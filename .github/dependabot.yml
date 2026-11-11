@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /apiserver
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /controllers
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /gaon-cli
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /lib/api
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /node-agent
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /scheduler
+    schedule:
+      interval: weekly

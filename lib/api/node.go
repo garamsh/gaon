@@ -8,12 +8,17 @@ const NodeStateDiscovered NodeState = "Discovered"
 // the contract names.
 type NodeState string
 
-// Node is a physical machine.
+// Node is a physical machine. Status carries its current fields; Spec is empty
+// until the contract gives a Node one.
 type Node struct {
 	TypeMeta
 	Metadata ObjectMeta `json:"metadata"`
+	Spec     NodeSpec   `json:"spec"`
 	Status   NodeStatus `json:"status"`
 }
+
+// NodeSpec is the desired state of a Node. It has no fields yet.
+type NodeSpec struct{}
 
 // NodeStatus is the observed state of a Node.
 type NodeStatus struct {
