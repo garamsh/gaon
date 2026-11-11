@@ -22,5 +22,9 @@ Current architecture of the system and the decisions behind it. This file is the
 
 - Responsibility documents
   - [structure.md](./structure.md): the shape gaon is partitioned into, what may reference what, and when a new unit is earned.
+  - [resource-api.md](./resource-api.md): the `v1alpha1` resource API contract: writers, state transitions, Lease and fencing, invariants and paths.
 - ADRs
   - [0001](./adr/0001-the-repository-is-a-go-workspace-of-executable-units-partitioned-by-responsibility.md): the repository is a Go workspace of executable units, each its own module, partitioned by responsibility.
+  - [0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md): gaon owns the Node Agent and depends one way on mvmd and naru, through their APIs.
+  - [0003](./adr/0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md): the `v1alpha1` resource API fixes one writer per section and a per-node Lease.
+  - [0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md): the Store is etcd, starting as one cell of one member.
