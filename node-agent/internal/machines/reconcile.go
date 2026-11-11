@@ -138,6 +138,9 @@ func (s *service) ensure(ctx context.Context, m *api.Machine) (outcome, error) {
 	case restarts(m.Spec.RunStrategy) && (r.GetState() == v1alpha2.MachineState_MACHINE_STATE_STOPPED || r.GetState() == v1alpha2.MachineState_MACHINE_STATE_FAULTED):
 		return s.restart(ctx, m, id, r)
 	case m.Spec.RunStrategy == api.RunOnce && r.GetState() == v1alpha2.MachineState_MACHINE_STATE_STOPPED:
+		if st.halted {
+			return s.resume(ctx, id, r)
+		}
 		return s.ended(ctx, id, r)
 	}
 	return outcome{runtime: r}, nil

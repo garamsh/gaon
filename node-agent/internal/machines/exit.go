@@ -25,6 +25,18 @@ func (s *service) ended(ctx context.Context, id string, r *v1alpha2.Machine) (ou
 	return outcome{runtime: r, clean: true}, nil
 }
 
+// resume starts the Machine that the agent holds stopped for `Halted` and that
+// now runs `Once`. Its next exit is judged afresh.
+func (s *service) resume(ctx context.Context, id string, r *v1alpha2.Machine) (outcome, error) {
+	st := s.runOf(id)
+	started, err := s.start(ctx, id)
+	if err != nil {
+		return outcome{runtime: r}, err
+	}
+	st.halted, st.exited = false, false
+	return outcome{runtime: started}, nil
+}
+
 // exitFailure names how the entrypoint's record shows it failed.
 func exitFailure(rec *v1alpha2.ExecRecord) string {
 	switch {

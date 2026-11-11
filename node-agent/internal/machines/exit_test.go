@@ -84,3 +84,46 @@ func TestOnce_AMachineStillRunningIsNotJudged(t *testing.T) {
 
 	assert.Equal(t, api.MachineRunning, r.gaon.Machine("m1").Status.Phase)
 }
+
+// switchTo changes the run strategy of Machine m1 and gives it to the service.
+func (r *rig) switchTo(strategy api.RunStrategy) {
+	r.t.Helper()
+	m := r.gaon.Machine("m1")
+	m.Spec.RunStrategy = strategy
+	r.put(m)
+}
+
+func TestOnce_AMachineStoppedForHaltedIsStartedWhenSwitchedToOnce(t *testing.T) {
+	r := newRig(t, nil)
+	r.begin(api.RunOnce)
+	r.switchTo(api.RunHalted)
+	r.mustRound()
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_STOPPED)
+	require.Equal(t, api.MachineStopped, r.gaon.Machine("m1").Status.Phase)
+
+	r.switchTo(api.RunOnce)
+	r.mustRound()
+
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
+	assert.Equal(t, api.MachineRunning, r.gaon.Machine("m1").Status.Phase)
+	assert.Equal(t, 2, r.starts())
+}
+
+func TestOnce_AnExitJudgedBeforeHaltedDoesNotJudgeTheRunAfterIt(t *testing.T) {
+	r := newRig(t, nil)
+	r.begin(api.RunOnce)
+	r.exit(exited(3, 0))
+	r.mustRound()
+	require.Equal(t, api.MachineFailed, r.gaon.Machine("m1").Status.Phase)
+	r.switchTo(api.RunHalted)
+	r.mustRound()
+	r.switchTo(api.RunOnce)
+	r.mustRound()
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
+
+	r.exit(exited(0, 0))
+	r.mustRound()
+
+	assert.Equal(t, api.MachineSucceeded, r.gaon.Machine("m1").Status.Phase)
+	assert.Equal(t, 2, r.starts())
+}
