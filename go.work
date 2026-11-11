@@ -1,5 +1,11 @@
 go 1.26.0
 
+// Moved by hand by the owner of this file: when go.dev/dl lists a newer
+// go1.26 patch, or govulncheck reports a standard library finding fixed in
+// one, the directive takes that patch release. CI reads it through
+// actions/setup-go's go-version-file, and a developer's go command fetches it.
+toolchain go1.26.11
+
 use (
 	./apiserver
 	./controllers
