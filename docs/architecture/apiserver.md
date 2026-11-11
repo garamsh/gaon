@@ -12,7 +12,7 @@ The server is the only process that talks to the Store. Machines, Volumes, Nodes
 
 The module follows the service layout of the stack convention. A transport at the module root decodes a request, calls one service method and translates its error; the service holds the rules; a Store interface is the only way the service reaches etcd, and one implementation of it wraps the etcd client.
 
-- The transport serves every path of resource-api.md §Paths, with one error translator: an `APIError` becomes its code and body, and any other error is logged once and answered as `Internal`, 500.
+- The transport serves every path of resource-api.md §Paths under the root `/apis/compute.gaon.garam.sh/v1alpha1` on the server's address, and answers any path outside the root, or none of those, with the `NotFound` error object. It has one error translator: an `APIError` becomes its code and body, and any other error is logged once and answered as `Internal`, 500.
 - The service has one generic description of a kind (its path prefix and how its resources are keyed) and one file of rules per kind. A kind that needs no rule beyond the generic ones adds none.
 - The Store interface speaks in keys, bytes and revisions: get, list, create, update at a revision, delete, and watch from a revision. It knows nothing of resources.
 
