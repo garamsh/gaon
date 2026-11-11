@@ -14,11 +14,11 @@ type resources struct {
 }
 
 func parseResources(cpu, memory api.Quantity) (resources, error) {
-	c, err := parseQuantity(cpu)
+	c, err := cpu.Value()
 	if err != nil {
 		return resources{}, fmt.Errorf("cpu: %w", err)
 	}
-	m, err := parseQuantity(memory)
+	m, err := memory.Value()
 	if err != nil {
 		return resources{}, fmt.Errorf("memory: %w", err)
 	}
