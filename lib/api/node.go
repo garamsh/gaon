@@ -1,15 +1,22 @@
 package api
 
-// NodeStateDiscovered is the pre-registration state of a Node: a machine naru
-// has discovered and gaon has not admitted.
-const NodeStateDiscovered NodeState = "Discovered"
-
-// NodeState is the state a Node's status reports. Discovered is the only one
-// the contract names.
+// NodeState is the state a Node's status reports.
 type NodeState string
 
-// Node is a physical machine. Status carries its current fields; Spec is empty
-// until the contract gives a Node one.
+// The Node states: Discovered until a user sets spec.admitted, Admitted after.
+const (
+	NodeStateDiscovered NodeState = "Discovered"
+	NodeStateAdmitted   NodeState = "Admitted"
+)
+
+// The condition types of a Node. The Node Agent writes Ready, and the node
+// lifecycle controller writes LeaseExpired.
+const (
+	NodeReady        = "Ready"
+	NodeLeaseExpired = "LeaseExpired"
+)
+
+// Node is a physical machine.
 type Node struct {
 	TypeMeta
 	Metadata ObjectMeta `json:"metadata"`
@@ -17,15 +24,51 @@ type Node struct {
 	Status   NodeStatus `json:"status"`
 }
 
-// NodeSpec is the desired state of a Node. It has no fields yet.
-type NodeSpec struct{}
+// NodeList is the answer to listing Nodes.
+type NodeList struct {
+	TypeMeta
+	Metadata ListMeta `json:"metadata"`
+	Items    []Node   `json:"items"`
+}
+
+// NodeSpec is the desired state of a Node. A user admits the Node by setting
+// Admitted; the Node Agent creates it with Admitted false.
+type NodeSpec struct {
+	Admitted bool `json:"admitted"`
+}
+
+// NodeCapacity is what the Node offers, from mvmd's runtime info.
+type NodeCapacity struct {
+	CPU     Quantity `json:"cpu,omitempty"`
+	Memory  Quantity `json:"memory,omitempty"`
+	Storage Quantity `json:"storage,omitempty"`
+}
 
 // NodeStatus is the observed state of a Node.
 type NodeStatus struct {
-	State NodeState `json:"state,omitempty"`
+	State      NodeState    `json:"state,omitempty"`
+	Capacity   NodeCapacity `json:"capacity"`
+	Addresses  []string     `json:"addresses,omitempty"`
+	Conditions []Condition  `json:"conditions,omitempty"`
 }
 
 // Validate checks the identity of n.
 func (n *Node) Validate() error {
 	return validateIdentity(n.TypeMeta, KindNode, n.Metadata)
+}
+
+// ValidateStatus checks that n's status names a known state and that each of
+// its conditions has a known status.
+func (n *Node) ValidateStatus() error {
+	switch n.Status.State {
+	case NodeStateDiscovered, NodeStateAdmitted:
+	default:
+		return invalid("status.state is %q, want Discovered or Admitted", n.Status.State)
+	}
+	for _, c := range n.Status.Conditions {
+		if err := c.validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -15,7 +15,7 @@ import (
 )
 
 // watchOf serves stream as the body of a watch and returns it opened.
-func watchOf(t *testing.T, stream string) *api.MachineWatch {
+func watchOf(t *testing.T, stream string) *api.Watch[api.Machine] {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, stream)
@@ -28,7 +28,7 @@ func watchOf(t *testing.T, stream string) *api.MachineWatch {
 }
 
 func TestWatchEventWireShape(t *testing.T) {
-	ev, err := api.NewMachineEvent(api.EventModified, newMachine("m1"))
+	ev, err := api.NewEvent(api.EventModified, newMachine("m1"))
 	require.NoError(t, err)
 	line, err := json.Marshal(ev)
 	require.NoError(t, err)
@@ -54,10 +54,10 @@ func TestWatchEventWireShape(t *testing.T) {
 }
 
 func TestNewMachineEventRefusesTypesThatCarryNoMachine(t *testing.T) {
-	_, err := api.NewMachineEvent(api.EventError, newMachine("m1"))
+	_, err := api.NewEvent(api.EventError, newMachine("m1"))
 	assert.Error(t, err)
 	for _, ty := range []api.EventType{api.EventAdded, api.EventModified, api.EventDeleted} {
-		_, err := api.NewMachineEvent(ty, newMachine("m1"))
+		_, err := api.NewEvent(ty, newMachine("m1"))
 		assert.NoError(t, err, string(ty))
 	}
 }
@@ -65,7 +65,7 @@ func TestNewMachineEventRefusesTypesThatCarryNoMachine(t *testing.T) {
 func TestMachineWatchDecodesNewlineDelimitedEvents(t *testing.T) {
 	var stream strings.Builder
 	for _, ty := range []api.EventType{api.EventAdded, api.EventModified, api.EventDeleted} {
-		ev, err := api.NewMachineEvent(ty, newMachine("m1"))
+		ev, err := api.NewEvent(ty, newMachine("m1"))
 		require.NoError(t, err)
 		line, err := json.Marshal(ev)
 		require.NoError(t, err)
@@ -77,7 +77,7 @@ func TestMachineWatchDecodesNewlineDelimitedEvents(t *testing.T) {
 	for _, want := range []api.EventType{api.EventAdded, api.EventModified, api.EventDeleted} {
 		ev := nextEvent(t, w)
 		assert.Equal(t, want, ev.Type)
-		assert.Equal(t, "m1", ev.Machine.Metadata.Name)
+		assert.Equal(t, "m1", ev.Object.Metadata.Name)
 	}
 	_, err := w.Next()
 	assert.ErrorIs(t, err, io.EOF)

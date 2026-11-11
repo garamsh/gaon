@@ -15,7 +15,9 @@ const (
 	KindMachineList = "MachineList"
 	KindVolume      = "Volume"
 	KindNode        = "Node"
+	KindNodeList    = "NodeList"
 	KindLease       = "Lease"
+	KindLeaseList   = "LeaseList"
 )
 
 // ResourceVersion is the version of an object in the Store. Clients treat it
@@ -53,14 +55,32 @@ type ListMeta struct {
 	ResourceVersion ResourceVersion `json:"resourceVersion"`
 }
 
-// Condition carries detail about a resource's state. Status is "True",
-// "False" or "Unknown".
+// ConditionStatus is the status of a Condition.
+type ConditionStatus string
+
+// The condition statuses.
+const (
+	ConditionTrue    ConditionStatus = "True"
+	ConditionFalse   ConditionStatus = "False"
+	ConditionUnknown ConditionStatus = "Unknown"
+)
+
+// Condition carries detail about a resource's state.
 type Condition struct {
-	Type               string     `json:"type"`
-	Status             string     `json:"status"`
-	Reason             string     `json:"reason,omitempty"`
-	Message            string     `json:"message,omitempty"`
-	LastTransitionTime *time.Time `json:"lastTransitionTime,omitempty"`
+	Type               string          `json:"type"`
+	Status             ConditionStatus `json:"status"`
+	Reason             string          `json:"reason,omitempty"`
+	Message            string          `json:"message,omitempty"`
+	LastTransitionTime *time.Time      `json:"lastTransitionTime,omitempty"`
+}
+
+func (c Condition) validate() error {
+	switch c.Status {
+	case ConditionTrue, ConditionFalse, ConditionUnknown:
+		return nil
+	default:
+		return invalid("condition %q has status %q, want True, False or Unknown", c.Type, c.Status)
+	}
 }
 
 // validateIdentity checks the type and the name every resource must carry.

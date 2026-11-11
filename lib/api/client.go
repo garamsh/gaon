@@ -71,20 +71,51 @@ func (c *Client) ListMachines(ctx context.Context) (*MachineList, error) {
 // WatchMachines streams the changes made after version rv
 // (GET /machines?watch=true). When rv has expired, Next returns ErrExpired:
 // list again and watch from the list's version.
-func (c *Client) WatchMachines(ctx context.Context, rv ResourceVersion) (*MachineWatch, error) {
-	if rv == "" {
-		return nil, errors.New("watch machines: resource version is empty")
-	}
-	query := url.Values{"watch": {"true"}, "resourceVersion": {string(rv)}}
-	resp, err := c.send(ctx, http.MethodGet, "/machines", query, nil)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		return nil, decodeError(resp)
-	}
-	return newMachineWatch(resp.Body), nil
+func (c *Client) WatchMachines(ctx context.Context, rv ResourceVersion) (*Watch[Machine], error) {
+	return watch[Machine](ctx, c, "/machines", KindMachine, rv)
+}
+
+// PutNode creates n, or changes its spec when n carries the ResourceVersion
+// it was read at (PUT /nodes/{name}).
+func (c *Client) PutNode(ctx context.Context, n *Node) (*Node, error) {
+	return put(ctx, c, "/nodes/"+url.PathEscape(n.Metadata.Name), n)
+}
+
+// PutNodeStatus writes n's status (PUT /nodes/{name}/status).
+func (c *Client) PutNodeStatus(ctx context.Context, n *Node) (*Node, error) {
+	return put(ctx, c, "/nodes/"+url.PathEscape(n.Metadata.Name)+"/status", n)
+}
+
+// GetNode returns the named Node (GET /nodes/{name}).
+func (c *Client) GetNode(ctx context.Context, name string) (*Node, error) {
+	return call[Node](ctx, c, http.MethodGet, "/nodes/"+url.PathEscape(name), nil, nil)
+}
+
+// ListNodes returns every Node and the version to watch from (GET /nodes).
+func (c *Client) ListNodes(ctx context.Context) (*NodeList, error) {
+	return call[NodeList](ctx, c, http.MethodGet, "/nodes", nil, nil)
+}
+
+// WatchNodes streams the changes made after version rv
+// (GET /nodes?watch=true), as WatchMachines does.
+func (c *Client) WatchNodes(ctx context.Context, rv ResourceVersion) (*Watch[Node], error) {
+	return watch[Node](ctx, c, "/nodes", KindNode, rv)
+}
+
+// GetLease returns the named Lease (GET /leases/{name}).
+func (c *Client) GetLease(ctx context.Context, name string) (*Lease, error) {
+	return call[Lease](ctx, c, http.MethodGet, "/leases/"+url.PathEscape(name), nil, nil)
+}
+
+// ListLeases returns every Lease and the version to watch from (GET /leases).
+func (c *Client) ListLeases(ctx context.Context) (*LeaseList, error) {
+	return call[LeaseList](ctx, c, http.MethodGet, "/leases", nil, nil)
+}
+
+// WatchLeases streams the changes made after version rv
+// (GET /leases?watch=true), as WatchMachines does.
+func (c *Client) WatchLeases(ctx context.Context, rv ResourceVersion) (*Watch[Lease], error) {
+	return watch[Lease](ctx, c, "/leases", KindLease, rv)
 }
 
 // PutVolumeStatus writes v's status (PUT /volumes/{name}/status).
@@ -96,6 +127,22 @@ func (c *Client) PutVolumeStatus(ctx context.Context, v *Volume) (*Volume, error
 // read at (PUT /leases/{name}).
 func (c *Client) PutLease(ctx context.Context, l *Lease) (*Lease, error) {
 	return put(ctx, c, "/leases/"+url.PathEscape(l.Metadata.Name), l)
+}
+
+func watch[T any](ctx context.Context, c *Client, path, kind string, rv ResourceVersion) (*Watch[T], error) {
+	if rv == "" {
+		return nil, fmt.Errorf("watch %s: resource version is empty", path)
+	}
+	query := url.Values{"watch": {"true"}, "resourceVersion": {string(rv)}}
+	resp, err := c.send(ctx, http.MethodGet, path, query, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		return nil, decodeError(resp)
+	}
+	return newWatch[T](kind, resp.Body), nil
 }
 
 func put[T any](ctx context.Context, c *Client, path string, in *T) (*T, error) {
