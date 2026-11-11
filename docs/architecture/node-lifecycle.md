@@ -15,19 +15,22 @@ Basis: [resource-api.md](./resource-api.md) §Lease and fencing and §Node, and 
 
 ### Timing
 
-- **The controller is the observer.** It watches `Lease` and measures validity on its own monotonic clock. The renew time a Lease carries is not read.
+- **The controller is the observer.** It watches `Lease` and `Node` and measures validity on its own monotonic clock. The renew time a Lease carries is not read.
 - **A Lease's validity starts at the controller's first sighting of its current `resourceVersion`**, whether in a list or in a watch event, and lasts the Lease's `durationSeconds` plus a margin. A new `resourceVersion` is a renewal and starts the count again. An event that repeats a version it already saw changes nothing.
 - **The condition becomes True when the validity has elapsed**, at that instant and not before. The controller sets a timer for the earliest deadline, so the write follows the expiry by the time of the API calls, which is within one renew period.
-- **A Lease the controller has no sighting of is not expired.** After a restart, listing counts as a first sighting, so validity restarts from the list. This only delays confirmation, which is the safe direction.
+- **A Lease the controller has no sighting of is not expired by that Lease's rule.** After a restart, listing counts as a first sighting, so validity restarts from the list. This only delays confirmation, which is the safe direction.
+- **A Node whose Lease the controller has not seen** counts validity from its first sighting of the Node, in a list or a watch event, for the default Lease duration plus the margin. An event that repeats a Node it already saw changes nothing. A Node's deletion ends the count. The Node Agent never renews mvmd's deadline without an acknowledged Lease renewal, so no Machine runs on such a Node and marking it never early keeps invariant 1.
+- **Once a Lease is seen**, its rule applies as above: the Lease's own `durationSeconds` plus the margin counts from the first sighting of its version, and the first sighting replaces the Node's count. A Lease cannot be deleted through the API, so "never seen" is the only case without a Lease.
+- **The numbers are flags of the binary**, until they are measured: `-lease-margin` defaults to 5s and `-default-lease-duration` to 30s.
 - **A failed write is retried** after a fixed delay (`nodelifecycle.RetryDelay`), and a failed list or watch lists again after the same delay. An `Expired` watch error and a stream that ends take the same path.
 
 ### The condition
 
-- **`LeaseExpired` True** while the Lease validity has passed, with reason `LeaseExpired`.
-- **`LeaseExpired` False** once a new version of the Lease is seen, with reason `LeaseRenewed`. The condition stays in the Node's status with its transition time.
+- **`LeaseExpired` True** while the Lease validity has passed, with reason `LeaseExpired`, or, for a Node whose Lease was not seen within the default validity, with reason `LeaseMissing`.
+- **`LeaseExpired` False** once a new version of the Lease is seen, or the Lease is first seen, with reason `LeaseRenewed`. The condition stays in the Node's status with its transition time.
 - **A Node with no `LeaseExpired` condition counts as False.** The controller adds the condition only to set it True.
 - **At start the controller reads each Node's condition once** and clears a True left by an earlier run while the Lease it has just seen is valid. A condition already at the wanted value is not written again.
-- The Node Agent's conditions and fields in the Node's status are kept as read.
+- The Node Agent's conditions and fields in the Node's status, `status.state` included, are kept as read.
 
 ### Fencing argument
 
@@ -41,9 +44,8 @@ Basis: [resource-api.md](./resource-api.md) §Lease and fencing and §Node, and 
 - Lease validity is measured by the observer because a renew time written by one machine cannot be compared with another machine's clock ([resource-api.md](./resource-api.md) §Rationale).
 - The controller, not the Scheduler, confirms expiry: the Scheduler writes `/binding` only and reads the Node, and writing a Node's `/status` is a controller's section ([resource-api.md](./resource-api.md) §Common rules).
 - It counts from the first sighting of a version and not from the renew time because only that is the observer's own clock.
+- A Node with no Lease counts from its first sighting for the same reason, and for a duration the controller holds itself because there is no Lease to carry one.
 
 ## Open questions
 
-- **Numbers:** the margin is a flag of the binary with no default, and the Lease duration comes from each Lease. Their values wait on the numbers named in [resource-api.md](./resource-api.md) §Open questions.
-- **A Node whose Lease never existed or was deleted** is not marked by the controller, which watches Leases and acts on a Lease it sees. Whether such a Node counts as expired, and who creates the Lease first, is not decided.
 - **A Lease whose Node does not exist** is retried at the retry delay until the Node appears or the Lease is deleted.

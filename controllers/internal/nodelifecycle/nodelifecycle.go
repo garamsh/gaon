@@ -16,18 +16,25 @@ const RetryDelay = 5 * time.Second
 const (
 	reasonLeaseExpired = "LeaseExpired"
 	reasonLeaseRenewed = "LeaseRenewed"
+	reasonLeaseMissing = "LeaseMissing"
 )
 
 // Config holds the numbers the controller does not decide.
 type Config struct {
 	// Margin is added to a Lease's duration before the Lease counts as expired.
 	Margin time.Duration
+	// DefaultLeaseDuration is the validity, before the margin, of a Node whose
+	// Lease the controller has not seen.
+	DefaultLeaseDuration time.Duration
 }
 
-// observation is what the controller knows of one Lease: the version it first
-// saw and when, on its own monotonic clock, and what it knows of the Node's
-// LeaseExpired condition.
+// observation is what the controller knows of one Node's Lease: the version it
+// first saw and when, on its own monotonic clock, and what it knows of the
+// Node's LeaseExpired condition. A Node whose Lease it has not seen has a
+// missing observation, counted from the first sighting of the Node.
 type observation struct {
+	// missing is true while no Lease of the Node has been seen.
+	missing  bool
 	version  api.ResourceVersion
 	seen     time.Time
 	validity time.Duration
@@ -56,4 +63,17 @@ func (o *observation) want(now time.Time) api.ConditionStatus {
 // settled reports whether the Node already holds the status wanted at now.
 func (o *observation) settled(now time.Time) bool {
 	return o.known && o.marked == (o.want(now) == api.ConditionTrue)
+}
+
+// reason is the reason and message the LeaseExpired condition takes when it
+// is set to want.
+func (o *observation) reason(want api.ConditionStatus) (reason, message string) {
+	switch {
+	case want == api.ConditionFalse:
+		return reasonLeaseRenewed, "the Lease is valid"
+	case o.missing:
+		return reasonLeaseMissing, "no Lease was seen within its default validity"
+	default:
+		return reasonLeaseExpired, "the Lease validity has passed"
+	}
 }

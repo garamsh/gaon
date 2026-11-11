@@ -18,13 +18,18 @@ const (
 	leaseSeconds = 10
 	margin       = 5 * time.Second
 	validity     = leaseSeconds*time.Second + margin
+
+	// defaultLease differs from leaseSeconds, so a test shows which of the two
+	// a rule counts.
+	defaultLease    = 20 * time.Second
+	missingValidity = defaultLease + margin
 )
 
 // start runs the controller against f on a fake clock until the test ends,
 // and returns once it has finished its first pass over the listed Leases.
 func start(t *testing.T, f *fakeAPI, clock *fakeClock) {
 	t.Helper()
-	svc := nodelifecycle.NewService(f.client, clock, nodelifecycle.Config{Margin: margin}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := nodelifecycle.NewService(f.client, clock, nodelifecycle.Config{Margin: margin, DefaultLeaseDuration: defaultLease}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- svc.Run(ctx) }()
@@ -53,6 +58,133 @@ func setup(t *testing.T) (*fakeAPI, *fakeClock) {
 	clock := newFakeClock()
 	start(t, f, clock)
 	return f, clock
+}
+
+// setupMissing serves one Node with no Lease and starts the controller.
+func setupMissing(t *testing.T) (*fakeAPI, *fakeClock) {
+	t.Helper()
+	f := newFakeAPI(t)
+	f.addNode(newNode("node-a"))
+	f.setLeases("10")
+	clock := newFakeClock()
+	start(t, f, clock)
+	return f, clock
+}
+
+// passNode sends a Node watch event and waits until the controller has
+// processed it and finished its pass.
+func passNode(t *testing.T, f *fakeAPI, clock *fakeClock, typ api.EventType, n *api.Node) {
+	t.Helper()
+	before := clock.Calls()
+	f.emitNode(typ, n)
+	clock.waitCallsAbove(t, before)
+}
+
+func TestLeaseMissingIsSetOnlyOnceTheDefaultDurationPlusMarginHasElapsed(t *testing.T) {
+	f, clock := setupMissing(t)
+
+	clock.Advance(missingValidity - time.Nanosecond)
+	passNode(t, f, clock, api.EventModified, newNode("node-a"))
+	assert.Zero(t, f.putCount(), "the Node was written before the default validity passed")
+	f.notExpired("node-a")
+
+	clock.Advance(time.Nanosecond)
+	f.waitPuts(1)
+	f.expiredIs("node-a", api.ConditionTrue)
+	c, _ := f.leaseExpired("node-a")
+	assert.Equal(t, "LeaseMissing", c.Reason)
+	require.NotNil(t, c.LastTransitionTime)
+}
+
+func TestLeaseMissingCountsFromTheFirstSightingOfTheNode(t *testing.T) {
+	f, clock := setupMissing(t)
+
+	clock.Advance(8 * time.Second)
+	f.addNode(newNode("node-b"))
+	passNode(t, f, clock, api.EventAdded, newNode("node-b"))
+
+	// node-a is due at 25s, node-b at 33s.
+	before := clock.Calls()
+	clock.Advance(missingValidity - 8*time.Second)
+	f.waitPuts(1)
+	f.expiredIs("node-a", api.ConditionTrue)
+	f.notExpired("node-b")
+	// The pass that wrote node-a sets the timer for node-b when it ends.
+	clock.waitCallsAbove(t, before)
+
+	clock.Advance(8 * time.Second)
+	f.waitPuts(2)
+	f.expiredIs("node-b", api.ConditionTrue)
+}
+
+func TestARepeatedNodeEventDoesNotRestartTheCount(t *testing.T) {
+	f, clock := setupMissing(t)
+
+	clock.Advance(8 * time.Second)
+	passNode(t, f, clock, api.EventModified, newNode("node-a"))
+
+	clock.Advance(missingValidity - 8*time.Second)
+	f.waitPuts(1)
+	f.expiredIs("node-a", api.ConditionTrue)
+}
+
+func TestASeenLeaseEndsTheMissingRuleAndItsRuleApplies(t *testing.T) {
+	f, clock := setupMissing(t)
+	clock.Advance(missingValidity)
+	f.waitPuts(1)
+	c, _ := f.leaseExpired("node-a")
+	require.Equal(t, "LeaseMissing", c.Reason)
+
+	f.emit(api.EventAdded, newLease("node-a", "1", leaseSeconds))
+	f.waitPuts(2)
+	f.expiredIs("node-a", api.ConditionFalse)
+	c, _ = f.leaseExpired("node-a")
+	assert.Equal(t, "LeaseRenewed", c.Reason)
+	pass(t, f, clock, api.EventModified, newLease("node-a", "1", leaseSeconds))
+
+	// The Lease's 10s plus margin applies, not the default duration.
+	clock.Advance(validity)
+	f.waitPuts(3)
+	f.expiredIs("node-a", api.ConditionTrue)
+	c, _ = f.leaseExpired("node-a")
+	assert.Equal(t, "LeaseExpired", c.Reason)
+}
+
+func TestALeaseSeenBeforeTheDefaultValidityPassesPreventsLeaseMissing(t *testing.T) {
+	f, clock := setupMissing(t)
+
+	clock.Advance(8 * time.Second)
+	pass(t, f, clock, api.EventAdded, newLease("node-a", "1", 60))
+
+	clock.Advance(missingValidity - 8*time.Second)
+	pass(t, f, clock, api.EventModified, newLease("node-a", "1", 60))
+	assert.Zero(t, f.putCount())
+	f.notExpired("node-a")
+}
+
+func TestANodeEventDoesNotReplaceTheObservationOfItsLease(t *testing.T) {
+	f, clock := setup(t)
+
+	clock.Advance(validity - time.Second)
+	passNode(t, f, clock, api.EventModified, newNode("node-a"))
+
+	clock.Advance(time.Second)
+	f.waitPuts(1)
+	c, _ := f.leaseExpired("node-a")
+	assert.Equal(t, "LeaseExpired", c.Reason)
+}
+
+func TestADeletedNodeWithoutALeaseIsForgotten(t *testing.T) {
+	f, clock := setupMissing(t)
+	f.addNode(newNode("node-b"))
+	passNode(t, f, clock, api.EventAdded, newNode("node-b"))
+
+	passNode(t, f, clock, api.EventDeleted, newNode("node-a"))
+	clock.Advance(missingValidity)
+
+	f.waitPuts(1)
+	f.expiredIs("node-b", api.ConditionTrue)
+	f.notExpired("node-a")
 }
 
 func TestLeaseExpiredIsSetOnlyOnceDurationPlusMarginHasElapsed(t *testing.T) {
