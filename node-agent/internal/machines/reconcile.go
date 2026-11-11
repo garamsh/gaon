@@ -10,11 +10,16 @@ import (
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
-// reconcileAll removes what is not wanted here, then brings each wanted
-// Machine to its run strategy. The error joins what failed; one Machine's
-// failure does not stop the others.
+// reconcileAll removes what is not wanted here, releases the Machines being
+// deleted that mvmd no longer holds, then brings each wanted Machine to its
+// run strategy. The error joins what failed; one Machine's failure does not
+// stop the others.
 func (s *service) reconcileAll(ctx context.Context) error {
-	errs := []error{s.collect(ctx)}
+	held, err := s.collect(ctx)
+	errs := []error{err}
+	if held != nil {
+		errs = append(errs, s.release(ctx, held))
+	}
 	for _, name := range s.cache.names() {
 		errs = append(errs, s.reconcile(ctx, name))
 	}
@@ -32,6 +37,12 @@ func (s *service) reconcile(ctx context.Context, name string) error {
 		s.log.Debug("on-demand Machines are not run", "machine", name)
 		return nil
 	}
+	if err := s.setFinalizer(ctx, name, true); err != nil {
+		return fmt.Errorf("machine %s: %w", name, err)
+	}
+	if m, ok = s.cache.machines[name]; !ok || !s.cache.mine(m) {
+		return nil
+	}
 	o, err := s.ensure(ctx, &m)
 	if err != nil {
 		return fmt.Errorf("machine %s: %w", name, err)
@@ -41,23 +52,32 @@ func (s *service) reconcile(ctx context.Context, name string) error {
 
 // collect stops and deletes every Machine mvmd holds that the agent created
 // and that is no longer wanted here: unbound, bound elsewhere, deleted, or
-// bound at an earlier epoch.
-func (s *service) collect(ctx context.Context) error {
+// bound at an earlier epoch. It returns the names of the Machines mvmd still
+// holds under an identifier the agent formed, which is nil when mvmd could not
+// be listed.
+func (s *service) collect(ctx context.Context) (map[string]bool, error) {
 	listed, err := s.runtime.ListMachines(ctx, &v1alpha2.ListMachinesRequest{})
 	if err != nil {
-		return fmt.Errorf("list runtime machines: %w", err)
+		return nil, fmt.Errorf("list runtime machines: %w", err)
 	}
 	wanted := s.cache.wanted()
+	held := map[string]bool{}
 	var errs []error
 	for _, r := range listed.GetMachines() {
-		if _, _, ours := parseID(r.GetId()); !ours || wanted[r.GetId()] {
+		name, _, ours := parseID(r.GetId())
+		if !ours {
+			continue
+		}
+		if wanted[r.GetId()] {
+			held[name] = true
 			continue
 		}
 		if err := s.remove(ctx, r.GetId()); err != nil {
+			held[name] = true
 			errs = append(errs, err)
 		}
 	}
-	return errors.Join(errs...)
+	return held, errors.Join(errs...)
 }
 
 // remove stops the mvmd machine id and deletes it. Both calls are repeatable.

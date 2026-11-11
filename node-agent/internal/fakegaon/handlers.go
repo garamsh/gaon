@@ -3,6 +3,7 @@ package fakegaon
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/garamsh/gaon/lib/api"
@@ -32,6 +33,17 @@ func (s *Server) listMachines(w http.ResponseWriter, r *http.Request) {
 		list.Items = append(list.Items, m)
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) getMachine(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.machines[r.PathValue("name")]
+	if !ok {
+		notFound(w, r.PathValue("name"))
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
 }
 
 func (s *Server) watch(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +79,45 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// putMachine changes the spec and the finalizers of a Machine, checking the
+// version and, as the API server does, refusing a finalizer added to a
+// Machine being deleted and removing a Machine whose last finalizer goes.
+func (s *Server) putMachine(w http.ResponseWriter, r *http.Request) {
+	var next api.Machine
+	if !decode(w, r, &next) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, found := s.machines[next.Metadata.Name]
+	if !found {
+		notFound(w, next.Metadata.Name)
+		return
+	}
+	if err := checkVersion(found, m.Metadata.ResourceVersion, next.Metadata.ResourceVersion, m.Metadata.Name); err != nil {
+		writeError(w, err)
+		return
+	}
+	deleting := m.Metadata.DeletionTimestamp != nil
+	if deleting && slices.ContainsFunc(next.Metadata.Finalizers, func(f string) bool { return !slices.Contains(m.Metadata.Finalizers, f) }) {
+		writeError(w, api.NewAPIError(api.ReasonInvalid, "a finalizer cannot be added to a machine being deleted"))
+		return
+	}
+	s.rev++
+	m.Metadata.ResourceVersion = version(s.rev)
+	if deleting && len(next.Metadata.Finalizers) == 0 {
+		m.Metadata.Finalizers = nil
+		delete(s.machines, m.Metadata.Name)
+		s.record(api.EventDeleted, &m)
+		writeJSON(w, http.StatusOK, m)
+		return
+	}
+	m.Spec, m.Metadata.Finalizers = next.Spec, next.Metadata.Finalizers
+	s.machines[m.Metadata.Name] = m
+	s.record(api.EventModified, &m)
+	writeJSON(w, http.StatusOK, m)
 }
 
 // putMachineStatus replaces the status of a Machine, checking the version

@@ -93,6 +93,9 @@ func (s *Server) DeleteMachine(_ context.Context, r *v1alpha2.DeleteMachineReque
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.record("DeleteMachine", r.GetMachineId())
+	if s.failDeletes {
+		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_PRECONDITION_FAILED, "delete refused")
+	}
 	m, ok := s.machines[r.GetMachineId()]
 	if !ok {
 		return &v1alpha2.DeleteMachineResponse{}, nil
