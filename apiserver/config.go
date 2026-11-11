@@ -50,8 +50,5 @@ func ParseConfig(args []string) (Config, error) {
 	if _, err := cfg.tlsGiven(); err != nil {
 		return Config{}, err
 	}
-	if _, err := cfg.tlsGiven(); err != nil {
-		return Config{}, err
-	}
 	return cfg, nil
 }

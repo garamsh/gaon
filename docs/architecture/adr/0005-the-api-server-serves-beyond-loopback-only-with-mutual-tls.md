@@ -7,7 +7,7 @@ Drafted for garamsh/gaon#51, under goal garamsh/gaon#49 and #48. The decisions a
 
 ## Context
 
-- **The API had no authentication**, so `gaon-apiserver` refused any listener that was not on a loopback address ([ADR 0003](./0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md), its bullet "Nothing authenticates callers"). A Node Agent on another node, the scheduler and the controllers cannot reach a server that listens only locally.
+- **The API had no authentication**, so `gaon-apiserver` refused any listener that was not on a loopback address ([ADR 0003](./0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md), its Decision 10, "Authentication is deferred"). A Node Agent on another node, the scheduler and the controllers cannot reach a server that listens only locally.
 - **Callers differ**: each Node Agent acts for one Node, and the scheduler, the controllers and the CLI each act for themselves.
 - **How a Node gets its certificate files** is a deployment decision outside gaon.
 
@@ -28,7 +28,7 @@ Drafted for garamsh/gaon#51, under goal garamsh/gaon#49 and #48. The decisions a
 - Whoever deploys gaon owns issuing, distributing and renewing the certificates. A certificate that expires stops its caller.
 - The server reads its files at start; replacing them takes a restart.
 - A caller holding a valid certificate may write any section of any resource, so a compromised Node Agent can write other Nodes' resources until authorization lands.
-- This narrows ADR 0003's bullet on authentication to a loopback-only rule for a server without the flags; the rest of ADR 0003 stands.
+- This ends ADR 0003's Decision 10, leaving a loopback-only rule for a server without the flags; the rest of ADR 0003 stands.
 - **Rejected: bearer tokens.** A token travels in every request and needs a store and a way to issue and revoke, which are more moving parts than a CA and files; the transport would still need TLS to keep the token private.
 - **Rejected: one shared certificate.** It authenticates that a caller is a gaon component and not which, so no later rule can tell one Node from another, and one leaked copy exposes every caller.
 

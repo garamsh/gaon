@@ -17,7 +17,7 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 - HTTP with JSON bodies on the paths in §Paths.
 - **The root is `/apis/compute.gaon.garam.sh/v1alpha1`** on the API server's address, the Kubernetes `/apis/<group>/<version>` form, which leaves room for the `apps` and `apiextensions` groups beside it. §Paths are relative to it. A client is configured with the full root URL.
 - A watch is a streaming HTTP response of newline-delimited JSON events.
-- A loopback address is served as plain HTTP. Any other address is served only with mutual TLS: the caller presents a client certificate that the API server's client CA signed, and a Node Agent's subject CN is its Node name ([ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md)).
+- Without TLS files the API server serves plain HTTP and refuses any address that is not loopback. With them it serves mutual TLS on any address, loopback included: the caller presents a client certificate that the API server's client CA signed, and a Node Agent's subject CN is its Node name ([ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md)).
 
 ### Common rules
 
