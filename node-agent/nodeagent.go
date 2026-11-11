@@ -27,7 +27,7 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 	}
 	defer func() { _ = conn.Close() }()
 	runtime := v1alpha2.NewRuntimeServiceClient(conn)
-	client := api.NewClient(cfg.APIServer, nil)
+	client := api.NewClient(cfg.APIServer, cfg.HTTPClient)
 
 	nodes := node.NewService(cfg.NodeName, client, runtime, clk, log)
 	live := liveness.NewService(cfg.NodeName, cfg.Liveness, client, runtime, clk, log)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestParseConfig_ReadsEveryValueFromItsEnvironmentVariable(t *testing.T) {
 	}), io.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, nodeagent.Config{
-		APIServer: "http://api", NodeName: "node-a", MvmdSocket: "/s.sock", ResyncPeriod: 7 * time.Second,
+		APIServer: "http://api", HTTPClient: &http.Client{}, NodeName: "node-a", MvmdSocket: "/s.sock", ResyncPeriod: 7 * time.Second,
 		RestartBackoff: 3 * time.Second, RestartBackoffMax: 2 * time.Minute, RestartResetAfter: 8 * time.Minute,
 		Liveness: liveness.Params{LeaseDuration: 40 * time.Second, RenewPeriod: 6 * time.Second, DeadlineLength: 20 * time.Second, Delta: 4 * time.Second, RPCTimeout: 3 * time.Second},
 	}, cfg)

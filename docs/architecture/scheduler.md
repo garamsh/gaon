@@ -10,6 +10,7 @@ Basis: [resource-api.md](./resource-api.md) §Machine, §Node, §Lease and fenci
 
 - Each pass lists the Nodes and the Machines, and binds each Machine that needs a binding through `POST /machines/{name}/binding`. It is the only writer of `/binding`.
 - It polls: `gaon-scheduler` runs a pass at start and then every `-interval` (default 5 seconds). A pass holds no state from the one before.
+- It reaches the API over plain HTTP, or over mutual TLS 1.3 when `-tls-ca`, `-tls-cert` and `-tls-key` are all given, with a client `lib/api` builds. Given one or two of them, or a file that cannot be read or does not fit, it exits with a usage error naming what is missing. The flags have no environment variable. Calls time out after 30 seconds either way.
 - A Machine with `deletionTimestamp` set is left alone.
 
 ### Placement rule

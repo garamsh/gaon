@@ -5,8 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"time"
 
+	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/node-agent/internal/liveness"
 )
 
@@ -21,6 +23,9 @@ const (
 	EnvDeadlineLength = "GAON_DEADLINE_LENGTH"
 	EnvRPCTimeout     = "GAON_RPC_TIMEOUT"
 	EnvResyncPeriod   = "GAON_RESYNC_PERIOD"
+	EnvTLSCA          = "GAON_TLS_CA"
+	EnvTLSCert        = "GAON_TLS_CERT"
+	EnvTLSKey         = "GAON_TLS_KEY"
 
 	EnvRestartBackoff    = "GAON_RESTART_BACKOFF"
 	EnvRestartBackoffMax = "GAON_RESTART_BACKOFF_MAX"
@@ -32,6 +37,9 @@ type Config struct {
 	// APIServer is the root of the resource API, the address up to the
 	// group and version, for example http://127.0.0.1:8080/apis/compute.gaon.garam.sh/v1alpha1.
 	APIServer string
+	// HTTPClient reaches APIServer: mutual TLS when the three --tls flags
+	// are given, plain HTTP when none is.
+	HTTPClient *http.Client
 	// NodeName names the Node and the Lease.
 	NodeName string
 	// MvmdSocket is the path of mvmd's runtime API Unix socket.
@@ -88,6 +96,10 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 		fs.DurationVar(p, name, d, usage+" (env "+env+")")
 	}
 	str(&c.APIServer, "api-server", EnvAPIServer, "root URL of the resource API, up to the group and version")
+	var tlsFiles api.TLSFiles
+	str(&tlsFiles.CA, "tls-ca", EnvTLSCA, "file of the CA certificates the API server's certificate must chain to")
+	str(&tlsFiles.Cert, "tls-cert", EnvTLSCert, "file of the client certificate presented to the API server")
+	str(&tlsFiles.Key, "tls-key", EnvTLSKey, "file of the key of --tls-cert")
 	str(&c.NodeName, "node-name", EnvNodeName, "name of this node's Node and Lease")
 	str(&c.MvmdSocket, "mvmd-socket", EnvMvmdSocket, "path of mvmd's runtime API Unix socket")
 	dur(&c.Liveness.Delta, "delta", EnvDelta, defaultDelta, "δ, how long a Machine can run past mvmd's recorded deadline expiry")
@@ -122,6 +134,10 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 		}
 	}
 	if err := c.Liveness.Validate(); err != nil {
+		return Config{}, err
+	}
+	var err error
+	if c.HTTPClient, err = tlsFiles.Client(); err != nil {
 		return Config{}, err
 	}
 	return c, nil
