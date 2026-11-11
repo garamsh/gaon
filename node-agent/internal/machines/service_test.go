@@ -52,7 +52,10 @@ func start(t *testing.T, armed bool, wrap func(machines.API) machines.API, setup
 	if wrap != nil {
 		client = wrap(client)
 	}
-	svc := machines.NewService(node, machines.Params{Resync: 20 * time.Millisecond, Retry: 20 * time.Millisecond},
+	svc := machines.NewService(node, machines.Params{
+		Resync: 20 * time.Millisecond, Retry: 20 * time.Millisecond, ReadTimeout: time.Second,
+		RestartBackoff: time.Hour, RestartBackoffMax: time.Hour, RestartResetAfter: time.Hour,
+	},
 		client, e.rt, clk, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

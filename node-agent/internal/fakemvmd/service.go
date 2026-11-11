@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -115,6 +116,27 @@ func (s *Server) InspectMachine(_ context.Context, r *v1alpha2.InspectMachineReq
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such machine")
 	}
 	return &v1alpha2.InspectMachineResponse{Machine: proto.Clone(m).(*v1alpha2.Machine)}, nil
+}
+
+// ReadExecOutput answers a read of the exec "entrypoint" with the record set
+// for the Machine, or as mvmd does for a Machine none of whose console lines
+// speaks of the entrypoint, with a record that says it was cut short.
+func (s *Server) ReadExecOutput(r *v1alpha2.ReadExecOutputRequest, stream grpc.ServerStreamingServer[v1alpha2.ReadExecOutputResponse]) error {
+	s.mu.Lock()
+	_, held := s.machines[r.GetMachineId()]
+	rec, set := s.records[r.GetMachineId()]
+	silent := s.silent[r.GetMachineId()]
+	s.mu.Unlock()
+	if !held || r.GetExecId() != "entrypoint" {
+		return v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such exec")
+	}
+	if silent {
+		return nil
+	}
+	if !set {
+		rec = &v1alpha2.ExecRecord{ExecId: "entrypoint", Status: v1alpha2.ExecStatus_EXEC_STATUS_CUT_SHORT}
+	}
+	return stream.Send(&v1alpha2.ReadExecOutputResponse{Part: &v1alpha2.ReadExecOutputResponse_Record{Record: rec}})
 }
 
 func (s *Server) ListMachines(context.Context, *v1alpha2.ListMachinesRequest) (*v1alpha2.ListMachinesResponse, error) {

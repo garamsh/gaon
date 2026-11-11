@@ -40,10 +40,15 @@ func TestParseConfig_ReadsEveryValueFromItsEnvironmentVariable(t *testing.T) {
 		nodeagent.EnvDeadlineLength: "20s",
 		nodeagent.EnvRPCTimeout:     "3s",
 		nodeagent.EnvResyncPeriod:   "7s",
+
+		nodeagent.EnvRestartBackoff:    "3s",
+		nodeagent.EnvRestartBackoffMax: "2m",
+		nodeagent.EnvRestartResetAfter: "8m",
 	}), io.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, nodeagent.Config{
 		APIServer: "http://api", NodeName: "node-a", MvmdSocket: "/s.sock", ResyncPeriod: 7 * time.Second,
+		RestartBackoff: 3 * time.Second, RestartBackoffMax: 2 * time.Minute, RestartResetAfter: 8 * time.Minute,
 		Liveness: liveness.Params{LeaseDuration: 40 * time.Second, RenewPeriod: 6 * time.Second, DeadlineLength: 20 * time.Second, Delta: 4 * time.Second, RPCTimeout: 3 * time.Second},
 	}, cfg)
 }
@@ -56,15 +61,21 @@ func TestParseConfig_DefaultsDeltaToOneSecondAndEveryDefaultPassesTheChecks(t *t
 	}), io.Discard)
 	require.NoError(t, err, "the start-time duration checks hold with every default")
 	assert.Equal(t, time.Second, cfg.Liveness.Delta)
+	assert.Equal(t, 10*time.Second, cfg.RestartBackoff, "resource-api.md's provisional first wait")
+	assert.Equal(t, 5*time.Minute, cfg.RestartBackoffMax)
+	assert.Equal(t, 10*time.Minute, cfg.RestartResetAfter)
 }
 
 func TestParseConfig_FlagsOverrideEnvironment(t *testing.T) {
-	cfg, err := nodeagent.ParseConfig([]string{"--node-name=from-flag", "--api-server", "http://flag", "--mvmd-socket=/f.sock", "--delta=2s"}, env(required), io.Discard)
+	cfg, err := nodeagent.ParseConfig([]string{"--node-name=from-flag", "--api-server", "http://flag", "--mvmd-socket=/f.sock", "--delta=2s", "--restart-backoff=4s", "--restart-backoff-max=1m", "--restart-reset-after=2m"}, env(required), io.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, "from-flag", cfg.NodeName)
 	assert.Equal(t, "http://flag", cfg.APIServer)
 	assert.Equal(t, "/f.sock", cfg.MvmdSocket)
 	assert.Equal(t, 2*time.Second, cfg.Liveness.Delta)
+	assert.Equal(t, 4*time.Second, cfg.RestartBackoff)
+	assert.Equal(t, time.Minute, cfg.RestartBackoffMax)
+	assert.Equal(t, 2*time.Minute, cfg.RestartResetAfter)
 }
 
 func TestParseConfig_RefusesWhatItCannotRunWith(t *testing.T) {
@@ -79,6 +90,9 @@ func TestParseConfig_RefusesWhatItCannotRunWith(t *testing.T) {
 		{"no socket", nodeagent.EnvMvmdSocket, nil, "mvmd-socket"},
 		{"a delta the Lease duration cannot cover", "", map[string]string{nodeagent.EnvDelta: "12s"}, "lease duration"},
 		{"a duration that is not one", "", map[string]string{nodeagent.EnvRenewPeriod: "soon"}, nodeagent.EnvRenewPeriod},
+		{"a restart backoff above its maximum", "", map[string]string{nodeagent.EnvRestartBackoff: "10m"}, "restart backoff"},
+		{"a restart backoff of zero", "", map[string]string{nodeagent.EnvRestartBackoff: "0s"}, "restart backoff"},
+		{"a restart reset time of zero", "", map[string]string{nodeagent.EnvRestartResetAfter: "0s"}, "restart backoff"},
 		{"durations that do not fit", "", map[string]string{nodeagent.EnvLeaseDuration: "10s"}, "lease duration"},
 	}
 	for _, tt := range tests {

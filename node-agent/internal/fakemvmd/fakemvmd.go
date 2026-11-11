@@ -45,6 +45,8 @@ type Server struct {
 	sequence    uint64
 	capacity    *v1alpha2.NodeCapacity
 	failDeletes bool
+	records     map[string]*v1alpha2.ExecRecord
+	silent      map[string]bool
 }
 
 // New starts a fake mvmd on a socket under t.TempDir, reading time from clk,
@@ -57,6 +59,8 @@ func New(t testing.TB, clk clock.Clock) *Server {
 		Socket:   filepath.Join(shortTempDir(t), "mvmd.sock"),
 		clock:    clk,
 		machines: map[string]*v1alpha2.Machine{},
+		records:  map[string]*v1alpha2.ExecRecord{},
+		silent:   map[string]bool{},
 		events:   make(chan *v1alpha2.WatchEventsResponse, 256),
 		capacity: &v1alpha2.NodeCapacity{Cpus: 8, MemoryBytes: 16 << 30, StateTotalBytes: 100 << 30, StateAvailableBytes: 90 << 30},
 	}
@@ -123,6 +127,22 @@ func (s *Server) SetState(id string, state v1alpha2.MachineState, reason string)
 	m.State, m.LastFailureReason = state, reason
 	s.mu.Unlock()
 	s.emit(id, &v1alpha2.WatchEventsResponse{Event: &v1alpha2.WatchEventsResponse_StateChanged{StateChanged: &v1alpha2.StateChanged{State: state}}})
+}
+
+// SetEntrypointRecord sets the record a read of the exec "entrypoint" of the
+// Machine id answers with, as the console log of a stopped Machine gives it.
+func (s *Server) SetEntrypointRecord(id string, r *v1alpha2.ExecRecord) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.records[id] = r
+}
+
+// SilenceEntrypoint makes a read of the Machine id's entrypoint end its
+// stream with no record while on is true.
+func (s *Server) SilenceEntrypoint(id string, on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.silent[id] = on
 }
 
 // FailDeletes makes every DeleteMachine fail with a refusal while on
