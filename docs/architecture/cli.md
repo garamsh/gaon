@@ -15,7 +15,7 @@ Basis: [resource-api.md](./resource-api.md) §Paths and the types of `lib/api/`.
 | `gaon list [-o yaml\|table] KIND` | Prints every resource of a kind. Default `table`. |
 | `gaon delete KIND NAME` | Sets the `deletionTimestamp` of a Machine. |
 
-- **Global flag:** `--server URL` is the group and version root of the resource API; `GAON_SERVER` is its default. It comes before the command. With neither, the CLI exits with a usage error.
+- **Global flag:** `--server URL` is the group and version root of the resource API, `http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1`, in full; `GAON_SERVER` is its default. It comes before the command. With neither, the CLI exits with a usage error.
 - **Operands:** a command's flags come before its operands. `KIND` is the lower-case kind name, matched without regard to case.
 - **Exit code:** 0 on success, 1 when a request or a check fails, 2 on a mistake in the command line.
 - **Output formats:** `yaml` prints the object as the API returned it, with the API's field names. `table` prints the columns below. Other formats are out of scope.
@@ -43,7 +43,7 @@ A verb works for a kind where `resource-api.md` §Paths has a path for it. A ver
   - A document without one is first read; a `NotFound` means create, otherwise the version read is the one written against. A change made after that read fails the write.
 - **A concurrent change is reported, not overwritten:** `Conflict` (the version moved) and `AlreadyExists` (a create lost a race) end `apply` with exit code 1 and a message saying the resource was changed by someone else.
 - **Order and failure:** documents are sent in file order and `apply` stops at the first failure; the lines already printed (`machine/web created`, `node/n1 configured`) were applied.
-- **Quantities** in a file are strings: `cpu: "2"`, not `cpu: 2`, because `lib/api/` decodes a Quantity from a JSON string only.
+- **Quantities** in a file may be strings or numbers: `cpu: "2"` and `cpu: 2` both decode, because `lib/api/` decodes a Quantity from either a JSON string or a JSON number.
 
 ### Delete
 
@@ -56,6 +56,5 @@ A verb works for a kind where `resource-api.md` §Paths has a path for it. A ver
 
 ## Open questions
 
-- **Server address:** `--server` takes the group and version root, because `resource-api.md` §Paths is relative to it and gives no prefix; the API server unit may fix one.
 - **Namespace:** the CLI sends no namespace, as the paths have none yet ([resource-api.md](./resource-api.md) §Open questions).
 - **Authentication, several clusters, other output formats:** out of scope for issue 8.

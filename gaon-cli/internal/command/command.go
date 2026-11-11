@@ -25,7 +25,9 @@ const usage = `usage:
   gaon [--server URL] apply -f FILE
   gaon [--server URL] get [-o yaml|table] KIND NAME
   gaon [--server URL] list [-o yaml|table] KIND
-  gaon [--server URL] delete KIND NAME`
+  gaon [--server URL] delete KIND NAME
+
+URL is the API root, http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1`
 
 // usageError is a mistake in the command line, as against a failed request.
 type usageError struct{ msg string }

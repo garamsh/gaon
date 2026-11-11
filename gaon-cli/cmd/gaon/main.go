@@ -26,7 +26,7 @@ func main() {
 func run(ctx context.Context, args []string, defaultServer string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gaon", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	server := fs.String("server", defaultServer, "root URL of the v1alpha1 resource API")
+	server := fs.String("server", defaultServer, "API root URL, http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(stderr, "gaon: %v\n", err)
 		return command.ExitUsage
