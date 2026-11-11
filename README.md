@@ -22,7 +22,7 @@ The control plane runs as host services that naru starts, not inside microVMs.
 
 ## Status
 
-The repository holds documents only: no Go module, `go.work` or `Makefile` yet. The first milestone, M1, is a Machine defined in YAML that runs on mvmd on a QEMU development node and runs on another node when its node dies. Its units are planned in `docs/architecture/structure.md` §Units.
+The first milestone, M1, is a Machine defined in YAML that runs on mvmd on a QEMU development node and runs on another node when its node dies. Its units are planned in `docs/architecture/structure.md` §Units.
 
 ## Structure
 

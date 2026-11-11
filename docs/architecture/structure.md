@@ -10,7 +10,7 @@ Nothing here states what goes inside a unit, or how the units are deployed. A un
 
 ## Units
 
-The repository holds no unit yet. The units planned for milestone M1, each created by the pull request of the issue that owns it (issues in garamsh/gaon):
+The units of milestone M1, each created by the pull request of the issue that owns it (issues in garamsh/gaon):
 
 - **`lib/api/`**, a library module: the `v1alpha1` resource types and their client. Issue 3.
 - **`apiserver/`**: the resource API server, binary `gaon-apiserver`. Issue 4.
@@ -19,8 +19,6 @@ The repository holds no unit yet. The units planned for milestone M1, each creat
 - **`node-agent/`**: runs bound Machines on mvmd, binary `gaon-node-agent`. Issue 7.
 - **`gaon-cli/`**: the client CLI, binary `gaon`. Issue 8.
 - **`tooling/e2e/`**: the end-to-end test of M1 on QEMU nodes. Issue 9.
-
-A unit's own document replaces its line here when it lands.
 
 The Gateway, the Cell Router and machine and cluster management are in gaon's scope (Discussion #2 comments `discussioncomment-19466471` and `discussioncomment-19533418`, in garamsh/discussions) and have no unit planned yet.
 
