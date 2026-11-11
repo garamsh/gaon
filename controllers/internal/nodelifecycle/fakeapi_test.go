@@ -16,7 +16,7 @@ import (
 )
 
 // fakeAPI serves only the endpoints the controller uses: listing and watching
-// Leases, reading a Node and writing a Node's status. A request to any other
+// Leases and Nodes, reading a Node and writing a Node's status. A request to any other
 // path fails the test, which is how the tests show the controller never
 // writes a Machine's binding or a Node's spec.
 type fakeAPI struct {
@@ -33,14 +33,17 @@ type fakeAPI struct {
 	conflicts int
 	lists     int
 
-	// events feeds the open watch; a nil entry ends the stream.
-	events chan *api.WatchEvent
+	// events feeds the open Lease watch and nodeEvents the open Node watch; a
+	// nil entry ends the stream.
+	events     chan *api.WatchEvent
+	nodeEvents chan *api.WatchEvent
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
-	f := &fakeAPI{t: t, nodes: map[string]*api.Node{}, events: make(chan *api.WatchEvent, 16), nextRV: 100}
+	f := &fakeAPI{t: t, nodes: map[string]*api.Node{}, events: make(chan *api.WatchEvent, 16), nodeEvents: make(chan *api.WatchEvent, 16), nextRV: 100}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /leases", f.listLeases)
+	mux.HandleFunc("GET /nodes", f.listNodes)
 	mux.HandleFunc("GET /nodes/{name}", f.getNode)
 	mux.HandleFunc("PUT /nodes/{name}/status", f.putNodeStatus)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +58,7 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 
 func (f *fakeAPI) listLeases(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("watch") == "true" {
-		f.watch(w, r)
+		f.watch(w, r, f.events)
 		return
 	}
 	f.mu.Lock()
@@ -69,13 +72,31 @@ func (f *fakeAPI) listLeases(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list)
 }
 
-func (f *fakeAPI) watch(w http.ResponseWriter, r *http.Request) {
+// listNodes lists every stored Node, and serves the Node watch.
+func (f *fakeAPI) listNodes(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("watch") == "true" {
+		f.watch(w, r, f.nodeEvents)
+		return
+	}
+	f.mu.Lock()
+	list := api.NodeList{
+		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindNodeList},
+		Metadata: api.ListMeta{ResourceVersion: "10"},
+	}
+	for _, n := range f.nodes {
+		list.Items = append(list.Items, *n)
+	}
+	f.mu.Unlock()
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (f *fakeAPI) watch(w http.ResponseWriter, r *http.Request, events <-chan *api.WatchEvent) {
 	w.WriteHeader(http.StatusOK)
 	w.(http.Flusher).Flush()
 	enc := json.NewEncoder(w)
 	for {
 		select {
-		case ev := <-f.events:
+		case ev := <-events:
 			if ev == nil {
 				return
 			}
@@ -160,6 +181,13 @@ func (f *fakeAPI) emit(typ api.EventType, l api.Lease) {
 	ev, err := api.NewEvent(typ, &l)
 	require.NoError(f.t, err)
 	f.events <- &ev
+}
+
+// emitNode queues a watch event for the open Node watch.
+func (f *fakeAPI) emitNode(typ api.EventType, n *api.Node) {
+	ev, err := api.NewEvent(typ, n)
+	require.NoError(f.t, err)
+	f.nodeEvents <- &ev
 }
 
 func (f *fakeAPI) endWatch() { f.events <- nil }
