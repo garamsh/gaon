@@ -21,12 +21,13 @@ func main() {
 	os.Exit(code)
 }
 
-// run reads the global flags, builds the client and runs the command.
+// run reads the global flags, builds the HTTP client the --tls flags describe and runs the command.
 // defaultServer is the server used when --server is not given.
 func run(ctx context.Context, args []string, defaultServer string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gaon", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	server := fs.String("server", defaultServer, "API root URL, http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1")
+	files := api.RegisterTLSFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(stderr, "gaon: %v\n", err)
 		return command.ExitUsage
@@ -35,5 +36,10 @@ func run(ctx context.Context, args []string, defaultServer string, stdout, stder
 		fmt.Fprintln(stderr, "gaon: no server: set --server or GAON_SERVER")
 		return command.ExitUsage
 	}
-	return command.Run(ctx, api.NewClient(*server, nil), fs.Args(), stdout, stderr)
+	httpClient, err := files.Client()
+	if err != nil {
+		fmt.Fprintf(stderr, "gaon: %v\n", err)
+		return command.ExitUsage
+	}
+	return command.Run(ctx, api.NewClient(*server, httpClient), fs.Args(), stdout, stderr)
 }

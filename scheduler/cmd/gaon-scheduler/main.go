@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,20 +17,50 @@ import (
 	"github.com/garamsh/gaon/scheduler/internal/scheduler"
 )
 
-func main() {
-	root := flag.String("api", "", "group and version root of the resource API, e.g. http://127.0.0.1:8080/apis/compute.gaon.garam.sh/v1alpha1")
-	interval := flag.Duration("interval", 5*time.Second, "time between scheduling passes")
-	flag.Parse()
+// config is what the scheduler is started with.
+type config struct {
+	root       string
+	interval   time.Duration
+	httpClient *http.Client
+}
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+// parseFlags reads the flags in args and builds the HTTP client the --tls
+// flags describe. It returns flag.ErrHelp when usage was asked for, after
+// writing it to out.
+func parseFlags(args []string, out io.Writer) (config, error) {
+	fs := flag.NewFlagSet("gaon-scheduler", flag.ContinueOnError)
+	fs.SetOutput(out)
+	root := fs.String("api", "", "group and version root of the resource API, e.g. http://127.0.0.1:8080/apis/compute.gaon.garam.sh/v1alpha1")
+	interval := fs.Duration("interval", 5*time.Second, "time between scheduling passes")
+	files := api.RegisterTLSFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return config{}, err
+	}
 	if *root == "" || *interval <= 0 {
-		log.Error("start", "err", "-api is required and -interval must be positive")
+		return config{}, errors.New("-api is required and -interval must be positive")
+	}
+	httpClient, err := files.Client()
+	if err != nil {
+		return config{}, err
+	}
+	httpClient.Timeout = 30 * time.Second
+	return config{root: *root, interval: *interval, httpClient: httpClient}, nil
+}
+
+func main() {
+	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	cfg, err := parseFlags(os.Args[1:], os.Stderr)
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
+	if err != nil {
+		log.Error("start", "err", err)
 		os.Exit(2)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	client := api.NewClient(*root, &http.Client{Timeout: 30 * time.Second})
-	scheduler.NewService(client, log).Run(ctx, *interval)
+	client := api.NewClient(cfg.root, cfg.httpClient)
+	scheduler.NewService(client, log).Run(ctx, cfg.interval)
 }

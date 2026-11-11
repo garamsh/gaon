@@ -16,6 +16,7 @@ Basis: [resource-api.md](./resource-api.md) §Paths and the types of `lib/api/`.
 | `gaon delete KIND NAME` | Sets the `deletionTimestamp` of a Machine. |
 
 - **Global flag:** `--server URL` is the group and version root of the resource API, `http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1`, in full; `GAON_SERVER` is its default. It comes before the command. With neither, the CLI exits with a usage error.
+- **TLS flags:** `--tls-ca`, `--tls-cert` and `--tls-key` come before the command, like `--server`, and have no environment variable. All three give a mutual TLS 1.3 client built by `lib/api/` that trusts only the CA file; none gives plain HTTP, for a loopback server. One or two, or a file that cannot be read or does not fit, end the CLI with a usage error naming what is missing, before any request.
 - **Operands:** a command's flags come before its operands. `KIND` is the lower-case kind name, matched without regard to case.
 - **Exit code:** 0 on success, 1 when a request or a check fails, 2 on a mistake in the command line.
 - **Output formats:** `yaml` prints the object as the API returned it, with the API's field names. `table` prints the columns below. Other formats are out of scope.

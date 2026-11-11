@@ -13,6 +13,9 @@ Every value is a flag with an environment variable as its fallback. A flag given
 | Flag | Environment variable | Default | Meaning |
 |---|---|---|---|
 | `--api-server` | `GAON_API_SERVER` | none, required | root URL of the resource API: the API server's address with `/apis/compute.gaon.garam.sh/v1alpha1`, which [resource-api.md](./resource-api.md) §Paths are relative to |
+| `--tls-ca` | `GAON_TLS_CA` | none | file of the CA certificates the API server's certificate must chain to |
+| `--tls-cert` | `GAON_TLS_CERT` | none | file of the client certificate the agent presents to the API server |
+| `--tls-key` | `GAON_TLS_KEY` | none | file of the key of the client certificate |
 | `--node-name` | `GAON_NODE_NAME` | none, required | name of this node's Node and Lease |
 | `--mvmd-socket` | `GAON_MVMD_SOCKET` | none, required | path of mvmd's runtime API socket |
 | `--delta` | `GAON_DELTA` | 1s, provisional | δ, how long a Machine can run past mvmd's recorded deadline expiry |
@@ -24,6 +27,8 @@ Every value is a flag with an environment variable as its fallback. A flag given
 | `--restart-backoff` | `GAON_RESTART_BACKOFF` | 10s | wait before the first restart of a Machine, doubled for each restart after it |
 | `--restart-backoff-max` | `GAON_RESTART_BACKOFF_MAX` | 5m | cap on the wait between two restarts, not below the backoff |
 | `--restart-reset-after` | `GAON_RESTART_RESET_AFTER` | 10m | how long a Machine must have run for the wait to start over at the backoff |
+
+The three TLS values are given together or not at all. All three give a mutual TLS 1.3 client built by `lib/api` that trusts only the CA file; none gives plain HTTP, for a loopback API server; one or two refuse the start, naming the ones missing, as does a file that cannot be read or does not fit. The agent builds its client once at start, so a replaced file is read at the next start.
 
 δ's default of 1s is provisional: it is not measured, in mvmd either, and it is far above a real-time thread's wake-up and a SIGKILL (mvmd ADR 0003). The durations must satisfy two inequalities, checked at start: the deadline length exceeds the renew period plus two call timeouts, so the deadline never lapses between rounds, and the Lease duration is at least the deadline length plus δ plus two call timeouts, so a round can always renew the deadline.
 
