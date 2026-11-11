@@ -396,6 +396,7 @@ func TestUsageMistakes_ExitWithUsageAndSendNothing(t *testing.T) {
 
 			assert.Equal(t, command.ExitUsage, code)
 			assert.Contains(t, stderr, "usage:")
+			assert.Contains(t, stderr, "/apis/compute.gaon.garam.sh/v1alpha1")
 			assert.Zero(t, f.count(), "requests sent")
 		})
 	}
@@ -405,6 +406,7 @@ func TestUsageMistakes_ExitWithUsageAndSendNothing(t *testing.T) {
 		stdout, _, code := execute(t, f, "help")
 		assert.Equal(t, command.ExitOK, code)
 		assert.Contains(t, stdout, "gaon [--server URL] apply -f FILE")
+		assert.Contains(t, stdout, "/apis/compute.gaon.garam.sh/v1alpha1")
 	})
 }
 
