@@ -87,12 +87,14 @@ func freeURL(t *testing.T) url.URL {
 	return url.URL{Scheme: "http", Host: ln.Addr().String()}
 }
 
-// send makes a raw request, for what the client does not send.
+// send makes a raw request, for what the client does not send. It reads the
+// whole response under a deadline, so a stream the server wrongly opens fails
+// the test here instead of hanging it.
 func (e *env) send(t *testing.T, method, path, body string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequest(method, e.root+path, strings.NewReader(body))
 	require.NoError(t, err)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	out, err := io.ReadAll(resp.Body)
