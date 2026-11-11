@@ -19,11 +19,14 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
+// apiRoot is the group and version root the server is documented to serve.
+const apiRoot = "/apis/compute.gaon.garam.sh/v1alpha1"
+
 // env is a gaon-apiserver run by apiserver.Run over a real, embedded etcd
 // member, and the clients that reach them.
 type env struct {
 	api  *api.Client
-	root string
+	base string
 	etcd *clientv3.Client
 	stop func() error
 }
@@ -54,8 +57,8 @@ func newEnv(t *testing.T) *env {
 	}
 	t.Cleanup(func() { _ = stop() })
 
-	root := "http://" + ln.Addr().String()
-	return &env{api: api.NewClient(root, nil), root: root, etcd: etcd, stop: stop}
+	base := "http://" + ln.Addr().String()
+	return &env{api: api.NewClient(base+apiRoot, nil), base: base, etcd: etcd, stop: stop}
 }
 
 func startEtcd(t *testing.T) string {
@@ -87,12 +90,19 @@ func freeURL(t *testing.T) url.URL {
 	return url.URL{Scheme: "http", Host: ln.Addr().String()}
 }
 
-// send makes a raw request, for what the client does not send. It reads the
-// whole response under a deadline, so a stream the server wrongly opens fails
-// the test here instead of hanging it.
+// send makes a raw request to path under the API root, for what the client
+// does not send.
 func (e *env) send(t *testing.T, method, path, body string) (int, string) {
 	t.Helper()
-	req, err := http.NewRequest(method, e.root+path, strings.NewReader(body))
+	return e.sendAbsolute(t, method, apiRoot+path, body)
+}
+
+// sendAbsolute makes a raw request to path on the server's address. It reads
+// the whole response under a deadline, so a stream the server wrongly opens
+// fails the test here instead of hanging it.
+func (e *env) sendAbsolute(t *testing.T, method, path, body string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(method, e.base+path, strings.NewReader(body))
 	require.NoError(t, err)
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	require.NoError(t, err)

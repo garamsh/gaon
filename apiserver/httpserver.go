@@ -16,27 +16,35 @@ import (
 
 const maxBody = 1 << 20
 
+// root is the group and version root: every path of resource-api.md §Paths is
+// relative to it.
+const root = "/apis/" + api.GroupVersion
+
 type traceKey struct{}
 
-// newHandler serves the paths of resource-api.md §Paths over svc. It is the
-// one place that maps a failure to an HTTP status.
+// newHandler serves the paths of resource-api.md §Paths under root over svc,
+// and answers NotFound to any other path. It is the one place that maps a
+// failure to an HTTP status.
 func newHandler(svc resourceapi.Service, log *slog.Logger) http.Handler {
 	h := &handler{log: log}
 	mux := http.NewServeMux()
-	mux.HandleFunc("PUT /machines/{name}", put(h, svc.PutMachine))
-	mux.HandleFunc("POST /machines/{name}/binding", h.bind(svc))
-	mux.HandleFunc("PUT /machines/{name}/status", put(h, svc.PutMachineStatus))
-	mux.HandleFunc("DELETE /machines/{name}", h.deleteMachine(svc))
-	mux.HandleFunc("GET /machines/{name}", get(h, svc.GetMachine))
-	mux.HandleFunc("GET /machines", listOrWatch(h, svc.ListMachines, svc.WatchMachines))
-	mux.HandleFunc("PUT /volumes/{name}/status", put(h, svc.PutVolumeStatus))
-	mux.HandleFunc("PUT /nodes/{name}", put(h, svc.PutNode))
-	mux.HandleFunc("PUT /nodes/{name}/status", put(h, svc.PutNodeStatus))
-	mux.HandleFunc("GET /nodes/{name}", get(h, svc.GetNode))
-	mux.HandleFunc("GET /nodes", listOrWatch(h, svc.ListNodes, svc.WatchNodes))
-	mux.HandleFunc("PUT /leases/{name}", put(h, svc.PutLease))
-	mux.HandleFunc("GET /leases/{name}", get(h, svc.GetLease))
-	mux.HandleFunc("GET /leases", listOrWatch(h, svc.ListLeases, svc.WatchLeases))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		h.fail(w, r, api.NewAPIError(api.ReasonNotFound, "no such path"))
+	})
+	mux.HandleFunc("PUT "+root+"/machines/{name}", put(h, svc.PutMachine))
+	mux.HandleFunc("POST "+root+"/machines/{name}/binding", h.bind(svc))
+	mux.HandleFunc("PUT "+root+"/machines/{name}/status", put(h, svc.PutMachineStatus))
+	mux.HandleFunc("DELETE "+root+"/machines/{name}", h.deleteMachine(svc))
+	mux.HandleFunc("GET "+root+"/machines/{name}", get(h, svc.GetMachine))
+	mux.HandleFunc("GET "+root+"/machines", listOrWatch(h, svc.ListMachines, svc.WatchMachines))
+	mux.HandleFunc("PUT "+root+"/volumes/{name}/status", put(h, svc.PutVolumeStatus))
+	mux.HandleFunc("PUT "+root+"/nodes/{name}", put(h, svc.PutNode))
+	mux.HandleFunc("PUT "+root+"/nodes/{name}/status", put(h, svc.PutNodeStatus))
+	mux.HandleFunc("GET "+root+"/nodes/{name}", get(h, svc.GetNode))
+	mux.HandleFunc("GET "+root+"/nodes", listOrWatch(h, svc.ListNodes, svc.WatchNodes))
+	mux.HandleFunc("PUT "+root+"/leases/{name}", put(h, svc.PutLease))
+	mux.HandleFunc("GET "+root+"/leases/{name}", get(h, svc.GetLease))
+	mux.HandleFunc("GET "+root+"/leases", listOrWatch(h, svc.ListLeases, svc.WatchLeases))
 	return h.recoverPanics(mux)
 }
 

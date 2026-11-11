@@ -343,6 +343,7 @@ func TestDeleteMachine_FinalizersHoldItUntilTheLastIsCleared(t *testing.T) {
 	held, err := e.api.PutMachine(ctx(t), &first)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"volumes"}, held.Metadata.Finalizers)
+	assert.Equal(t, again.Metadata.Generation, held.Metadata.Generation, "removing a finalizer leaves the generation")
 	still, err := e.api.GetMachine(ctx(t), "m1")
 	require.NoError(t, err, "one finalizer is left")
 	assert.NotNil(t, still.Metadata.DeletionTimestamp)
@@ -365,6 +366,7 @@ func TestDeleteMachine_ClearingFinalizersOfALiveMachineKeepsIt(t *testing.T) {
 	cleared, err := e.api.PutMachine(ctx(t), m)
 	require.NoError(t, err)
 	assert.Empty(t, cleared.Metadata.Finalizers)
+	assert.Equal(t, m.Metadata.Generation, cleared.Metadata.Generation, "a finalizer is metadata, not spec")
 	_, err = e.api.GetMachine(ctx(t), "m1")
 	assert.NoError(t, err, "only a Machine being deleted goes with its last finalizer")
 }
