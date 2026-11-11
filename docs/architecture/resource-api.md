@@ -101,8 +101,14 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 
 ### Watch
 
-- A watch resumes from a given `resourceVersion`.
-- An expired `resourceVersion` gets an "expired" error; the client lists again and watches from the list's version.
+- A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required.
+- Each line of the stream is one JSON event with a `type` and an `object`.
+- Event types, PascalCase as every enum is:
+  - `Added`, `Modified` and `Deleted` carry the Machine as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
+  - `Error` carries the error object, and is the last event of its stream.
+- The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons are `Conflict`, `NotFound`, `AlreadyExists`, `Invalid` and `Expired`.
+- An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
+- The types are in `lib/api/`: `WatchEvent`, `EventType`, `APIError` and `Reason`.
 
 ## Rationale
 
@@ -115,7 +121,6 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 
 - **Authentication** of API callers is deferred; see Transport.
 - **Namespace in the path:** whether the paths carry the namespace and in what form.
-- **Event shape of a watch:** the names of event types and the error object that carries "expired", left to the first PR of `lib/api` (issue 3).
 - **The pre-registration state:** the `Node` schema, who creates a `Node` for a discovered machine, and what admits it.
 - **Unacknowledged renewals:** how the Node Agent bounds the expiry of an mvmd renewal whose acknowledgement never arrived; left to the Node Agent's document.
 - **Which unit confirms Lease expiry:** the Scheduler, or the node lifecycle controller; left to those units' documents.
