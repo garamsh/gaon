@@ -31,7 +31,14 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 
 	nodes := node.NewService(cfg.NodeName, client, runtime, clk, log)
 	live := liveness.NewService(cfg.NodeName, cfg.Liveness, client, runtime, clk, log)
-	runs := machines.NewService(cfg.NodeName, machines.Params{Resync: cfg.ResyncPeriod, Retry: cfg.ResyncPeriod}, client, runtime, clk, log)
+	runs := machines.NewService(cfg.NodeName, machines.Params{
+		Resync:            cfg.ResyncPeriod,
+		Retry:             cfg.ResyncPeriod,
+		RestartBackoff:    cfg.RestartBackoff,
+		RestartBackoffMax: cfg.RestartBackoffMax,
+		RestartResetAfter: cfg.RestartResetAfter,
+		ReadTimeout:       cfg.Liveness.RPCTimeout,
+	}, client, runtime, clk, log)
 
 	var wg sync.WaitGroup
 	for _, run := range []func(context.Context){

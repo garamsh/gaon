@@ -2,7 +2,7 @@
 
 What `gaon-node-agent` does on a node: it registers the node, keeps its Lease and mvmd's fencing deadline renewed, runs the Machines bound to it on mvmd, and reports their status.
 
-Basis: [resource-api.md](./resource-api.md) for the contract it keeps, [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md) for the boundary. The mvmd statements below hold for garamsh/mvmd at commit `1b08e5e04273b8839f66d9e154bf96086fbc3d23`, runtime API `v1alpha2`, which the agent reaches only through mvmd's `lib/runtimeapi` module over mvmd's Unix socket.
+Basis: [resource-api.md](./resource-api.md) for the contract it keeps, [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md) for the boundary. The mvmd statements below hold for garamsh/mvmd at commit `3b37892f303a4d4dbd8e5360906d0f9c036b562e`, runtime API `v1alpha2`, which the agent reaches only through mvmd's `lib/runtimeapi` module over mvmd's Unix socket.
 
 ## Current decisions
 
@@ -21,6 +21,9 @@ Every value is a flag with an environment variable as its fallback. A flag given
 | `--deadline-length` | `GAON_DEADLINE_LENGTH` | 15s | length each deadline renewal asks mvmd for |
 | `--rpc-timeout` | `GAON_RPC_TIMEOUT` | 2s | bound on each call of a renewal round |
 | `--resync-period` | `GAON_RESYNC_PERIOD` | 10s | time between two reconciliations of the Machines and two reports of the Node's status |
+| `--restart-backoff` | `GAON_RESTART_BACKOFF` | 10s | wait before the first restart of a Machine, doubled for each restart after it |
+| `--restart-backoff-max` | `GAON_RESTART_BACKOFF_MAX` | 5m | cap on the wait between two restarts, not below the backoff |
+| `--restart-reset-after` | `GAON_RESTART_RESET_AFTER` | 10m | how long a Machine must have run for the wait to start over at the backoff |
 
 δ's default of 1s is provisional: it is not measured, in mvmd either, and it is far above a real-time thread's wake-up and a SIGKILL (mvmd ADR 0003). The durations must satisfy two inequalities, checked at start: the deadline length exceeds the renew period plus two call timeouts, so the deadline never lapses between rounds, and the Lease duration is at least the deadline length plus δ plus two call timeouts, so a round can always renew the deadline.
 
@@ -52,9 +55,13 @@ Every value is a flag with an environment variable as its fallback. A flag given
 - **Watched set:** the agent lists the Machines, watches from the list's version and reconciles on every change and every resync. A failed or expired watch is followed by a new list.
 - **Identity in mvmd:** a Machine is held in mvmd as its name with the binding epoch appended. A binding at a later epoch is therefore a different mvmd machine, and the earlier one is removed, never reused.
 - **Epoch rule:** the agent keeps the newest epoch it has seen for each Machine and ignores an event, a list entry or a re-read carrying an older one.
-- **Run:** a Machine bound to this node, not being deleted and not `OnDemand`, has its image pulled by digest, is created in mvmd and started, according to `runStrategy`: `Halted` is stopped and not created, `Once` is not started again after it stopped, the others are started whenever mvmd holds them stopped or created.
+- **Run:** a Machine bound to this node, not being deleted and not `OnDemand`, has its image pulled by digest, is created in mvmd and started, according to `runStrategy`: `Halted` is stopped and not created, `Once` is not started again after it stopped, the others are started whenever mvmd holds them created, and restarted as below when it holds them stopped or faulted.
 - **Remove:** every mvmd machine the agent named that is not a Machine bound here now, whether unbound, bound elsewhere, bound at an older epoch, being deleted or no longer in the API, is stopped and deleted. This also clears what an earlier run left. An mvmd machine whose identifier the agent did not form is left alone.
-- **Status:** the agent writes `phase`, `bindingEpoch` equal to the spec's, `observedGeneration`, `addresses` and a `Ready` condition, only when they differ from what is stored.
+- **Status:** the agent writes `phase`, `bindingEpoch` equal to the spec's, `observedGeneration`, `addresses`, `restartCount` and a `Ready` condition, only when they differ from what is stored. `lastExit` is never written: mvmd reports no exit time (garamsh/mvmd#331).
+- **Restart:** under `Always` a Machine that stopped, and under `RerunOnFailure` one that failed, is started again after a wait and not before. The wait is the backoff, doubled for each restart and capped at the maximum, and starts over once the Machine has run for the reset time. A clean exit under `RerunOnFailure` is not restarted. A faulted Machine is stopped first, since mvmd accepts only a stop in that state. A `Halted` Machine resumed is started at once and is not a restart.
+- **Failure:** the agent reads the entrypoint's record from mvmd, exec `entrypoint`, once when it first sees the Machine stopped. The exit failed when the record is `EXITED` with a non-zero exit code or a terminating signal, when there is no `EXITED` record, or when the Machine is faulted; an `EXITED` record with code 0 and no signal is clean. A read that returns no record before the call timeout is a failure; any other error leaves the exit unjudged until the next resync.
+- **`restartCount`:** each restart adds one, written by compare-and-swap with the Machine's epoch checked, so a count of an earlier epoch is never carried into a later one. A write that conflicts is read again and retried, and a restart whose write failed is written by the next round, never counted twice.
+- **Where the state lives:** the wait, the streak and the judged exit are kept in the agent's memory per mvmd machine, so a rebinding starts with none; an agent restart forgets them, and a Machine it finds stopped then waits the first backoff. The exit time is not known (garamsh/mvmd#331), so the reset time is measured from when the agent started the Machine or first saw it running to when it first sees it stopped, which can lag the exit by up to one resync.
 
 | mvmd state | Phase | Ready |
 |---|---|---|
@@ -63,17 +70,17 @@ Every value is a flag with an environment variable as its fallback. A flag given
 | paused | `Suspended` | false |
 | stopped, `Halted` | `Stopped` | false |
 | stopped, `Once` | `Succeeded` | false |
-| stopped, other | `Pending` | false, started again on the next resync |
-| faulted | `Failed` | false, the reason is mvmd's last failure reason |
+| stopped, `RerunOnFailure` after a clean exit | `Pending` | false, not started again |
+| stopped, other | `Pending` | false, started again once the restart wait is over |
+| faulted | `Failed` | false, the reason is mvmd's last failure reason; stopped and started again once the restart wait is over |
 
 - **Failures the agent settles itself** go to `Failed` with the `Ready` condition false and a reason: `InvalidSpec` for an image that is not `<repository>@sha256:<digest>` or resources it cannot convert, and `Rejected` for a create mvmd refuses, such as one above a Driver's `max_vcpus`, with mvmd's reason as the message. The Driver's limit is not on the Node's status.
-- **Outcome kind `IN_PROGRESS`** is treated as never produced by mvmd (garamsh/mvmd#307), and no exec output is read (garamsh/mvmd#308).
+- **Outcome kind `IN_PROGRESS`** is treated as never produced by mvmd (garamsh/mvmd#307).
 
 ### What the agent does not do yet
 
 - `OnDemand` Machines, wake and suspend.
 - Volumes and attachment, and the network policy: a Machine is created with none, so invariant 6 is not kept by the agent.
-- Restart with backoff: a faulted Machine stays `Failed`, `restartCount` and the last exit are not written, and a Machine that stopped under `Always` is started again at the next resync.
 - The Node's `addresses`.
 - Calling naru.
 
@@ -81,9 +88,14 @@ Every value is a flag with an environment variable as its fallback. A flag given
 
 - One loop for the Lease and the deadline keeps the obligation checkable in one place: the deadline is never renewed outside a round that has just seen the Lease's validity.
 - The call-timeout margin pays for not knowing whether an unacknowledged call reached mvmd, instead of asking mvmd afterwards, which a failing path may not allow.
+- The restart state is in memory because nothing the contract defines can hold it, and losing it costs one backoff, not a missed restart.
+- A clean record equal to the previous one counts as a failure because the cost of a wrong restart is one backoff, and of a wrong stop is a Machine that never runs again.
+- The exit is read once, at the first sight of the stopped state, so a log that changes afterwards cannot change the verdict.
+- The restart settings are flags with the recorded defaults because the contract fixes no values and a node's operator is the one who knows its workloads.
 - The epoch in the mvmd identifier makes rebinding to the same node a replacement rather than a reuse, so state of an older epoch cannot carry into a newer one.
 
 ## Open questions
 
-- **Restart policy:** the backoff and the exit record for `RerunOnFailure` and `Always`.
+- **Entrypoint record across a start:** mvmd's documents do not say whether the console log an entrypoint's record is answered from is cleared when a Machine starts. The agent treats a clean record equal to the one it read at the Machine's previous exit as a failure, so a stale record cannot end the restarts; a Machine switched from `Always` to `RerunOnFailure` whose entrypoint keeps exiting cleanly is therefore restarted, at the backoff.
+- **Phase of a clean exit under `RerunOnFailure`:** [resource-api.md](./resource-api.md) defines `Succeeded` only for `Once`, so the Machine stays `Pending` with a message saying it exited cleanly.
 - **Node addresses:** which addresses the agent reports.

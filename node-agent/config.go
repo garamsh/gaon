@@ -21,6 +21,10 @@ const (
 	EnvDeadlineLength = "GAON_DEADLINE_LENGTH"
 	EnvRPCTimeout     = "GAON_RPC_TIMEOUT"
 	EnvResyncPeriod   = "GAON_RESYNC_PERIOD"
+
+	EnvRestartBackoff    = "GAON_RESTART_BACKOFF"
+	EnvRestartBackoffMax = "GAON_RESTART_BACKOFF_MAX"
+	EnvRestartResetAfter = "GAON_RESTART_RESET_AFTER"
 )
 
 // Config is what the agent is started with.
@@ -37,6 +41,13 @@ type Config struct {
 	// ResyncPeriod is the time between two reconciliations of the Machines
 	// and two reports of the Node's status.
 	ResyncPeriod time.Duration
+	// RestartBackoff is the wait before a Machine's first restart, doubled
+	// with each restart up to RestartBackoffMax.
+	RestartBackoff    time.Duration
+	RestartBackoffMax time.Duration
+	// RestartResetAfter is how long a Machine runs before the wait starts
+	// again from RestartBackoff.
+	RestartResetAfter time.Duration
 }
 
 // Defaults of the durations. δ's is provisional: it is not measured.
@@ -47,6 +58,11 @@ const (
 	defaultDeadlineLength = 15 * time.Second
 	defaultRPCTimeout     = 2 * time.Second
 	defaultResyncPeriod   = 10 * time.Second
+
+	// The restart durations are those resource-api.md records, provisionally.
+	defaultRestartBackoff    = 10 * time.Second
+	defaultRestartBackoffMax = 5 * time.Minute
+	defaultRestartResetAfter = 10 * time.Minute
 )
 
 // ParseConfig reads the flags in args. A flag not given falls back to its
@@ -80,6 +96,9 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	dur(&c.Liveness.DeadlineLength, "deadline-length", EnvDeadlineLength, defaultDeadlineLength, "length each deadline renewal asks mvmd for")
 	dur(&c.Liveness.RPCTimeout, "rpc-timeout", EnvRPCTimeout, defaultRPCTimeout, "bound on each call of a renewal")
 	dur(&c.ResyncPeriod, "resync-period", EnvResyncPeriod, defaultResyncPeriod, "time between two reconciliations of the Machines")
+	dur(&c.RestartBackoff, "restart-backoff", EnvRestartBackoff, defaultRestartBackoff, "wait before a Machine's first restart, doubled with each restart")
+	dur(&c.RestartBackoffMax, "restart-backoff-max", EnvRestartBackoffMax, defaultRestartBackoffMax, "longest wait before a restart")
+	dur(&c.RestartResetAfter, "restart-reset-after", EnvRestartResetAfter, defaultRestartResetAfter, "how long a Machine runs before the restart wait starts again from the first")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -88,6 +107,10 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	}
 	if c.ResyncPeriod <= 0 {
 		return Config{}, fmt.Errorf("resync period is %s, want a positive duration", c.ResyncPeriod)
+	}
+	if c.RestartBackoff <= 0 || c.RestartResetAfter <= 0 || c.RestartBackoffMax < c.RestartBackoff {
+		return Config{}, fmt.Errorf("restart backoff is %s, its maximum %s and its reset time %s, want positive durations with the maximum not below the backoff",
+			c.RestartBackoff, c.RestartBackoffMax, c.RestartResetAfter)
 	}
 	for _, f := range []struct{ name, env, value string }{
 		{"api-server", EnvAPIServer, c.APIServer},

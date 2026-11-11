@@ -109,12 +109,16 @@ type outcome struct {
 	// failure, when set, is a failure the agent met and the reason for it.
 	failure    error
 	failReason string
+	// clean is set when the entrypoint exited cleanly and the run strategy
+	// does not start the Machine again.
+	clean bool
 }
 
-// machineStatus maps an outcome to the status the agent writes for m, keeping the
+// machineStatus maps an outcome to the status the agent writes for m, adding
+// the restarts not yet written to restartCount and keeping the
 // fields it does not own and the transition time of a condition that did
 // not change.
-func machineStatus(m *api.Machine, o outcome, now time.Time) api.MachineStatus {
+func machineStatus(m *api.Machine, o outcome, now time.Time, restarts int32) api.MachineStatus {
 	next := api.MachineStatus{BindingEpoch: m.Spec.BindingEpoch, ObservedGeneration: m.Metadata.Generation}
 	var ready api.Condition
 	switch {
@@ -131,10 +135,14 @@ func machineStatus(m *api.Machine, o outcome, now time.Time) api.MachineStatus {
 	default:
 		next.Addresses = o.runtime.GetAddresses()
 		next.Phase, ready = fromState(m, o.runtime)
+		if o.clean {
+			ready.Message = "the entrypoint exited cleanly and is not started again"
+		}
 	}
 	if m.Status.BindingEpoch == m.Spec.BindingEpoch {
 		next.RestartCount, next.LastActiveTime, next.LastExit = m.Status.RestartCount, m.Status.LastActiveTime, m.Status.LastExit
 	}
+	next.RestartCount += restarts
 	ready.LastTransitionTime = transition(m, ready, now)
 	next.Conditions = []api.Condition{ready}
 	return next

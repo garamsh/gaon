@@ -20,6 +20,15 @@ type Params struct {
 	Resync time.Duration
 	// Retry is the wait before listing again after a list or a watch failed.
 	Retry time.Duration
+	// RestartBackoff is the wait before the first restart of a Machine, which
+	// doubles with each restart up to RestartBackoffMax.
+	RestartBackoff    time.Duration
+	RestartBackoffMax time.Duration
+	// RestartResetAfter is how long a Machine runs before the wait starts
+	// again from RestartBackoff.
+	RestartResetAfter time.Duration
+	// ReadTimeout bounds the read of an entrypoint's record.
+	ReadTimeout time.Duration
 }
 
 // Service runs the Machines bound to the node.
@@ -37,11 +46,12 @@ type service struct {
 	clock   clock.Clock
 	log     *slog.Logger
 	cache   *cache
+	runs    map[string]*run
 }
 
 // NewService returns a Service for the Machines bound to the node named node.
 func NewService(node string, params Params, api API, runtime Runtime, clk clock.Clock, log *slog.Logger) Service {
-	return &service{node: node, params: params, api: api, runtime: runtime, clock: clk, log: log, cache: newCache(node)}
+	return &service{node: node, params: params, api: api, runtime: runtime, clock: clk, log: log, cache: newCache(node), runs: map[string]*run{}}
 }
 
 func (s *service) Run(ctx context.Context) {

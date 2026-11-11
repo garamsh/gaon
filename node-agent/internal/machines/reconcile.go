@@ -17,6 +17,7 @@ import (
 func (s *service) reconcileAll(ctx context.Context) error {
 	held, err := s.collect(ctx)
 	errs := []error{err}
+	s.prune(s.cache.wanted())
 	if held != nil {
 		errs = append(errs, s.release(ctx, held))
 	}
@@ -114,6 +115,7 @@ func (s *service) ensure(ctx context.Context, m *api.Machine) (outcome, error) {
 		return outcome{}, fmt.Errorf("inspect %s: %w", id, err)
 	}
 	r := got.GetMachine()
+	st := s.runOf(id)
 	switch {
 	case m.Spec.RunStrategy == api.RunHalted:
 		if r.GetState() == v1alpha2.MachineState_MACHINE_STATE_RUNNING || r.GetState() == v1alpha2.MachineState_MACHINE_STATE_PAUSED {
@@ -123,12 +125,18 @@ func (s *service) ensure(ctx context.Context, m *api.Machine) (outcome, error) {
 			}
 			r = stopped.GetMachine()
 		}
-	case r.GetState() == v1alpha2.MachineState_MACHINE_STATE_CREATED,
-		r.GetState() == v1alpha2.MachineState_MACHINE_STATE_STOPPED && m.Spec.RunStrategy != api.RunOnce:
+		st.halted = r.GetState() == v1alpha2.MachineState_MACHINE_STATE_STOPPED
+	case r.GetState() == v1alpha2.MachineState_MACHINE_STATE_RUNNING:
+		if st.started.IsZero() {
+			st.started = s.clock.Now()
+		}
+	case r.GetState() == v1alpha2.MachineState_MACHINE_STATE_CREATED:
 		r, err = s.start(ctx, id)
 		if err != nil {
 			return outcome{runtime: got.GetMachine()}, err
 		}
+	case restarts(m.Spec.RunStrategy) && (r.GetState() == v1alpha2.MachineState_MACHINE_STATE_STOPPED || r.GetState() == v1alpha2.MachineState_MACHINE_STATE_FAULTED):
+		return s.restart(ctx, m, id, r)
 	}
 	return outcome{runtime: r}, nil
 }
@@ -168,6 +176,7 @@ func (s *service) start(ctx context.Context, id string) (*v1alpha2.Machine, erro
 	if err != nil {
 		return nil, fmt.Errorf("start %s: %w", id, err)
 	}
+	s.runOf(id).started = s.clock.Now()
 	return started.GetMachine(), nil
 }
 
@@ -180,7 +189,9 @@ func (s *service) report(ctx context.Context, name string, o outcome) error {
 		if !ok || !s.cache.mine(m) {
 			return nil
 		}
-		next := machineStatus(&m, o, s.clock.Now())
+		st := s.runOf(machineID(name, m.Spec.BindingEpoch))
+		pending := st.unwritten
+		next := machineStatus(&m, o, s.clock.Now(), pending)
 		if reflect.DeepEqual(next, m.Status) {
 			return nil
 		}
@@ -189,6 +200,7 @@ func (s *service) report(ctx context.Context, name string, o outcome) error {
 		switch {
 		case err == nil:
 			s.cache.observe(*written)
+			st.unwritten -= pending
 			return nil
 		case errors.Is(err, api.ErrConflict):
 			fresh, getErr := s.api.GetMachine(ctx, name)
