@@ -58,16 +58,37 @@ func TestPutNodeStatus_StateAgreesWithAdmitted(t *testing.T) {
 	admitted, err := e.api.PutNode(ctx(t), &admit)
 	require.NoError(t, err)
 
-	back := *admitted
-	back.Status.State = api.NodeStateDiscovered
-	_, err = e.api.PutNodeStatus(ctx(t), &back)
-	assert.ErrorIs(t, err, api.ErrInvalid, "Discovered while spec.admitted is true")
-
 	ok := *admitted
 	ok.Status.State = api.NodeStateAdmitted
 	got, err := e.api.PutNodeStatus(ctx(t), &ok)
 	require.NoError(t, err)
 	assert.Equal(t, api.NodeStateAdmitted, got.Status.State)
+}
+
+func TestPutNodeStatus_UnchangedStateIsAcceptedWhateverSpecAdmittedIs(t *testing.T) {
+	e := newEnv(t)
+	n := e.createNode(t, "n1")
+	admit := *n
+	admit.Spec.Admitted = true
+	admitted, err := e.api.PutNode(ctx(t), &admit)
+	require.NoError(t, err)
+	assert.Equal(t, api.NodeStateDiscovered, admitted.Status.State, "stored state lags the spec")
+
+	lease := *admitted
+	lease.Status.State = api.NodeStateDiscovered
+	lease.Status.Conditions = []api.Condition{{Type: api.NodeLeaseExpired, Status: api.ConditionTrue}}
+	got, err := e.api.PutNodeStatus(ctx(t), &lease)
+	require.NoError(t, err, "a condition write that leaves the state as stored")
+	assert.Len(t, got.Status.Conditions, 1)
+
+	change := *got
+	change.Spec.Admitted = false
+	un, err := e.api.PutNode(ctx(t), &change)
+	require.NoError(t, err)
+	against := *un
+	against.Status.State = api.NodeStateAdmitted
+	_, err = e.api.PutNodeStatus(ctx(t), &against)
+	assert.ErrorIs(t, err, api.ErrInvalid, "control: a changed state against the spec is refused")
 }
 
 func mustNodeStatus(t *testing.T, e *env, n *api.Node) *api.Node {

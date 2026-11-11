@@ -40,7 +40,7 @@ func (s *service) PutNodeStatus(ctx context.Context, name string, next *api.Node
 	if err := next.ValidateStatus(); err != nil {
 		return nil, err
 	}
-	if want := stateFor(n.Spec.Admitted); next.Status.State != want {
+	if want := stateFor(n.Spec.Admitted); next.Status.State != n.Status.State && next.Status.State != want {
 		return nil, api.NewAPIError(api.ReasonInvalid, "status.state is %q, want %q while spec.admitted is %t", next.Status.State, want, n.Spec.Admitted)
 	}
 	n.Status = next.Status
