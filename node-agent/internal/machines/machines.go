@@ -22,6 +22,7 @@ const (
 	ReasonRunning     = "Running"
 	ReasonStopped     = "Stopped"
 	ReasonFaulted     = "Faulted"
+	ReasonExitFailed  = "ExitFailed"
 	ReasonSuspended   = "Suspended"
 )
 
@@ -112,6 +113,9 @@ type outcome struct {
 	// clean is set when the entrypoint exited cleanly and the run strategy
 	// does not start the Machine again.
 	clean bool
+	// exitFailure, when set, is how a Machine that is not started again
+	// failed.
+	exitFailure string
 }
 
 // machineStatus maps an outcome to the status the agent writes for m, adding
@@ -135,8 +139,14 @@ func machineStatus(m *api.Machine, o outcome, now time.Time, restarts int32) api
 	default:
 		next.Addresses = o.runtime.GetAddresses()
 		next.Phase, ready = fromState(m, o.runtime)
-		if o.clean {
+		switch {
+		case o.clean:
+			next.Phase = api.MachineSucceeded
 			ready.Message = "the entrypoint exited cleanly and is not started again"
+		case o.exitFailure != "":
+			next.Phase = api.MachineFailed
+			ready.Reason = ReasonExitFailed
+			ready.Message = o.exitFailure
 		}
 	}
 	if m.Status.BindingEpoch == m.Spec.BindingEpoch {
@@ -163,8 +173,6 @@ func fromState(m *api.Machine, r *v1alpha2.Machine) (api.MachinePhase, api.Condi
 		switch m.Spec.RunStrategy {
 		case api.RunHalted:
 			return api.MachineStopped, cond(api.ConditionFalse, ReasonStopped, "")
-		case api.RunOnce:
-			return api.MachineSucceeded, cond(api.ConditionFalse, ReasonStopped, "")
 		}
 		return api.MachinePending, cond(api.ConditionFalse, ReasonStopped, "the Machine stopped and is started again")
 	default:

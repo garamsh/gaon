@@ -237,7 +237,7 @@ func TestRestart_RerunOnFailureRestartsAFailureAndNotACleanExit(t *testing.T) {
 			r.requireState(v1alpha2.MachineState_MACHINE_STATE_STOPPED)
 			assert.Equal(t, 1, r.starts(), "a clean exit is not started again, however long the wait")
 			s := r.gaon.Machine("m1").Status
-			assert.Equal(t, api.MachinePending, s.Phase)
+			assert.Equal(t, api.MachineSucceeded, s.Phase)
 			require.Len(t, s.Conditions, 1)
 			assert.Contains(t, s.Conditions[0].Message, "cleanly")
 		})
