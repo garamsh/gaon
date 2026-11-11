@@ -128,7 +128,7 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 - A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required.
 - Each line of the stream is one JSON event with a `type` and an `object`.
 - Event types, PascalCase as every enum is:
-  - `Added`, `Modified` and `Deleted` carry the Machine as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
+  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Node or a Lease) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
   - `Error` carries the error object, and is the last event of its stream.
 - The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422 and `Expired` 410.
 - An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
