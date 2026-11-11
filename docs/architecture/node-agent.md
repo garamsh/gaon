@@ -8,27 +8,34 @@ Basis: [resource-api.md](./resource-api.md) for the contract it keeps, [ADR 0002
 
 ### Configuration
 
-Every value is a flag with an environment variable as its fallback. A flag given wins over the variable, and the variable over the default. The agent refuses to start when a required value is missing or the durations do not fit each other.
+Every value is a flag with an environment variable as its fallback. A flag given wins over the variable, and the variable over the default. The agent refuses to start when a required value is missing or the durations do not fit each other, defaults included: the defaults satisfy both inequalities below.
 
 | Flag | Environment variable | Default | Meaning |
 |---|---|---|---|
-| `--api-server` | `GAON_API_SERVER` | none, required | root URL of the resource API, up to the group and version |
+| `--api-server` | `GAON_API_SERVER` | none, required | root URL of the resource API: the API server's address with `/apis/compute.gaon.garam.sh/v1alpha1`, which [resource-api.md](./resource-api.md) §Paths are relative to |
 | `--node-name` | `GAON_NODE_NAME` | none, required | name of this node's Node and Lease |
 | `--mvmd-socket` | `GAON_MVMD_SOCKET` | none, required | path of mvmd's runtime API socket |
-| `--delta` | `GAON_DELTA` | none, required | δ, how long a Machine can run past mvmd's recorded deadline expiry |
+| `--delta` | `GAON_DELTA` | 1s, provisional | δ, how long a Machine can run past mvmd's recorded deadline expiry |
 | `--lease-duration` | `GAON_LEASE_DURATION` | 30s | validity of the Lease after a renewal, a whole number of seconds |
 | `--renew-period` | `GAON_RENEW_PERIOD` | 5s | time between renewal rounds |
 | `--deadline-length` | `GAON_DEADLINE_LENGTH` | 15s | length each deadline renewal asks mvmd for |
 | `--rpc-timeout` | `GAON_RPC_TIMEOUT` | 2s | bound on each call of a renewal round |
 | `--resync-period` | `GAON_RESYNC_PERIOD` | 10s | time between two reconciliations of the Machines and two reports of the Node's status |
 
-δ has no default because it is not measured, in mvmd either; the operator states the value they accept. The durations must satisfy two inequalities, checked at start: the deadline length exceeds the renew period plus two call timeouts, so the deadline never lapses between rounds, and the Lease duration is at least the deadline length plus δ plus two call timeouts, so a round can always renew the deadline.
+δ's default of 1s is provisional: it is not measured, in mvmd either, and it is far above a real-time thread's wake-up and a SIGKILL (mvmd ADR 0003). The durations must satisfy two inequalities, checked at start: the deadline length exceeds the renew period plus two call timeouts, so the deadline never lapses between rounds, and the Lease duration is at least the deadline length plus δ plus two call timeouts, so a round can always renew the deadline.
 
 ### Registration
 
 - The agent creates its Node with an empty `spec`, by a `PUT` without a version, when the API has none, and never writes `spec` again.
 - It writes the Node's `status` by compare-and-swap on every resync: `state` is `Admitted` when a user has set `spec.admitted` and `Discovered` otherwise, `capacity` comes from mvmd's runtime info (cpus as a whole number, memory and storage in bytes, storage being mvmd's state total), and the `Ready` condition is true while mvmd answers. When mvmd's runtime info fails, the agent writes `Ready` false with reason `RuntimeUnreachable` and the error as the message, keeps the stored `capacity`, and keeps the condition's transition time while its status and reason are unchanged.
 - It creates the Lease named as the Node on its first round and renews it by compare-and-swap, writing the node as holder.
+
+### Finalizer
+
+- The agent's finalizer is `compute.gaon.garam.sh/node-agent`.
+- **Added** to `metadata.finalizers` before the agent first creates or starts a Machine bound to its Node, so a Machine that is not yet finalized is never run.
+- **Removed** once a Machine bound to its Node with `deletionTimestamp` set is released on mvmd. Released means mvmd holds no machine the agent named after it, under any epoch, by the round's listing of mvmd less what the round removed. A failed stop or delete keeps the finalizer, and the next resync tries again. A Machine bound to another Node keeps the finalizer, since that Node's agent releases it.
+- Both are `PUT /machines/{name}` by compare-and-swap on the version read, changing only the agent's own entry of `metadata.finalizers` and never another's. A conflict is read again and retried, up to three times a round. The API server removes the Machine on the write that clears its last finalizer.
 
 ### The fencing obligation
 
@@ -67,7 +74,7 @@ Every value is a flag with an environment variable as its fallback. A flag given
 - `OnDemand` Machines, wake and suspend.
 - Volumes and attachment, and the network policy: a Machine is created with none, so invariant 6 is not kept by the agent.
 - Restart with backoff: a faulted Machine stays `Failed`, `restartCount` and the last exit are not written, and a Machine that stopped under `Always` is started again at the next resync.
-- Removing the agent's finalizer from a deleted Machine, and the Node's `addresses`.
+- The Node's `addresses`.
 - Calling naru.
 
 ## Rationale
@@ -78,8 +85,5 @@ Every value is a flag with an environment variable as its fallback. A flag given
 
 ## Open questions
 
-- **API root:** whether `--api-server` carries the group and version or the agent appends them, pending the API server's path decision.
-- **δ:** the value to run with, until mvmd measures it.
-- **Finalizer:** how the agent removes its finalizer from a Machine, since the API has no path for it yet.
 - **Restart policy:** the backoff and the exit record for `RerunOnFailure` and `Always`.
 - **Node addresses:** which addresses the agent reports.

@@ -48,6 +48,16 @@ func TestParseConfig_ReadsEveryValueFromItsEnvironmentVariable(t *testing.T) {
 	}, cfg)
 }
 
+func TestParseConfig_DefaultsDeltaToOneSecondAndEveryDefaultPassesTheChecks(t *testing.T) {
+	cfg, err := nodeagent.ParseConfig(nil, env(map[string]string{
+		nodeagent.EnvAPIServer:  "http://api",
+		nodeagent.EnvNodeName:   "n1",
+		nodeagent.EnvMvmdSocket: "/s.sock",
+	}), io.Discard)
+	require.NoError(t, err, "the start-time duration checks hold with every default")
+	assert.Equal(t, time.Second, cfg.Liveness.Delta)
+}
+
 func TestParseConfig_FlagsOverrideEnvironment(t *testing.T) {
 	cfg, err := nodeagent.ParseConfig([]string{"--node-name=from-flag", "--api-server", "http://flag", "--mvmd-socket=/f.sock", "--delta=2s"}, env(required), io.Discard)
 	require.NoError(t, err)
@@ -67,7 +77,7 @@ func TestParseConfig_RefusesWhatItCannotRunWith(t *testing.T) {
 		{"no api server", nodeagent.EnvAPIServer, nil, "api-server"},
 		{"no node name", nodeagent.EnvNodeName, nil, "node-name"},
 		{"no socket", nodeagent.EnvMvmdSocket, nil, "mvmd-socket"},
-		{"no delta, which has no default", nodeagent.EnvDelta, nil, "delta"},
+		{"a delta the Lease duration cannot cover", "", map[string]string{nodeagent.EnvDelta: "12s"}, "lease duration"},
 		{"a duration that is not one", "", map[string]string{nodeagent.EnvRenewPeriod: "soon"}, nodeagent.EnvRenewPeriod},
 		{"durations that do not fit", "", map[string]string{nodeagent.EnvLeaseDuration: "10s"}, "lease duration"},
 	}

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/garamsh/gaon/lib/api"
 )
@@ -46,6 +47,8 @@ func New(t testing.TB) *Server {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /machines", s.listMachines)
+	mux.HandleFunc("GET /machines/{name}", s.getMachine)
+	mux.HandleFunc("PUT /machines/{name}", s.putMachine)
 	mux.HandleFunc("PUT /machines/{name}/status", s.putMachineStatus)
 	mux.HandleFunc("GET /nodes/{name}", s.getNode)
 	mux.HandleFunc("PUT /nodes/{name}", s.putNode)
@@ -121,6 +124,31 @@ func (s *Server) SetMachine(m api.Machine) {
 	m.Metadata.ResourceVersion = version(s.rev)
 	s.machines[m.Metadata.Name] = m
 	s.record(t, &m)
+}
+
+// BumpVersion changes the stored version of the Machine name without emitting
+// an event, as a write does that a watcher has not yet been told of.
+func (s *Server) BumpVersion(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := s.machines[name]
+	s.rev++
+	m.Metadata.ResourceVersion = version(s.rev)
+	s.machines[name] = m
+}
+
+// MarkDeleting sets deletionTimestamp on the Machine name and emits Modified,
+// as a delete does while a finalizer is held.
+func (s *Server) MarkDeleting(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := s.machines[name]
+	now := time.Now().UTC()
+	m.Metadata.DeletionTimestamp = &now
+	s.rev++
+	m.Metadata.ResourceVersion = version(s.rev)
+	s.machines[name] = m
+	s.record(api.EventModified, &m)
 }
 
 // DeleteMachine removes the Machine name and emits Deleted.

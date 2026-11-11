@@ -35,15 +35,16 @@ type Server struct {
 	// MaxVCPUs, when above zero, is the most vCPUs a Create accepts.
 	MaxVCPUs uint32
 
-	clock    clock.Clock
-	mu       sync.Mutex
-	machines map[string]*v1alpha2.Machine
-	images   []string
-	calls    []string
-	renewals []Renewal
-	events   chan *v1alpha2.WatchEventsResponse
-	sequence uint64
-	capacity *v1alpha2.NodeCapacity
+	clock       clock.Clock
+	mu          sync.Mutex
+	machines    map[string]*v1alpha2.Machine
+	images      []string
+	calls       []string
+	renewals    []Renewal
+	events      chan *v1alpha2.WatchEventsResponse
+	sequence    uint64
+	capacity    *v1alpha2.NodeCapacity
+	failDeletes bool
 }
 
 // New starts a fake mvmd on a socket under t.TempDir, reading time from clk,
@@ -122,6 +123,14 @@ func (s *Server) SetState(id string, state v1alpha2.MachineState, reason string)
 	m.State, m.LastFailureReason = state, reason
 	s.mu.Unlock()
 	s.emit(id, &v1alpha2.WatchEventsResponse{Event: &v1alpha2.WatchEventsResponse_StateChanged{StateChanged: &v1alpha2.StateChanged{State: state}}})
+}
+
+// FailDeletes makes every DeleteMachine fail with a refusal while on
+// is true, so mvmd keeps what it holds.
+func (s *Server) FailDeletes(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failDeletes = on
 }
 
 // Arm applies a deadline renewal as a client of mvmd would.

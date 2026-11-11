@@ -39,9 +39,9 @@ type Config struct {
 	ResyncPeriod time.Duration
 }
 
-// Defaults of the durations that have one. δ has none: it is not measured,
-// so the operator states the value they accept.
+// Defaults of the durations. δ's is provisional: it is not measured.
 const (
+	defaultDelta          = time.Second
 	defaultLeaseDuration  = 30 * time.Second
 	defaultRenewPeriod    = 5 * time.Second
 	defaultDeadlineLength = 15 * time.Second
@@ -74,7 +74,7 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	str(&c.APIServer, "api-server", EnvAPIServer, "root URL of the resource API, up to the group and version")
 	str(&c.NodeName, "node-name", EnvNodeName, "name of this node's Node and Lease")
 	str(&c.MvmdSocket, "mvmd-socket", EnvMvmdSocket, "path of mvmd's runtime API Unix socket")
-	dur(&c.Liveness.Delta, "delta", EnvDelta, 0, "δ, how long a Machine can run past mvmd's recorded deadline expiry; required")
+	dur(&c.Liveness.Delta, "delta", EnvDelta, defaultDelta, "δ, how long a Machine can run past mvmd's recorded deadline expiry")
 	dur(&c.Liveness.LeaseDuration, "lease-duration", EnvLeaseDuration, defaultLeaseDuration, "how long the Lease is valid after a renewal, in whole seconds")
 	dur(&c.Liveness.RenewPeriod, "renew-period", EnvRenewPeriod, defaultRenewPeriod, "time between two renewals of the Lease and the deadline")
 	dur(&c.Liveness.DeadlineLength, "deadline-length", EnvDeadlineLength, defaultDeadlineLength, "length each deadline renewal asks mvmd for")
@@ -97,9 +97,6 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 		if f.value == "" {
 			return Config{}, fmt.Errorf("--%s or %s is required", f.name, f.env)
 		}
-	}
-	if c.Liveness.Delta == 0 {
-		return Config{}, fmt.Errorf("--delta or %s is required: δ has no default", EnvDelta)
 	}
 	if err := c.Liveness.Validate(); err != nil {
 		return Config{}, err
