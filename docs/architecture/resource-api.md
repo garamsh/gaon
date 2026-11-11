@@ -17,7 +17,7 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 - HTTP with JSON bodies on the paths in §Paths.
 - **The root is `/apis/compute.gaon.garam.sh/v1alpha1`** on the API server's address, the Kubernetes `/apis/<group>/<version>` form, which leaves room for the `apps` and `apiextensions` groups beside it. §Paths are relative to it. A client is configured with the full root URL.
 - A watch is a streaming HTTP response of newline-delimited JSON events.
-- No authentication yet: the API server listens only on a local address.
+- Without TLS files the API server serves plain HTTP and refuses any address that is not loopback. With them it serves mutual TLS on any address, loopback included: the caller presents a client certificate that the API server's client CA signed, and a Node Agent's subject CN is its Node name ([ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md)).
 
 ### Common rules
 
@@ -158,7 +158,7 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 
 ## Open questions
 
-- **Authentication** of API callers is deferred; see Transport.
+- **Authorization:** which identity may write which section. The API server authenticates callers (see Transport) and lets any authenticated caller write any path.
 - **Namespace in the path:** whether the paths carry the namespace and in what form.
 - **Admitting a Node:** whether anyone besides a user may set `spec.admitted`.
 - **Unacknowledged renewals:** how the Node Agent bounds the expiry of an mvmd renewal whose acknowledgement never arrived; left to the Node Agent's document.

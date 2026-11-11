@@ -33,3 +33,4 @@ Current architecture of the system and the decisions behind it. This file is the
   - [0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md): gaon owns the Node Agent and depends one way on mvmd and naru, through their APIs.
   - [0003](./adr/0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md): the `v1alpha1` resource API fixes one writer per section and a per-node Lease.
   - [0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md): the Store is etcd, starting as one cell of one member.
+  - [0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md): the API server serves beyond loopback only with mutual TLS.
