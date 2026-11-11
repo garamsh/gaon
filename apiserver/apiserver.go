@@ -17,11 +17,15 @@ import (
 const shutdownTimeout = 5 * time.Second
 
 // Run serves the API on ln over the etcd cell of cfg until ctx ends. It
-// refuses a listener that is not on a loopback address, because the API has
-// no authentication yet.
+// serves mutual TLS where cfg names the TLS files, and without them refuses a
+// listener that is not on a loopback address.
 func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) error {
-	if addr, ok := ln.Addr().(*net.TCPAddr); !ok || !addr.IP.IsLoopback() {
-		return fmt.Errorf("listener %s is not a loopback address", ln.Addr())
+	tlsCfg, err := cfg.serverTLS()
+	if err != nil {
+		return err
+	}
+	if addr, ok := ln.Addr().(*net.TCPAddr); tlsCfg == nil && (!ok || !addr.IP.IsLoopback()) {
+		return fmt.Errorf("listener %s is not a loopback address and no TLS files are given", ln.Addr())
 	}
 	st, err := etcdstore.New(ctx, cfg.Endpoints, cfg.DialTimeout)
 	if err != nil {
@@ -32,9 +36,16 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 		Handler:           newHandler(resourceapi.NewService(st, time.Now), log),
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 10 * time.Second,
+		TLSConfig:         tlsCfg,
 	}
 	done := make(chan error, 1)
-	go func() { done <- srv.Serve(ln) }()
+	go func() {
+		if tlsCfg == nil {
+			done <- srv.Serve(ln)
+			return
+		}
+		done <- srv.ServeTLS(ln, "", "")
+	}()
 	select {
 	case err := <-done:
 		return err

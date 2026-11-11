@@ -30,12 +30,23 @@ func TestParseConfig_Flags(t *testing.T) {
 	assert.Equal(t, 2*time.Second, cfg.DialTimeout)
 }
 
+func TestParseConfig_TLSFlags(t *testing.T) {
+	cfg, err := apiserver.ParseConfig([]string{"-tls-client-ca", "ca.pem", "-tls-cert", "cert.pem", "-tls-key", "key.pem"})
+	require.NoError(t, err)
+	assert.Equal(t, "ca.pem", cfg.TLSClientCA)
+	assert.Equal(t, "cert.pem", cfg.TLSCert)
+	assert.Equal(t, "key.pem", cfg.TLSKey)
+}
+
 func TestParseConfig_Refuses(t *testing.T) {
 	for name, args := range map[string][]string{
 		"no endpoint":      {"-etcd-endpoints", " , "},
 		"zero timeout":     {"-etcd-dial-timeout", "0s"},
 		"negative timeout": {"-etcd-dial-timeout", "-1s"},
 		"unknown flag":     {"-colour"},
+		"only the CA":      {"-tls-client-ca", "ca.pem"},
+		"no key":           {"-tls-client-ca", "ca.pem", "-tls-cert", "cert.pem"},
+		"no CA":            {"-tls-cert", "cert.pem", "-tls-key", "key.pem"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := apiserver.ParseConfig(args)

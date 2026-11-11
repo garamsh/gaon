@@ -30,7 +30,7 @@ The module follows the service layout of the stack convention. A transport at th
 
 Every write to an existing resource carries the version it was read at, and a write without it or with a stale one gets `Conflict`; a write to a resource that does not exist gets `NotFound`. A PUT without a version creates and gets `AlreadyExists` where the name is taken.
 
-- **Sections.** A spec PUT keeps the stored status, binding fields and deletion timestamp; a status PUT keeps the stored spec and metadata; the binding path sets only `spec.nodeName` and `spec.bindingEpoch`. The contract names a writer for each section, and the server cannot tell writers apart, because the API has no authentication (see open questions); it keeps the sections apart by the path a write arrives on.
+- **Sections.** A spec PUT keeps the stored status, binding fields and deletion timestamp; a status PUT keeps the stored spec and metadata; the binding path sets only `spec.nodeName` and `spec.bindingEpoch`. The contract names a writer for each section, and the server cannot tell writers apart, because authentication gives it an identity but no rule on which identity writes which section (see open questions); it keeps the sections apart by the path a write arrives on.
 - **Generation.** The generation of a resource is 1 on creation and grows by one on every write that changes its spec, a binding included.
 - **Creation.** A Machine is created `Pending`, with no node and no epoch; a create that carries a node or an epoch is `Invalid`. A Node is created `Discovered`, whatever status the body carries.
 - **Node state.** A Node status write that changes `status.state` must set the state that agrees with the stored `spec.admitted`: `Admitted` where it is true, `Discovered` where it is false. A write that leaves the state as stored is accepted whatever `spec.admitted` is, so one writer's lag, such as the node lifecycle controller writing `LeaseExpired` while the Node Agent has not yet moved the state, does not block another writer's section. The server does not move the state when the spec changes; the Node Agent does, through a status write.
@@ -41,10 +41,15 @@ Every write to an existing resource carries the version it was read at, and a wr
 
 ### Running
 
-`Run` takes a listener, a configuration and a context, and serves until the context ends, then stops accepting and drains for a short time. It refuses a listener that is not on a loopback address, because nothing authenticates a caller yet. The binary reads the etcd endpoints, the listen address and the dial timeout from flags and defaults to loopback for both. It dials etcd at start and fails if it cannot.
+`Run` takes a listener, a configuration and a context, and serves until the context ends, then stops accepting and drains for a short time. A listener on a loopback address is served as plain HTTP, and any other is served only with mutual TLS: the server requires a client certificate that the client CA signed, and speaks TLS 1.3 or later ([ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md)). Without the TLS flags, `Run` refuses a listener that is not on a loopback address. The binary reads the etcd endpoints, the listen address, the dial timeout and the TLS files from flags and defaults to loopback for the listener.
+
+- `--tls-client-ca`, `--tls-cert` and `--tls-key` are the PEM files of the client CA and of the server's certificate and key. All three are given or none is, and a partial set, or a file that does not load, stops the server at start.
+- The certificate's subject CN is the caller's identity, a Node Agent's being its Node name. The server authenticates and does not yet act on the identity.
+- The server reads the files once at start. It dials etcd at start and fails if it cannot.
 
 ## Rationale
 
+- Mutual TLS beyond loopback, the certificate's CN as identity, and authentication without authorization: [ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md).
 - The Store is etcd, and `resourceVersion`, compare-and-swap and watch map onto etcd's revisions, transactions and watches: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md). Keeping the Store behind an interface of keys and revisions keeps the rules testable against a real etcd without the rules knowing it.
 - One writer per section, and the Lease and the epoch as the fence against a stale writer: [ADR 0003](./adr/0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md). The server holds the invariants the contract gives it; it does not duplicate the rules that `lib/api` owns, so a client and the server cannot disagree about them.
 - The server is its own module with its own binary, a unit of the workspace: [ADR 0001](./adr/0001-the-repository-is-a-go-workspace-of-executable-units-partitioned-by-responsibility.md). It imports `lib/api` and nothing else of gaon.
@@ -52,7 +57,7 @@ Every write to an existing resource carries the version it was read at, and a wr
 
 ## Open questions
 
-- **Authentication.** The contract names a writer for each section, and the server cannot check who writes. Until it can, the loopback restriction is the only boundary, and a client that writes a section it does not own is stopped only by the path.
+- **Authorization.** The contract names a writer for each section, and the server authenticates a caller by its certificate but does not check which identity writes which section. Any authenticated caller may write any path, and a client that writes a section it does not own is stopped only by the path.
 - **Volume creation.** The contract gives a Volume a status path and no create path, so a Volume cannot come into being through this API. Whoever creates Volumes needs a path in the contract, or the server needs to admit an absent Volume on a status write.
 - **Node created with `spec.admitted` true.** The server starts every Node `Discovered`, so one created already admitted waits for the Node Agent to move its state. The contract does not say whether a create may carry `admitted`.
 - **The `Deleted` event.** It carries the last stored value, not the resource as the delete left it, so a consumer sees the finalizer-free state only through the preceding `Modified`. The contract does not say which a consumer should expect.
