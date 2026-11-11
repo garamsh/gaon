@@ -147,7 +147,6 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 - **Namespace in the path:** whether the paths carry the namespace and in what form.
 - **Admitting a Node:** whether anyone besides a user may set `spec.admitted`.
 - **Unacknowledged renewals:** how the Node Agent bounds the expiry of an mvmd renewal whose acknowledgement never arrived; left to the Node Agent's document.
-- **Which unit confirms Lease expiry:** the Scheduler, or the node lifecycle controller; left to those units' documents.
 - **Data-plane route:** how exec, file and console traffic reaches a node.
 - **Numbers:** Lease duration, renew period, expiry margin, deadline length, δ, clock-rate error, OnDemand backoff and the `lastActiveTime` minimum interval (Discussion #2 section 6 item 13).
 - **Store growth and compaction interval:** [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
