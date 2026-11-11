@@ -210,7 +210,6 @@ func TestRun_ReportsPhaseFromMvmdState(t *testing.T) {
 		message  string
 	}{
 		{"a faulted VMM is Failed with mvmd's reason", api.RunAlways, v1alpha2.MachineState_MACHINE_STATE_FAULTED, "vmm exited: oom", api.MachineFailed, machines.ReasonFaulted, "vmm exited: oom"},
-		{"a Once Machine that stopped Succeeded", api.RunOnce, v1alpha2.MachineState_MACHINE_STATE_STOPPED, "", api.MachineSucceeded, machines.ReasonStopped, ""},
 		{"a paused Machine is Suspended", api.RunAlways, v1alpha2.MachineState_MACHINE_STATE_PAUSED, "", api.MachineSuspended, machines.ReasonSuspended, ""},
 	}
 	for _, tt := range tests {

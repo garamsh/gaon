@@ -51,7 +51,9 @@ Every transition below is decided and written by the Node Agent except the rebin
 | any to `Stopped` | `runStrategy` is `Halted` |
 | `Stopped` to `Pending` | `runStrategy` changes from `Halted` |
 | `Running` to `Pending` | exit and `runStrategy` asks for a restart, with backoff |
-| `Running` to `Succeeded` or `Failed` | the result of a `Once` Machine |
+| `Running` to `Succeeded` | a `Once` Machine whose entrypoint exits cleanly |
+| `Running` to `Failed` | a `Once` Machine whose entrypoint exits with a failure |
+| `Running` to `Succeeded` | `RerunOnFailure` and the entrypoint exits cleanly; it is not started again |
 | any to `Failed` | unrecoverable error: image error, no node with a required capability |
 | rebinding, epoch plus one | the node's Lease expiry is confirmed (Scheduler writes `/binding`) |
 

@@ -59,7 +59,7 @@ Every value is a flag with an environment variable as its fallback. A flag given
 - **Remove:** every mvmd machine the agent named that is not a Machine bound here now, whether unbound, bound elsewhere, bound at an older epoch, being deleted or no longer in the API, is stopped and deleted. This also clears what an earlier run left. An mvmd machine whose identifier the agent did not form is left alone.
 - **Status:** the agent writes `phase`, `bindingEpoch` equal to the spec's, `observedGeneration`, `addresses`, `restartCount` and a `Ready` condition, only when they differ from what is stored. `lastExit` is never written: mvmd reports no exit time (garamsh/mvmd#331).
 - **Restart:** under `Always` a Machine that stopped, and under `RerunOnFailure` one that failed, is started again after a wait and not before. The wait is the backoff, doubled for each restart and capped at the maximum, and starts over once the Machine has run for the reset time. A clean exit under `RerunOnFailure` is not restarted. A faulted Machine is stopped first, since mvmd accepts only a stop in that state. A `Halted` Machine resumed is started at once and is not a restart.
-- **Failure:** the agent reads the entrypoint's record from mvmd, exec `entrypoint`, once when it first sees the Machine stopped. The exit failed when the record is `EXITED` with a non-zero exit code or a terminating signal, when there is no `EXITED` record, or when the Machine is faulted; an `EXITED` record with code 0 and no signal is clean. A read that returns no record before the call timeout is a failure; any other error leaves the exit unjudged until the next resync.
+- **Failure:** the agent reads the entrypoint's record from mvmd, exec `entrypoint`, once when it first sees the Machine stopped, under `Once` as under the restarting strategies. The exit failed when the record is `EXITED` with a non-zero exit code or a terminating signal, when there is no `EXITED` record, or when the Machine is faulted; an `EXITED` record with code 0 and no signal is clean. A read that returns no record before the call timeout is a failure; any other error leaves the exit unjudged until the next resync.
 - **`restartCount`:** each restart adds one, written by compare-and-swap with the Machine's epoch checked, so a count of an earlier epoch is never carried into a later one. A write that conflicts is read again and retried, and a restart whose write failed is written by the next round, never counted twice.
 - **Where the state lives:** the wait, the streak and the judged exit are kept in the agent's memory per mvmd machine, so a rebinding starts with none; an agent restart forgets them, and a Machine it finds stopped then waits the first backoff. The exit time is not known (garamsh/mvmd#331), so the reset time is measured from when the agent started the Machine or first saw it running to when it first sees it stopped, which can lag the exit by up to one resync.
 
@@ -69,8 +69,9 @@ Every value is a flag with an environment variable as its fallback. A flag given
 | running | `Running` | true |
 | paused | `Suspended` | false |
 | stopped, `Halted` | `Stopped` | false |
-| stopped, `Once` | `Succeeded` | false |
-| stopped, `RerunOnFailure` after a clean exit | `Pending` | false, not started again |
+| stopped, `Once`, clean exit | `Succeeded` | false, not started again |
+| stopped, `Once`, failed exit | `Failed` | false, reason `ExitFailed` and a message naming the exit, not started again |
+| stopped, `RerunOnFailure` after a clean exit | `Succeeded` | false, not started again |
 | stopped, other | `Pending` | false, started again once the restart wait is over |
 | faulted | `Failed` | false, the reason is mvmd's last failure reason; stopped and started again once the restart wait is over |
 
@@ -97,5 +98,4 @@ Every value is a flag with an environment variable as its fallback. A flag given
 ## Open questions
 
 - **Entrypoint record across a start:** mvmd's documents do not say whether the console log an entrypoint's record is answered from is cleared when a Machine starts. The agent treats a clean record equal to the one it read at the Machine's previous exit as a failure, so a stale record cannot end the restarts; a Machine switched from `Always` to `RerunOnFailure` whose entrypoint keeps exiting cleanly is therefore restarted, at the backoff.
-- **Phase of a clean exit under `RerunOnFailure`:** [resource-api.md](./resource-api.md) defines `Succeeded` only for `Once`, so the Machine stays `Pending` with a message saying it exited cleanly.
 - **Node addresses:** which addresses the agent reports.
