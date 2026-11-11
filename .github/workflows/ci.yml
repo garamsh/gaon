@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: read-all
+
+jobs:
+  ci:
+    # ubuntu-24.04 is a hosted runner label and cannot be pinned by digest;
+    # the "Record the toolchain" step records what it resolved to on each run.
+    # Its mover is a manual bump by the owner of .github/ when GitHub
+    # announces the label's deprecation.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.work
+          cache: false
+      - name: Record the toolchain
+        run: |
+          cat /etc/os-release
+          go version
+          make --version | head -n 1
+      - run: make ci

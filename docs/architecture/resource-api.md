@@ -24,13 +24,14 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 - Each section has one writer: `spec` users and controllers, `/binding` the Scheduler, `/status` the Node Agent for what runs on its node and controllers for the rest.
 - Every write is a compare-and-swap on `resourceVersion`. A change of `spec` is tracked by `generation` and `observedGeneration`.
 - Deletion sets `deletionTimestamp`; the owner of each finalizer removes it when its work is done. Ownership and garbage collection use `ownerReferences`.
+- A `PUT` without `metadata.resourceVersion` creates the object and answers `AlreadyExists` if it exists; a `PUT` with one is the compare-and-swap. A `DELETE` carries the version in the query `resourceVersion`.
 - Enum values are PascalCase, fields camelCase, quantities in `500m` and `4Gi` form, and detail is carried in `conditions`.
 
 ### Machine
 
 - **`spec`:** image, kernel, resources (requests and limits for cpu and memory), root disk size, volumes and mounts, networks, ports, `runStrategy`, `idleTimeoutSeconds`, `nodeSelector`, `requiredCapabilities`.
 - **`runStrategy`:** `Always`, `RerunOnFailure`, `Once`, `OnDemand`, `Halted`.
-- **Set by `/binding` only:** `spec.nodeName` and `spec.bindingEpoch`.
+- **Set by `/binding` only:** `spec.nodeName` and `spec.bindingEpoch`. The first binding sets the epoch to 1, and each binding sets it to the current epoch plus one.
 - **Mutable:** `runStrategy`, `idleTimeoutSeconds`, `resources` and `volumes`, as far as the Driver supports a change while running. Everything else is replaced by a new Machine; MachineDeployment does rolling updates.
 - **`status`:** `phase` (`Pending`, `Running`, `Suspended`, `Succeeded`, `Failed`, `Stopped`), `bindingEpoch`, `observedGeneration`, `conditions`, `restartCount`, `addresses`, `lastActiveTime`, and the exit code and time of the last exit.
 - **A status whose `bindingEpoch` differs from `spec.bindingEpoch` is void** and read as `Pending`, so no one rewrites a dead node's status.
@@ -93,6 +94,8 @@ Relative to the group and version root; where the namespace appears is an open q
 | `POST /machines/{name}/binding` | Scheduler | bind and set the epoch |
 | `PUT /machines/{name}/status` | Node Agent, controllers | report status, epoch checked |
 | `DELETE /machines/{name}` | users | set `deletionTimestamp`; the Node Agent removes its finalizer after release |
+| `GET /machines` | all | list, with the `resourceVersion` to watch from |
+| `GET /machines/{name}` | all | read one Machine |
 | `GET /machines?watch=true` | all | subscribe to changes |
 | `PUT /volumes/{name}/status` | Node Agent, controllers | attachment and volume status |
 | `PUT /leases/{name}` | Node Agent | renew the node's Lease |
@@ -101,8 +104,14 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 
 ### Watch
 
-- A watch resumes from a given `resourceVersion`.
-- An expired `resourceVersion` gets an "expired" error; the client lists again and watches from the list's version.
+- A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required.
+- Each line of the stream is one JSON event with a `type` and an `object`.
+- Event types, PascalCase as every enum is:
+  - `Added`, `Modified` and `Deleted` carry the Machine as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
+  - `Error` carries the error object, and is the last event of its stream.
+- The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422 and `Expired` 410.
+- An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
+- The types are in `lib/api/`: `WatchEvent`, `EventType`, `APIError` and `Reason`.
 
 ## Rationale
 
@@ -115,7 +124,6 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 
 - **Authentication** of API callers is deferred; see Transport.
 - **Namespace in the path:** whether the paths carry the namespace and in what form.
-- **Event shape of a watch:** the names of event types and the error object that carries "expired", left to the first PR of `lib/api` (issue 3).
 - **The pre-registration state:** the `Node` schema, who creates a `Node` for a discovered machine, and what admits it.
 - **Unacknowledged renewals:** how the Node Agent bounds the expiry of an mvmd renewal whose acknowledgement never arrived; left to the Node Agent's document.
 - **Which unit confirms Lease expiry:** the Scheduler, or the node lifecycle controller; left to those units' documents.
