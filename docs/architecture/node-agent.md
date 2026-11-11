@@ -27,7 +27,7 @@ Every value is a flag with an environment variable as its fallback. A flag given
 ### Registration
 
 - The agent creates its Node with an empty `spec`, by a `PUT` without a version, when the API has none, and never writes `spec` again.
-- It writes the Node's `status` by compare-and-swap on every resync: `state` is `Admitted` when a user has set `spec.admitted` and `Discovered` otherwise, `capacity` comes from mvmd's runtime info (cpus as a whole number, memory and storage in bytes, storage being mvmd's state total), and the `Ready` condition is true while mvmd answers.
+- It writes the Node's `status` by compare-and-swap on every resync: `state` is `Admitted` when a user has set `spec.admitted` and `Discovered` otherwise, `capacity` comes from mvmd's runtime info (cpus as a whole number, memory and storage in bytes, storage being mvmd's state total), and the `Ready` condition is true while mvmd answers. When mvmd's runtime info fails, the agent writes `Ready` false with reason `RuntimeUnreachable` and the error as the message, keeps the stored `capacity`, and keeps the condition's transition time while its status and reason are unchanged.
 - It creates the Lease named as the Node on its first round and renews it by compare-and-swap, writing the node as holder.
 
 ### The fencing obligation
@@ -36,6 +36,7 @@ Every value is a flag with an environment variable as its fallback. A flag given
 - **Validity of the Lease** is counted from the start of the latest acknowledged renewal call on the agent's monotonic clock, as [resource-api.md](./resource-api.md) states.
 - **A deadline renewal is sent only if, were mvmd to receive it as late as the call timeout allows, its expiry plus δ is within that validity.** That is the clock reading now, plus the call timeout, the deadline length and δ, no later than the validity. This bounds a renewal whose acknowledgement never arrives, which resource-api.md leaves to this document: mvmd may have recorded it, and it was recorded no later than the call timeout after it was sent.
 - **When the Lease cannot be renewed**, validity stops growing, the check refuses every further deadline renewal once the margin is gone, and mvmd's deadline lapses on its own. The Machines are fenced by mvmd, not by the agent's survival. A failed Lease call makes the agent read the Lease again before the next write.
+- **Every call of a round is bounded** by the call timeout, including the read of mvmd's last applied number, so a runtime that does not answer ends the round with an error and the next round renews the Lease.
 - **The renewal number** sent to mvmd increases monotonically; the agent reads mvmd's last applied number once at start, so a restarted agent continues the sequence.
 - mvmd refuses to start or restore a Machine while its deadline is not armed or has expired; the agent treats that refusal as a failure to retry on the next resync, and the Machine stays `Pending`.
 

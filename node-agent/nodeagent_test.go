@@ -118,9 +118,10 @@ func TestRun_RegistersTheNodeRenewsItsLeaseAndRunsABoundMachine(t *testing.T) {
 		s := gaon.Machine("m1").Status
 		return s.Phase == api.MachineRunning && s.BindingEpoch == 1
 	}, 5*time.Second, 10*time.Millisecond, "the bound Machine runs, which needs the deadline armed by the renewal loop")
-	n, ok := gaon.Node("n1")
-	require.True(t, ok)
-	assert.Equal(t, api.Quantity("8"), n.Status.Capacity.CPU)
+	require.Eventually(t, func() bool {
+		n, ok := gaon.Node("n1")
+		return ok && n.Status.Capacity.CPU == "8"
+	}, 5*time.Second, 10*time.Millisecond, "the Node's status is written by its own loop, independent of the Machine")
 	lease, ok := gaon.Lease("n1")
 	require.True(t, ok)
 	assert.Equal(t, "n1", lease.Spec.Holder)

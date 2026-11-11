@@ -27,18 +27,26 @@ func capacity(c *v1alpha2.NodeCapacity) (api.NodeCapacity, error) {
 	}, nil
 }
 
-// withReady returns conditions with Ready true, keeping the transition time
-// of a Ready that already is true and every other condition as it is.
-func withReady(conditions []api.Condition, now time.Time) []api.Condition {
+// Reasons of the Ready condition.
+const (
+	ReasonRuntimeReachable   = "RuntimeReachable"
+	ReasonRuntimeUnreachable = "RuntimeUnreachable"
+)
+
+// withReady returns conditions with Ready set to status, reason and message.
+// The transition time of a Ready that already has the same status and reason
+// is kept; every other condition is kept as it is.
+func withReady(conditions []api.Condition, status api.ConditionStatus, reason, message string, now time.Time) []api.Condition {
+	t := now.UTC()
 	out := make([]api.Condition, 0, len(conditions)+1)
 	for _, c := range conditions {
-		if c.Type == api.NodeReady && c.Status == api.ConditionTrue {
-			return append(out, conditions...)
-		}
 		if c.Type != api.NodeReady {
 			out = append(out, c)
+			continue
+		}
+		if c.Status == status && c.Reason == reason && c.LastTransitionTime != nil {
+			t = *c.LastTransitionTime
 		}
 	}
-	t := now.UTC()
-	return append(out, api.Condition{Type: api.NodeReady, Status: api.ConditionTrue, Reason: "RuntimeReachable", LastTransitionTime: &t})
+	return append(out, api.Condition{Type: api.NodeReady, Status: status, Reason: reason, Message: message, LastTransitionTime: &t})
 }

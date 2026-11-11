@@ -56,7 +56,7 @@ func start(t *testing.T, armed bool, wrap func(machines.API) machines.API, setup
 		client, e.rt, clk, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { _ = svc.Run(ctx); close(done) }()
+	go func() { svc.Run(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
 	return e
 }

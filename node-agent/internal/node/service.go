@@ -16,11 +16,13 @@ import (
 type Service interface {
 	// Sync creates the Node when the API has none, then writes its status:
 	// state from spec.admitted, capacity from mvmd's runtime info, and the
-	// Ready condition.
+	// Ready condition. When mvmd does not answer, Ready is written false
+	// with the error as its message, the stored capacity is kept, and Sync
+	// returns the error.
 	Sync(ctx context.Context) error
 	// Run calls Sync every period until ctx ends, whether or not a call
 	// succeeded.
-	Run(ctx context.Context, period time.Duration) error
+	Run(ctx context.Context, period time.Duration)
 }
 
 type service struct {
@@ -36,39 +38,47 @@ func NewService(name string, nodes Nodes, runtime Runtime, clk clock.Clock, log 
 	return &service{name: name, nodes: nodes, runtime: runtime, clock: clk, log: log}
 }
 
-func (s *service) Run(ctx context.Context, period time.Duration) error {
+func (s *service) Run(ctx context.Context, period time.Duration) {
 	for {
 		if err := s.Sync(ctx); err != nil && ctx.Err() == nil {
 			s.log.Warn("node sync", "node", s.name, "error", err)
 		}
 		if err := s.clock.Sleep(ctx, period); err != nil {
-			return nil
+			return
 		}
 	}
 }
 
 func (s *service) Sync(ctx context.Context) error {
-	info, err := s.runtime.GetRuntimeInfo(ctx, &v1alpha2.GetRuntimeInfoRequest{})
-	if err != nil {
-		return fmt.Errorf("get runtime info: %w", err)
-	}
-	capacity, err := capacity(info.GetCapacity())
-	if err != nil {
-		return err
+	info, runtimeErr := s.runtime.GetRuntimeInfo(ctx, &v1alpha2.GetRuntimeInfoRequest{})
+	var stored api.NodeCapacity
+	if runtimeErr == nil {
+		var err error
+		if stored, err = capacity(info.GetCapacity()); err != nil {
+			return err
+		}
 	}
 	current, err := s.register(ctx)
 	if err != nil {
 		return err
 	}
 	next := *current
-	next.Status.Capacity = capacity
 	next.Status.State = api.NodeStateDiscovered
 	if current.Spec.Admitted {
 		next.Status.State = api.NodeStateAdmitted
 	}
-	next.Status.Conditions = withReady(current.Status.Conditions, s.clock.Now())
+	if runtimeErr == nil {
+		next.Status.Capacity = stored
+		next.Status.Conditions = withReady(current.Status.Conditions, api.ConditionTrue, ReasonRuntimeReachable, "", s.clock.Now())
+	} else {
+		// The stored capacity stays: it is what the Node last had.
+		next.Status.Conditions = withReady(current.Status.Conditions, api.ConditionFalse, ReasonRuntimeUnreachable, runtimeErr.Error(), s.clock.Now())
+	}
 	if _, err := s.nodes.PutNodeStatus(ctx, &next); err != nil {
 		return fmt.Errorf("put node status: %w", err)
+	}
+	if runtimeErr != nil {
+		return fmt.Errorf("get runtime info: %w", runtimeErr)
 	}
 	return nil
 }

@@ -34,15 +34,15 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 	runs := machines.NewService(cfg.NodeName, machines.Params{Resync: cfg.ResyncPeriod, Retry: cfg.ResyncPeriod}, client, runtime, clk, log)
 
 	var wg sync.WaitGroup
-	for _, run := range []func(context.Context) error{
+	for _, run := range []func(context.Context){
 		live.Run,
-		func(ctx context.Context) error { return nodes.Run(ctx, cfg.ResyncPeriod) },
+		func(ctx context.Context) { nodes.Run(ctx, cfg.ResyncPeriod) },
 		runs.Run,
 	} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = run(ctx)
+			run(ctx)
 		}()
 	}
 	wg.Wait()

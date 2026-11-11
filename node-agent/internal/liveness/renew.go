@@ -57,7 +57,9 @@ func (s *service) renewLease(ctx context.Context) error {
 // within the Lease.
 func (s *service) renewDeadline(ctx context.Context) error {
 	if !s.synced {
-		inspected, err := s.deadline.InspectDeadline(ctx, &v1alpha2.InspectDeadlineRequest{})
+		inspectCtx, cancel := context.WithTimeout(ctx, s.params.RPCTimeout)
+		inspected, err := s.deadline.InspectDeadline(inspectCtx, &v1alpha2.InspectDeadlineRequest{})
+		cancel()
 		if err != nil {
 			return fmt.Errorf("inspect deadline: %w", err)
 		}

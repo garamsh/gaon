@@ -166,15 +166,55 @@ func TestRenew_CreatesTheLeaseNamedAsTheNodeThenRenewsItByVersion(t *testing.T) 
 func TestRun_KeepsTheObligationUntilTheContextEnds(t *testing.T) {
 	e := newEnv(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- e.svc(e.deadl).Run(ctx) }()
+	done := make(chan struct{})
+	go func() { e.svc(e.deadl).Run(ctx); close(done) }()
 	require.Eventually(t, func() bool { return len(e.mvmd.Renewals()) >= 5 }, 5*time.Second, 5*time.Millisecond)
 	e.gaon.FailLeaseWrites(true)
 	n := len(e.gaon.LeaseWrites())
 	require.Eventually(t, func() bool { return e.clock.Now().After(e.lastValidity(t).Add(time.Minute)) }, 5*time.Second, 5*time.Millisecond)
 	cancel()
-	require.NoError(t, <-done)
+	<-done
 	assert.Len(t, e.gaon.LeaseWrites(), n, "setup: no Lease write was acknowledged after the failure")
+	e.assertFenced(t)
+}
+
+// hangInspect is a runtime that does not answer InspectDeadline: the call
+// returns only when its context ends.
+type hangInspect struct {
+	liveness.Deadline
+	on bool
+}
+
+func (h *hangInspect) InspectDeadline(ctx context.Context, in *v1alpha2.InspectDeadlineRequest, opts ...grpc.CallOption) (*v1alpha2.InspectDeadlineResponse, error) {
+	if !h.on {
+		return h.Deadline.InspectDeadline(ctx, in, opts...)
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestRenew_ARuntimeThatDoesNotAnswerInspectDoesNotHoldTheRoundAndTheNextRoundRenewsTheLease(t *testing.T) {
+	e := newEnv(t)
+	hang := &hangInspect{Deadline: e.deadl, on: true}
+	fast := params
+	fast.RPCTimeout = 50 * time.Millisecond // a real timeout: the fake clock does not move contexts
+	svc := liveness.NewService("n1", fast, api.NewClient(e.gaon.URL, nil), hang, e.clock, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	returned := make(chan error, 1)
+	go func() { returned <- svc.Renew(context.Background()) }()
+	select {
+	case err := <-returned:
+		require.Error(t, err, "the round reports the runtime that did not answer")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the round did not return while the runtime does not answer InspectDeadline")
+	}
+	assert.Len(t, e.gaon.LeaseWrites(), 1, "the Lease was renewed in the round that the runtime held")
+
+	hang.on = false
+	e.clock.Advance(params.RenewPeriod)
+	require.NoError(t, svc.Renew(context.Background()), "control: the same service renews once the runtime answers")
+	assert.Len(t, e.gaon.LeaseWrites(), 2, "the next round renews the Lease")
+	assert.Len(t, e.mvmd.Renewals(), 1, "and the deadline")
 	e.assertFenced(t)
 }
 

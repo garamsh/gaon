@@ -15,7 +15,7 @@ type Service interface {
 	// Lease leaves room for it. The error joins what failed.
 	Renew(ctx context.Context) error
 	// Run renews every RenewPeriod until ctx ends.
-	Run(ctx context.Context) error
+	Run(ctx context.Context)
 }
 
 type service struct {
@@ -42,13 +42,13 @@ func NewService(node string, params Params, leases Leases, deadline Deadline, cl
 	return &service{node: node, params: params, leases: leases, deadline: deadline, clock: clk, log: log}
 }
 
-func (s *service) Run(ctx context.Context) error {
+func (s *service) Run(ctx context.Context) {
 	for {
 		if err := s.Renew(ctx); err != nil && ctx.Err() == nil {
 			s.log.Warn("renewal round", "node", s.node, "error", err)
 		}
 		if err := s.clock.Sleep(ctx, s.params.RenewPeriod); err != nil {
-			return nil
+			return
 		}
 	}
 }

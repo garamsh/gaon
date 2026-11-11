@@ -26,7 +26,7 @@ type Params struct {
 type Service interface {
 	// Run lists the Machines, watches them and reconciles on every change and
 	// every Params.Resync, until ctx ends.
-	Run(ctx context.Context) error
+	Run(ctx context.Context)
 }
 
 type service struct {
@@ -44,13 +44,13 @@ func NewService(node string, params Params, api API, runtime Runtime, clk clock.
 	return &service{node: node, params: params, api: api, runtime: runtime, clock: clk, log: log, cache: newCache(node)}
 }
 
-func (s *service) Run(ctx context.Context) error {
+func (s *service) Run(ctx context.Context) {
 	for {
 		if err := s.session(ctx); err != nil && ctx.Err() == nil {
 			s.log.Warn("machine session ended", "node", s.node, "error", err)
 		}
 		if err := s.clock.Sleep(ctx, s.params.Retry); err != nil {
-			return nil
+			return
 		}
 	}
 }
