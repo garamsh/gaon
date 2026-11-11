@@ -36,6 +36,8 @@ Basis: [resource-api.md](./resource-api.md) §Machine, §Node, §Lease and fenci
 
 - It stays unbound. The Scheduler writes `PUT /machines/{name}/status` with a `Scheduled` condition, status `False`, reason `Unschedulable`, whose message gives how many Nodes are eligible of how many exist and the requests that fit none. It sets `phase` to `Pending` when the status has none.
 - A pass whose condition is identical writes nothing.
+- It writes an unbound Machine's `/status` as the controller [resource-api.md](./resource-api.md) §Common rules names for "the rest". An unbound Machine runs on no Node. This follows Kubernetes, where the scheduler writes `PodScheduled`. Decided in the [PR #18 review](https://github.com/garamsh/gaon/pull/18#pullrequestreview-5853380290).
+- A `Scheduled` condition left from before a binding is void once the Machine is bound: binding raises `spec.bindingEpoch`, so the old status reads as `Pending` ([resource-api.md](./resource-api.md) §Machine). The Node Agent's first status at the new epoch replaces it, and no reader acts on the stale condition. Decided in the [PR #18 review](https://github.com/garamsh/gaon/pull/18#pullrequestreview-5853380290).
 
 ## Rationale
 
@@ -47,6 +49,4 @@ Basis: [resource-api.md](./resource-api.md) §Machine, §Node, §Lease and fenci
 - **Driver limits.** garamsh/mvmd#306 has merged, but the Node schema carries no Driver limits, so placement stays within Node capacity and a Create mvmd refuses shows in the Machine's status.
 - **Node `storage` and the root disk.** `status.capacity.storage` and `spec.rootDiskSize` are not compared; only requests are.
 - **`nodeSelector` and `requiredCapabilities`.** The Node schema has no labels or capabilities to match them against, so they are not read.
-- **Who writes the unbound Machine's `/status`.** [resource-api.md](./resource-api.md) §Common rules names the Node Agent and controllers; the Scheduler writes the `Scheduled` condition because the issue asks for the reason in the status.
-- **A stale `Scheduled` condition.** Binding a Machine does not clear its `Unschedulable` condition.
 - **Watching instead of polling,** when the poll interval becomes a cost or a delay worth removing.
