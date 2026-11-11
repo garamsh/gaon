@@ -1,0 +1,139 @@
+package nodeagent_test
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/garamsh/gaon/lib/api"
+	nodeagent "github.com/garamsh/gaon/node-agent"
+	"github.com/garamsh/gaon/node-agent/internal/clock"
+	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
+	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
+	"github.com/garamsh/gaon/node-agent/internal/liveness"
+	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
+)
+
+func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+
+var required = map[string]string{
+	nodeagent.EnvAPIServer:  "http://127.0.0.1:1",
+	nodeagent.EnvNodeName:   "n1",
+	nodeagent.EnvMvmdSocket: "/run/mvmd.sock",
+	nodeagent.EnvDelta:      "3s",
+}
+
+func TestParseConfig_ReadsEveryValueFromItsEnvironmentVariable(t *testing.T) {
+	cfg, err := nodeagent.ParseConfig(nil, env(map[string]string{
+		nodeagent.EnvAPIServer:      "http://api",
+		nodeagent.EnvNodeName:       "node-a",
+		nodeagent.EnvMvmdSocket:     "/s.sock",
+		nodeagent.EnvDelta:          "4s",
+		nodeagent.EnvLeaseDuration:  "40s",
+		nodeagent.EnvRenewPeriod:    "6s",
+		nodeagent.EnvDeadlineLength: "20s",
+		nodeagent.EnvRPCTimeout:     "3s",
+		nodeagent.EnvResyncPeriod:   "7s",
+	}), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, nodeagent.Config{
+		APIServer: "http://api", NodeName: "node-a", MvmdSocket: "/s.sock", ResyncPeriod: 7 * time.Second,
+		Liveness: liveness.Params{LeaseDuration: 40 * time.Second, RenewPeriod: 6 * time.Second, DeadlineLength: 20 * time.Second, Delta: 4 * time.Second, RPCTimeout: 3 * time.Second},
+	}, cfg)
+}
+
+func TestParseConfig_FlagsOverrideEnvironment(t *testing.T) {
+	cfg, err := nodeagent.ParseConfig([]string{"--node-name=from-flag", "--api-server", "http://flag", "--mvmd-socket=/f.sock", "--delta=2s"}, env(required), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, "from-flag", cfg.NodeName)
+	assert.Equal(t, "http://flag", cfg.APIServer)
+	assert.Equal(t, "/f.sock", cfg.MvmdSocket)
+	assert.Equal(t, 2*time.Second, cfg.Liveness.Delta)
+}
+
+func TestParseConfig_RefusesWhatItCannotRunWith(t *testing.T) {
+	tests := []struct {
+		name string
+		drop string
+		set  map[string]string
+		want string
+	}{
+		{"no api server", nodeagent.EnvAPIServer, nil, "api-server"},
+		{"no node name", nodeagent.EnvNodeName, nil, "node-name"},
+		{"no socket", nodeagent.EnvMvmdSocket, nil, "mvmd-socket"},
+		{"no delta, which has no default", nodeagent.EnvDelta, nil, "delta"},
+		{"a duration that is not one", "", map[string]string{nodeagent.EnvRenewPeriod: "soon"}, nodeagent.EnvRenewPeriod},
+		{"durations that do not fit", "", map[string]string{nodeagent.EnvLeaseDuration: "10s"}, "lease duration"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := map[string]string{}
+			for k, v := range required {
+				if k != tt.drop {
+					m[k] = v
+				}
+			}
+			for k, v := range tt.set {
+				m[k] = v
+			}
+			_, err := nodeagent.ParseConfig(nil, env(m), io.Discard)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+	_, err := nodeagent.ParseConfig(nil, env(required), io.Discard)
+	assert.NoError(t, err, "control: the same environment with everything present is accepted")
+}
+
+func TestRun_RegistersTheNodeRenewsItsLeaseAndRunsABoundMachine(t *testing.T) {
+	clk := clock.System{}
+	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clk)
+	cfg := nodeagent.Config{
+		APIServer: gaon.URL, NodeName: "n1", MvmdSocket: mvmd.Socket, ResyncPeriod: 20 * time.Millisecond,
+		Liveness: liveness.Params{LeaseDuration: 30 * time.Second, RenewPeriod: 20 * time.Millisecond, DeadlineLength: 5 * time.Second, Delta: time.Second, RPCTimeout: time.Second},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- nodeagent.Run(ctx, cfg, clk, slog.New(slog.NewTextHandler(io.Discard, nil))) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	gaon.SetMachine(api.Machine{
+		Metadata: api.ObjectMeta{Name: "m1"},
+		Spec: api.MachineSpec{
+			Image:        "registry.example/app@sha256:" + strings.Repeat("b", 64),
+			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "1", Memory: "512Mi"}},
+			RunStrategy:  api.RunAlways,
+			NodeName:     "n1",
+			BindingEpoch: 1,
+		},
+	})
+
+	require.Eventually(t, func() bool {
+		s := gaon.Machine("m1").Status
+		return s.Phase == api.MachineRunning && s.BindingEpoch == 1
+	}, 5*time.Second, 10*time.Millisecond, "the bound Machine runs, which needs the deadline armed by the renewal loop")
+	require.Eventually(t, func() bool {
+		n, ok := gaon.Node("n1")
+		return ok && n.Status.Capacity.CPU == "8"
+	}, 5*time.Second, 10*time.Millisecond, "the Node's status is written by its own loop, independent of the Machine")
+	lease, ok := gaon.Lease("n1")
+	require.True(t, ok)
+	assert.Equal(t, "n1", lease.Spec.Holder)
+	renewals := mvmd.Renewals()
+	require.NotEmpty(t, renewals)
+	assert.Equal(t, 5*time.Second, renewals[0].Length)
+	assert.Equal(t, v1alpha2.MachineState_MACHINE_STATE_RUNNING, mustMachine(t, mvmd, "m1-e1").GetState())
+}
+
+func mustMachine(t *testing.T, m *fakemvmd.Server, id string) *v1alpha2.Machine {
+	t.Helper()
+	got, ok := m.Machine(id)
+	require.True(t, ok)
+	return got
+}
