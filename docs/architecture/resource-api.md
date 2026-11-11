@@ -15,6 +15,7 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 ### Transport
 
 - HTTP with JSON bodies on the paths in §Paths.
+- **The root is `/apis/compute.gaon.garam.sh/v1alpha1`** on the API server's address, the Kubernetes `/apis/<group>/<version>` form, which leaves room for the `apps` and `apiextensions` groups beside it. §Paths are relative to it. A client is configured with the full root URL.
 - A watch is a streaming HTTP response of newline-delimited JSON events.
 - No authentication yet: the API server listens only on a local address.
 
@@ -24,6 +25,7 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 - Each section has one writer: `spec` users and controllers, `/binding` the Scheduler, `/status` the Node Agent for what runs on its node and controllers for the rest.
 - Every write is a compare-and-swap on `resourceVersion`. A change of `spec` is tracked by `generation` and `observedGeneration`.
 - Deletion sets `deletionTimestamp`; the owner of each finalizer removes it when its work is done. Ownership and garbage collection use `ownerReferences`.
+- **A finalizer's owner adds and removes it through `PUT /machines/{name}`**, by compare-and-swap, changing only its own entry of `metadata.finalizers`. The Node Agent's finalizer is `compute.gaon.garam.sh/node-agent`: it adds it before it first starts a Machine bound to its Node, and removes it once a Machine with `deletionTimestamp` set is released on mvmd. The API server removes a Machine on the write that clears its last finalizer.
 - A `PUT` without `metadata.resourceVersion` creates the object and answers `AlreadyExists` if it exists; a `PUT` with one is the compare-and-swap. A `DELETE` carries the version in the query `resourceVersion`.
 - Enum values are PascalCase, fields camelCase, quantities in `500m` and `4Gi` form, and detail is carried in `conditions`.
 
@@ -53,8 +55,9 @@ Every transition below is decided and written by the Node Agent except the rebin
 | any to `Failed` | unrecoverable error: image error, no node with a required capability |
 | rebinding, epoch plus one | the node's Lease expiry is confirmed (Scheduler writes `/binding`) |
 
-- **OnDemand, what the Store holds:** the phase on each transition, and `lastActiveTime` no more often than a configured minimum interval. Momentary activity is not in the Store; the node serves it on the data plane.
+- **OnDemand, what the Store holds:** the phase on each transition, and `lastActiveTime` no more often than a minimum interval, provisionally 60s. Momentary activity is not in the Store; the node serves it on the data plane.
 - **OnDemand, a process that exits by itself:** the Machine goes to `Suspended`, keeping its disk. The exit code and time go into status, and the next demand signal starts it. Exits that repeat without demand back off before the next start.
+- **Restart backoff,** provisionally: 10s, doubled per restart, at most 5 minutes, reset after the Machine has run for 10 minutes. Exits that repeat without demand under OnDemand back off the same way.
 - **Without snapshot support,** `Suspended` means the disk is kept and the process ended; only resume speed differs.
 
 ### Volume
@@ -75,6 +78,7 @@ Every transition below is decided and written by the Node Agent except the rebin
   - `conditions`: each has a `status` of `True`, `False` or `Unknown`, and any other value is refused. `Ready` is written by the Node Agent. `LeaseExpired` is written by the node lifecycle controller.
 - **Each writer changes only its own fields**, by compare-and-swap on the whole object, as §Common rules states for every write.
 - **The Node's Lease** is one Lease per Node, named as the Node.
+- **A Node with no Lease.** The node lifecycle controller also watches Nodes. For a Node whose Lease it has not seen, it counts validity from its first sighting of that Node, for the Lease duration plus the expiry margin. When that elapses with no Lease seen, it writes `LeaseExpired` true with reason `LeaseMissing`. Seeing the Lease afterwards applies the Lease rule: a new version makes it false, with reason `LeaseRenewed`. This keeps invariant 1: without an acknowledged Lease renewal the Node Agent never renews mvmd's node deadline, so no Machine runs on that Node. A Lease cannot be deleted, as §Paths has no such path, so a Node never having had one is the only case.
 - **Placement:** the Scheduler places a Machine only on a Node that is `Admitted`, is `Ready`, and does not have `LeaseExpired` true.
 
 ### Lease and fencing
@@ -84,7 +88,16 @@ Every transition below is decided and written by the Node Agent except the rebin
 - **The Node Agent's validity bound.** After the Store acknowledges a renewal, the Lease is valid for the duration counted from the start of that renewal call on the Node Agent's own monotonic clock, because the observer sees it no earlier.
 - **The fencing obligation.** The Node Agent renews mvmd's node deadline only so that, for each renewal acknowledged at monotonic time `t` with length `L`, `t + L + δ` is no later than the end of validity of the latest acknowledged Lease renewal. mvmd's runtime API gives the bound: a recorded expiry is never later than the acknowledgement time plus the length, and a Machine runs at most δ past it. This keeps invariant 1 when the Node Agent dies.
 - **Rebinding waits for expiry.** The epoch increases only after the node's Lease expiry is confirmed.
-- **Parameters, no values yet:** Lease duration, renew period, the expiry margin, the deadline length, δ (not measured in mvmd either) and the clock-rate error the margin must cover.
+- **Parameters, provisional until measured.** Each binary that takes one as a flag defaults to it:
+
+| Parameter | Value | Basis |
+|---|---|---|
+| Lease duration | 30s | Node Agent's default |
+| Renew period | 5s | Node Agent's default |
+| Deadline length | 15s | Node Agent's default |
+| Call timeout | 2s | Node Agent's default |
+| δ | 1s | not measured in mvmd; above a real-time thread's wake-up and a SIGKILL (mvmd ADR 0003), and the Node Agent's check 30 >= 15 + 1 + 2x2 holds |
+| Expiry margin | 5s | covers the rate error between two monotonic clocks, well under 1% of 30s; a larger margin only delays rebinding |
 
 ### Invariants
 
@@ -99,11 +112,11 @@ Every transition below is decided and written by the Node Agent except the rebin
 
 ### Paths
 
-Relative to the group and version root; where the namespace appears is an open question.
+Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where the namespace appears is an open question.
 
 | Path | Writer | Use |
 |---|---|---|
-| `PUT /machines/{name}` | users, controllers | create and change `spec` |
+| `PUT /machines/{name}` | users, controllers; the Node Agent for its finalizer only | create and change `spec`; add or remove a finalizer |
 | `POST /machines/{name}/binding` | Scheduler | bind and set the epoch |
 | `PUT /machines/{name}/status` | Node Agent, controllers | report status, epoch checked |
 | `DELETE /machines/{name}` | users | set `deletionTimestamp`; the Node Agent removes its finalizer after release |
@@ -148,7 +161,7 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 - **Admitting a Node:** whether anyone besides a user may set `spec.admitted`.
 - **Unacknowledged renewals:** how the Node Agent bounds the expiry of an mvmd renewal whose acknowledgement never arrived; left to the Node Agent's document.
 - **Data-plane route:** how exec, file and console traffic reaches a node.
-- **Numbers:** Lease duration, renew period, expiry margin, deadline length, δ, clock-rate error, OnDemand backoff and the `lastActiveTime` minimum interval (Discussion #2 section 6 item 13).
+- **Numbers:** measuring the provisional values in §Lease and fencing, the restart backoff and the `lastActiveTime` minimum interval (Discussion #2 section 6 item 13).
 - **Store growth and compaction interval:** [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
 - **Placement of other core resources** (Namespace, roles, resource definitions) in an API group, and the extension resources' schemas.
 - **Out of the contract by decision:** Discussion #2 section 6 items 5, 6 and 12 (tenancy, the immediate-bind default, deployment features).
