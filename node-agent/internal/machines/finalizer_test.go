@@ -115,3 +115,18 @@ func TestRun_KeepsItsFinalizerWhileMvmdStillHoldsTheMachine(t *testing.T) {
 	e.mvmd.FailDeletes(false)
 	eventually(t, "released, the Machine is removed", func() bool { return e.gaon.Machine("m1").Metadata.Name == "" })
 }
+
+func TestRun_KeepsItsFinalizerOnADeletingMachineBoundToAnotherNode(t *testing.T) {
+	e := start(t, true, nil)
+	elsewhere := machine("elsewhere", 1, "n2", api.RunAlways)
+	elsewhere.Metadata.Finalizers = []string{machines.Finalizer}
+	e.gaon.SetMachine(elsewhere)
+	e.gaon.SetMachine(machine("mine", 1, node, api.RunAlways))
+	eventually(t, "mine runs", e.running("mine-e1"))
+
+	e.gaon.MarkDeleting("elsewhere")
+	e.gaon.MarkDeleting("mine")
+
+	eventually(t, "control: mine is released and removed", func() bool { return e.gaon.Machine("mine").Metadata.Name == "" })
+	assert.Equal(t, []string{machines.Finalizer}, e.finalizers("elsewhere"), "a Machine bound to another Node is not this agent's to release")
+}

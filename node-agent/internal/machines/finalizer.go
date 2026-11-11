@@ -54,13 +54,13 @@ func (s *service) setFinalizer(ctx context.Context, name string, add bool) error
 }
 
 // release removes the agent's finalizer from every Machine being deleted that
-// carries it and that mvmd no longer holds under any epoch. held names the
-// Machines mvmd still holds.
+// carries it, is bound to this node and is no longer held by mvmd under any
+// epoch. held names the Machines mvmd still holds.
 func (s *service) release(ctx context.Context, held map[string]bool) error {
 	var errs []error
 	for _, name := range s.cache.names() {
 		m := s.cache.machines[name]
-		if m.Metadata.DeletionTimestamp == nil || held[name] || !slices.Contains(m.Metadata.Finalizers, Finalizer) {
+		if m.Spec.NodeName != s.node || m.Metadata.DeletionTimestamp == nil || held[name] || !slices.Contains(m.Metadata.Finalizers, Finalizer) {
 			continue
 		}
 		errs = append(errs, s.setFinalizer(ctx, name, false))

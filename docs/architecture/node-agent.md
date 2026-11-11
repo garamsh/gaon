@@ -34,7 +34,7 @@ Every value is a flag with an environment variable as its fallback. A flag given
 
 - The agent's finalizer is `compute.gaon.garam.sh/node-agent`.
 - **Added** to `metadata.finalizers` before the agent first creates or starts a Machine bound to its Node, so a Machine that is not yet finalized is never run.
-- **Removed** once a Machine with `deletionTimestamp` set is released on mvmd: mvmd holds no machine the agent named after it, under any epoch, by the round's listing of mvmd less what the round removed. A failed stop or delete keeps the finalizer, and the next resync tries again.
+- **Removed** once a Machine bound to its Node with `deletionTimestamp` set is released on mvmd. Released means mvmd holds no machine the agent named after it, under any epoch, by the round's listing of mvmd less what the round removed. A failed stop or delete keeps the finalizer, and the next resync tries again. A Machine bound to another Node keeps the finalizer, since that Node's agent releases it.
 - Both are `PUT /machines/{name}` by compare-and-swap on the version read, changing only the agent's own entry of `metadata.finalizers` and never another's. A conflict is read again and retried, up to three times a round. The API server removes the Machine on the write that clears its last finalizer.
 
 ### The fencing obligation
