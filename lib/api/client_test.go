@@ -188,7 +188,7 @@ func TestClientWritesVolumeStatus(t *testing.T) {
 	assert.ErrorIs(t, err, api.ErrInvalid)
 }
 
-func nextEvent(t *testing.T, w *api.MachineWatch) api.MachineEvent {
+func nextEvent[T any](t *testing.T, w *api.Watch[T]) api.Event[T] {
 	t.Helper()
 	ev, err := w.Next()
 	require.NoError(t, err)
@@ -212,19 +212,19 @@ func TestClientWatchResumesFromAVersion(t *testing.T) {
 
 	ev := nextEvent(t, w)
 	assert.Equal(t, api.EventModified, ev.Type, "the watch resumes after the version it was given")
-	assert.Equal(t, second.Metadata.ResourceVersion, ev.Machine.Metadata.ResourceVersion)
+	assert.Equal(t, second.Metadata.ResourceVersion, ev.Object.Metadata.ResourceVersion)
 
 	third, err := c.PutMachine(ctx, newMachine("m2"))
 	require.NoError(t, err)
 	ev = nextEvent(t, w)
 	assert.Equal(t, api.EventAdded, ev.Type, "a change made while watching is delivered")
-	assert.Equal(t, third.Metadata.ResourceVersion, ev.Machine.Metadata.ResourceVersion)
+	assert.Equal(t, third.Metadata.ResourceVersion, ev.Object.Metadata.ResourceVersion)
 
 	_, err = c.DeleteMachine(ctx, "m2", third.Metadata.ResourceVersion)
 	require.NoError(t, err)
 	ev = nextEvent(t, w)
 	assert.Equal(t, api.EventDeleted, ev.Type)
-	assert.Equal(t, "m2", ev.Machine.Metadata.Name)
+	assert.Equal(t, "m2", ev.Object.Metadata.Name)
 }
 
 func TestClientWatchFromAnExpiredVersionIsExpiredAndRelistRecovers(t *testing.T) {
@@ -238,7 +238,7 @@ func TestClientWatchFromAnExpiredVersionIsExpiredAndRelistRecovers(t *testing.T)
 	live, err := c.WatchMachines(ctx, first.Metadata.ResourceVersion)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = live.Close() })
-	assert.Equal(t, "m2", nextEvent(t, live).Machine.Metadata.Name, "before compaction the same version resumes")
+	assert.Equal(t, "m2", nextEvent(t, live).Object.Metadata.Name, "before compaction the same version resumes")
 
 	s.compact()
 
@@ -261,7 +261,7 @@ func TestClientWatchFromAnExpiredVersionIsExpiredAndRelistRecovers(t *testing.T)
 	added, err := c.PutMachine(ctx, newMachine("m3"))
 	require.NoError(t, err)
 	ev := nextEvent(t, recovered)
-	assert.Equal(t, added.Metadata.ResourceVersion, ev.Machine.Metadata.ResourceVersion, "watching from the list's version delivers what follows it")
+	assert.Equal(t, added.Metadata.ResourceVersion, ev.Object.Metadata.ResourceVersion, "watching from the list's version delivers what follows it")
 }
 
 func TestClientWatchRequiresAVersion(t *testing.T) {

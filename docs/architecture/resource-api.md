@@ -8,7 +8,7 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 
 ### Naming and groups
 
-- **`Machine` is the microVM.** A physical machine is the core resource `Node`. A machine naru has discovered but gaon has not admitted is a `Node` in the pre-registration state `Discovered`. There is no Host resource. The `Node` schema beyond this is not decided.
+- **`Machine` is the microVM.** A physical machine is the core resource `Node`. A machine naru has discovered but gaon has not admitted is a `Node` whose state is `Discovered`. There is no Host resource. The `Node` schema is in §Node.
 - **API group suffix `gaon.garam.sh`:** `compute.gaon.garam.sh/v1alpha1` holds the core resources named here, `apps.gaon.garam.sh` the default extensions, `apiextensions.gaon.garam.sh` the resource definitions.
 - **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Machine, Volume, roles and bindings, resource definitions, the Driver interface. MachineSet, MachineDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no Machine runs before its network policy is applied, and the default network blocks all outside traffic.
 
@@ -64,6 +64,19 @@ Every transition below is decided and written by the Node Agent except the rebin
 - **Attachment is a compare-and-swap by the Node Agent** on `status.attachment`. It succeeds only if `attachment` is empty or its epoch is lower than the Machine's current epoch.
 - A node-local volume pins its Machine to that node; moving between nodes is out of the first scope.
 
+### Node
+
+- **`spec`, written by users:** `admitted` (boolean). A user admits a Node by setting it. Until then the Node is `Discovered`.
+- **Creation:** the Node Agent creates its Node on registration, with an empty `spec`, by a `PUT` without a version, and the API server sets `status.state` to `Discovered` on creation. This is the one write to a Node's `spec` path the Node Agent makes, and it makes it only to create.
+- **`status`:**
+  - `state`: `Discovered` while `spec.admitted` is false, `Admitted` once it is true. The Node Agent writes it. Any other value is refused.
+  - `capacity`: cpu, memory and storage, from mvmd's runtime info. The Node Agent writes it.
+  - `addresses`: the Node Agent writes it.
+  - `conditions`: each has a `status` of `True`, `False` or `Unknown`, and any other value is refused. `Ready` is written by the Node Agent. `LeaseExpired` is written by the node lifecycle controller.
+- **Each writer changes only its own fields**, by compare-and-swap on the whole object, as §Common rules states for every write.
+- **The Node's Lease** is one Lease per Node, named as the Node.
+- **Placement:** the Scheduler places a Machine only on a Node that is `Admitted`, is `Ready`, and does not have `LeaseExpired` true.
+
 ### Lease and fencing
 
 - **A Lease per node, separate from `Node`.** It holds a holder, a renew time and a duration, and the Node Agent renews it by compare-and-swap.
@@ -98,7 +111,15 @@ Relative to the group and version root; where the namespace appears is an open q
 | `GET /machines/{name}` | all | read one Machine |
 | `GET /machines?watch=true` | all | subscribe to changes |
 | `PUT /volumes/{name}/status` | Node Agent, controllers | attachment and volume status |
-| `PUT /leases/{name}` | Node Agent | renew the node's Lease |
+| `PUT /nodes/{name}` | users, Node Agent | users create a Node and admit it; the Node Agent only creates it |
+| `PUT /nodes/{name}/status` | Node Agent, controllers | report state, capacity, addresses and conditions |
+| `GET /nodes` | all | list, with the `resourceVersion` to watch from |
+| `GET /nodes/{name}` | all | read one Node |
+| `GET /nodes?watch=true` | all | subscribe to changes |
+| `PUT /leases/{name}` | Node Agent | create and renew the node's Lease |
+| `GET /leases` | all | list, with the `resourceVersion` to watch from |
+| `GET /leases/{name}` | all | read one Lease |
+| `GET /leases?watch=true` | all | subscribe to changes |
 
 Wake, exec, file API and console are data-plane features and are not recorded in the Store.
 
@@ -124,7 +145,7 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 
 - **Authentication** of API callers is deferred; see Transport.
 - **Namespace in the path:** whether the paths carry the namespace and in what form.
-- **The pre-registration state:** the `Node` schema, who creates a `Node` for a discovered machine, and what admits it.
+- **Admitting a Node:** whether anyone besides a user may set `spec.admitted`.
 - **Unacknowledged renewals:** how the Node Agent bounds the expiry of an mvmd renewal whose acknowledgement never arrived; left to the Node Agent's document.
 - **Which unit confirms Lease expiry:** the Scheduler, or the node lifecycle controller; left to those units' documents.
 - **Data-plane route:** how exec, file and console traffic reaches a node.

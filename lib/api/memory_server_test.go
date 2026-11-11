@@ -28,6 +28,7 @@ type memoryServer struct {
 
 type loggedEvent struct {
 	rev   int64
+	kind  string
 	event api.WatchEvent
 }
 
@@ -39,10 +40,22 @@ func newMemoryServer(t *testing.T) (*memoryServer, *api.Client) {
 	mux.HandleFunc("POST /machines/{name}/binding", s.bindMachine)
 	mux.HandleFunc("PUT /machines/{name}/status", s.putMachineStatus)
 	mux.HandleFunc("DELETE /machines/{name}", s.deleteMachine)
-	mux.HandleFunc("GET /machines/{name}", s.getMachine)
-	mux.HandleFunc("GET /machines", s.listOrWatchMachines)
+	mux.HandleFunc("GET /machines/{name}", getObject[api.Machine](s, "machines/"))
+	mux.HandleFunc("GET /machines", listOrWatch(s, "machines/", api.KindMachine, func(items []api.Machine, rv api.ResourceVersion) any {
+		return &api.MachineList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachineList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
 	mux.HandleFunc("PUT /volumes/{name}/status", s.putVolumeStatus)
+	mux.HandleFunc("PUT /nodes/{name}", s.putNode)
+	mux.HandleFunc("PUT /nodes/{name}/status", s.putNodeStatus)
+	mux.HandleFunc("GET /nodes/{name}", getObject[api.Node](s, "nodes/"))
+	mux.HandleFunc("GET /nodes", listOrWatch(s, "nodes/", api.KindNode, func(items []api.Node, rv api.ResourceVersion) any {
+		return &api.NodeList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindNodeList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
 	mux.HandleFunc("PUT /leases/{name}", s.putLease)
+	mux.HandleFunc("GET /leases/{name}", getObject[api.Lease](s, "leases/"))
+	mux.HandleFunc("GET /leases", listOrWatch(s, "leases/", api.KindLease, func(items []api.Lease, rv api.ResourceVersion) any {
+		return &api.LeaseList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindLeaseList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return s, api.NewClient(ts.URL, ts.Client())
@@ -152,43 +165,46 @@ func (s *memoryServer) deleteMachine(w http.ResponseWriter, r *http.Request) {
 	delete(s.objects, "machines/"+name)
 	s.rev++
 	m.Metadata.ResourceVersion = api.ResourceVersion(strconv.FormatInt(s.rev, 10))
-	s.record(&m, api.EventDeleted)
+	record(s, api.KindMachine, &m, api.EventDeleted)
 	writeJSON(w, http.StatusOK, &m)
 }
 
-func (s *memoryServer) getMachine(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	m, found := s.loadMachine(r.PathValue("name"))
-	if !found {
-		writeError(w, api.NewAPIError(api.ReasonNotFound, "machine %q not found", r.PathValue("name")))
-		return
-	}
-	writeJSON(w, http.StatusOK, &m)
-}
-
-func (s *memoryServer) listOrWatchMachines(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("watch") == "true" {
-		s.watchMachines(w, r)
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	list := api.MachineList{
-		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachineList},
-		Metadata: api.ListMeta{ResourceVersion: api.ResourceVersion(strconv.FormatInt(s.rev, 10))},
-		Items:    []api.Machine{},
-	}
-	for key := range s.objects {
-		if name, ok := strings.CutPrefix(key, "machines/"); ok {
-			m, _ := s.loadMachine(name)
-			list.Items = append(list.Items, m)
+// getObject answers GET of one object stored under prefix.
+func getObject[T any](s *memoryServer, prefix string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		obj, found := load[T](s, prefix+r.PathValue("name"))
+		if !found {
+			writeError(w, api.NewAPIError(api.ReasonNotFound, "%q not found", r.PathValue("name")))
+			return
 		}
+		writeJSON(w, http.StatusOK, &obj)
 	}
-	writeJSON(w, http.StatusOK, &list)
 }
 
-func (s *memoryServer) watchMachines(w http.ResponseWriter, r *http.Request) {
+// listOrWatch answers GET of a collection: the list build makes of the
+// objects under prefix, or with watch=true the events of kind.
+func listOrWatch[T any](s *memoryServer, prefix, kind string, build func([]T, api.ResourceVersion) any) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("watch") == "true" {
+			s.watch(w, r, kind)
+			return
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		items := []T{}
+		for key := range s.objects {
+			if strings.HasPrefix(key, prefix) {
+				obj, _ := load[T](s, key)
+				items = append(items, obj)
+			}
+		}
+		writeJSON(w, http.StatusOK, build(items, api.ResourceVersion(strconv.FormatInt(s.rev, 10))))
+	}
+}
+
+func (s *memoryServer) watch(w http.ResponseWriter, r *http.Request, kind string) {
 	from, err := strconv.ParseInt(r.URL.Query().Get("resourceVersion"), 10, 64)
 	if err != nil {
 		writeError(w, api.NewAPIError(api.ReasonInvalid, "resourceVersion is not a version"))
@@ -215,10 +231,13 @@ func (s *memoryServer) watchMachines(w http.ResponseWriter, r *http.Request) {
 		changed := s.changed
 		s.mu.Unlock()
 		for _, l := range pending {
+			from = l.rev
+			if l.kind != kind {
+				continue
+			}
 			if err := enc.Encode(l.event); err != nil {
 				return
 			}
-			from = l.rev
 		}
 		flusher.Flush()
 		select {
@@ -278,10 +297,58 @@ func (s *memoryServer) putLease(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	s.rev++
-	l.Metadata.ResourceVersion = api.ResourceVersion(strconv.FormatInt(s.rev, 10))
-	s.objects[key] = mustJSON(&l)
-	writeJSON(w, http.StatusOK, &l)
+	t := api.EventAdded
+	if found {
+		t = api.EventModified
+	}
+	store(s, w, key, api.KindLease, &l.Metadata, &l, t)
+}
+
+func (s *memoryServer) putNode(w http.ResponseWriter, r *http.Request) {
+	var n api.Node
+	if !decodeBody(w, r, &n) || !s.nameMatches(w, r, n.Metadata.Name) {
+		return
+	}
+	if err := n.Validate(); err != nil {
+		writeError(w, err)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := "nodes/" + n.Metadata.Name
+	old, found := load[api.Node](s, key)
+	if err := s.checkVersion(found, old.Metadata.ResourceVersion, n.Metadata.ResourceVersion, n.Metadata.Name); err != nil {
+		writeError(w, err)
+		return
+	}
+	if found {
+		n.Status = old.Status
+		store(s, w, key, api.KindNode, &n.Metadata, &n, api.EventModified)
+		return
+	}
+	n.Status = api.NodeStatus{State: api.NodeStateDiscovered}
+	store(s, w, key, api.KindNode, &n.Metadata, &n, api.EventAdded)
+}
+
+func (s *memoryServer) putNodeStatus(w http.ResponseWriter, r *http.Request) {
+	var next api.Node
+	if !decodeBody(w, r, &next) || !s.nameMatches(w, r, next.Metadata.Name) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := "nodes/" + next.Metadata.Name
+	n, found := load[api.Node](s, key)
+	if err := s.requireVersion(found, n.Metadata.ResourceVersion, next.Metadata.ResourceVersion, next.Metadata.Name); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := next.ValidateStatus(); err != nil {
+		writeError(w, err)
+		return
+	}
+	n.Status = next.Status
+	store(s, w, key, api.KindNode, &n.Metadata, &n, api.EventModified)
 }
 
 func (s *memoryServer) loadMachine(name string) (api.Machine, bool) {
@@ -293,21 +360,35 @@ func (s *memoryServer) loadMachine(name string) (api.Machine, bool) {
 	return m, found
 }
 
-// storeMachine writes m at a new revision, logs the event and answers with m.
-func (s *memoryServer) storeMachine(w http.ResponseWriter, m *api.Machine, t api.EventType) {
-	s.rev++
-	m.Metadata.ResourceVersion = api.ResourceVersion(strconv.FormatInt(s.rev, 10))
-	s.objects["machines/"+m.Metadata.Name] = mustJSON(m)
-	s.record(m, t)
-	writeJSON(w, http.StatusOK, m)
+func load[T any](s *memoryServer, key string) (T, bool) {
+	var obj T
+	raw, found := s.objects[key]
+	if found {
+		_ = json.Unmarshal(raw, &obj)
+	}
+	return obj, found
 }
 
-func (s *memoryServer) record(m *api.Machine, t api.EventType) {
-	ev, err := api.NewMachineEvent(t, m)
+// storeMachine writes m at a new revision, logs the event and answers with m.
+func (s *memoryServer) storeMachine(w http.ResponseWriter, m *api.Machine, t api.EventType) {
+	store(s, w, "machines/"+m.Metadata.Name, api.KindMachine, &m.Metadata, m, t)
+}
+
+// store writes obj at a new revision, logs the event and answers with obj.
+func store[T any](s *memoryServer, w http.ResponseWriter, key, kind string, meta *api.ObjectMeta, obj *T, t api.EventType) {
+	s.rev++
+	meta.ResourceVersion = api.ResourceVersion(strconv.FormatInt(s.rev, 10))
+	s.objects[key] = mustJSON(obj)
+	record(s, kind, obj, t)
+	writeJSON(w, http.StatusOK, obj)
+}
+
+func record[T any](s *memoryServer, kind string, obj *T, t api.EventType) {
+	ev, err := api.NewEvent(t, obj)
 	if err != nil {
 		panic(err)
 	}
-	s.log = append(s.log, loggedEvent{rev: s.rev, event: ev})
+	s.log = append(s.log, loggedEvent{rev: s.rev, kind: kind, event: ev})
 	close(s.changed)
 	s.changed = make(chan struct{})
 }
