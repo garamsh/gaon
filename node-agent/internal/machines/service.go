@@ -43,15 +43,19 @@ type service struct {
 	params  Params
 	api     API
 	runtime Runtime
+	network Network
+	storage Storage
 	clock   clock.Clock
 	log     *slog.Logger
 	cache   *cache
 	runs    map[string]*run
 }
 
-// NewService returns a Service for the Machines bound to the node named node.
-func NewService(node string, params Params, api API, runtime Runtime, clk clock.Clock, log *slog.Logger) Service {
-	return &service{node: node, params: params, api: api, runtime: runtime, clock: clk, log: log, cache: newCache(node), runs: map[string]*run{}}
+// NewService returns a Service for the Machines bound to the node named node,
+// which creates each with the policy network gives and the disks storage
+// readies.
+func NewService(node string, params Params, api API, runtime Runtime, network Network, storage Storage, clk clock.Clock, log *slog.Logger) Service {
+	return &service{node: node, params: params, api: api, runtime: runtime, network: network, storage: storage, clock: clk, log: log, cache: newCache(node), runs: map[string]*run{}}
 }
 
 func (s *service) Run(ctx context.Context) {

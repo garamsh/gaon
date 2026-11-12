@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/node-agent/internal/liveness"
+	"github.com/garamsh/gaon/node-agent/internal/machines"
 )
 
 // Environment variables, each the fallback of the flag named beside it.
@@ -33,6 +35,11 @@ const (
 	EnvRestartBackoff    = "GAON_RESTART_BACKOFF"
 	EnvRestartBackoffMax = "GAON_RESTART_BACKOFF_MAX"
 	EnvRestartResetAfter = "GAON_RESTART_RESET_AFTER"
+
+	EnvNetworkPlugin = "GAON_NETWORK_PLUGIN"
+	EnvStoragePlugin = "GAON_STORAGE_PLUGIN"
+	EnvEgressPrefix  = "GAON_EGRESS_PREFIX"
+	EnvIngressPrefix = "GAON_INGRESS_PREFIX"
 )
 
 // Config is what the agent is started with.
@@ -65,6 +72,11 @@ type Config struct {
 	// RestartResetAfter is how long a Machine runs before the wait starts
 	// again from RestartBackoff.
 	RestartResetAfter time.Duration
+	// Network decides the network policy each Machine is created with, and
+	// Storage the disks. They are the plugins --network-plugin and
+	// --storage-plugin name.
+	Network machines.Network
+	Storage machines.Storage
 }
 
 // Defaults of the durations. δ's is provisional: it is not measured.
@@ -80,6 +92,9 @@ const (
 	defaultRestartBackoff    = 10 * time.Second
 	defaultRestartBackoffMax = 5 * time.Minute
 	defaultRestartResetAfter = 10 * time.Minute
+
+	defaultNetworkPlugin = "default"
+	defaultStoragePlugin = "none"
 )
 
 // ParseConfig reads the flags in args. A flag not given falls back to its
@@ -88,6 +103,7 @@ const (
 func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Config, error) {
 	var c Config
 	var errs []error
+	seen := map[string]bool{}
 	fs := flag.NewFlagSet("gaon-node-agent", flag.ContinueOnError)
 	fs.SetOutput(out)
 	str := func(p *string, name, env, usage string) {
@@ -123,6 +139,25 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	dur(&c.RestartBackoff, "restart-backoff", EnvRestartBackoff, defaultRestartBackoff, "wait before a Machine's first restart, doubled with each restart")
 	dur(&c.RestartBackoffMax, "restart-backoff-max", EnvRestartBackoffMax, defaultRestartBackoffMax, "longest wait before a restart")
 	dur(&c.RestartResetAfter, "restart-reset-after", EnvRestartResetAfter, defaultRestartResetAfter, "how long a Machine runs before the restart wait starts again from the first")
+	var networkPlugin, storagePlugin string
+	var egress, ingress []string
+	fs.StringVar(&networkPlugin, "network-plugin", orDefault(getenv(EnvNetworkPlugin), defaultNetworkPlugin), "network plugin, which decides each Machine's network policy (env "+EnvNetworkPlugin+")")
+	fs.StringVar(&storagePlugin, "storage-plugin", orDefault(getenv(EnvStoragePlugin), defaultStoragePlugin), "storage plugin, which decides each Machine's disks (env "+EnvStoragePlugin+")")
+	prefixes := func(p *[]string, name, env, usage string) {
+		if v := getenv(env); v != "" {
+			*p = strings.Split(v, ",")
+		}
+		fs.Func(name, usage+", repeatable (env "+env+", comma separated)", func(v string) error {
+			if len(*p) > 0 && !seen[name] {
+				*p = nil
+			}
+			seen[name] = true
+			*p = append(*p, v)
+			return nil
+		})
+	}
+	prefixes(&egress, "egress-prefix", EnvEgressPrefix, "CIDR a Machine may send to over any protocol, for the default network plugin")
+	prefixes(&ingress, "ingress-prefix", EnvIngressPrefix, "CIDR a Machine's ports accept TCP from, for the default network plugin")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -148,6 +183,13 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	if err := c.Liveness.Validate(); err != nil {
 		return Config{}, err
 	}
+	var err error
+	if c.Network, err = newNetwork(networkPlugin, egress, ingress); err != nil {
+		return Config{}, err
+	}
+	if c.Storage, err = newStorage(storagePlugin); err != nil {
+		return Config{}, err
+	}
 	if tokenFile != "" || c.CertDir != "" {
 		token, err := bootstrapToken(tokenFile, c.CertDir, tlsFiles)
 		if err != nil {
@@ -156,9 +198,15 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 		c.TLSCA, c.BootstrapToken = tlsFiles.CA, token
 		return c, nil
 	}
-	var err error
 	if c.HTTPClient, err = tlsFiles.Client(); err != nil {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }
