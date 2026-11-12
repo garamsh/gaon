@@ -22,7 +22,20 @@ var listKinds = map[string]string{
 	"nodes":    api.KindNodeList,
 	"leases":   api.KindLeaseList,
 	"volumes":  "VolumeList",
+
+	"clusterroles":               api.KindClusterRoleList,
+	"clusterrolebindings":        api.KindClusterRoleBindingList,
+	"customresourcedefinitions":  api.KindCustomResourceDefinitionList,
+	"certificatesigningrequests": api.KindCertificateSigningRequestList,
+	"widgets":                    "WidgetList",
+	"gadgets":                    "GadgetList",
+	"things":                     "ThingList",
 }
+
+// computePrefix is where the fake serves the compute group, which --server
+// names. Its paths are kept and recorded without it; the paths of every other
+// group are kept and recorded in full.
+const computePrefix = "/apis/" + api.GroupVersion
 
 // fakeServer is an in-memory resource API: objects by path, one revision
 // counter, and a compare-and-swap on resourceVersion for every write.
@@ -73,6 +86,19 @@ func (f *fakeServer) count() int {
 	return len(f.requests)
 }
 
+// writes counts the requests that are not reads.
+func (f *fakeServer) writes() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, r := range f.requests {
+		if !strings.HasPrefix(r, http.MethodGet+" ") {
+			n++
+		}
+	}
+	return n
+}
+
 func (f *fakeServer) seen() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -95,22 +121,32 @@ func (f *fakeServer) store(path string, obj map[string]any) api.ResourceVersion 
 func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	// path is the key the object is stored under, and groupVersion the one
+	// its list reports.
+	// A path outside /apis is the compute group served at the root, as for a
+	// --server that does not end in computePrefix.
+	path, groupVersion := r.URL.Path, api.GroupVersion
+	rest := path
+	if p, ok := strings.CutPrefix(path, computePrefix); ok {
+		path, rest = p, p
+	} else if parts := strings.SplitN(strings.Trim(path, "/"), "/", 4); len(parts) == 4 && parts[0] == "apis" {
+		rest, groupVersion = "/"+parts[3], parts[1]+"/"+parts[2]
+	}
+	f.requests = append(f.requests, r.Method+" "+path)
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
 	collection := parts[0]
 	if _, ok := listKinds[collection]; !ok || len(parts) > 2 {
 		fail(w, api.ReasonNotFound, "no such path")
 		return
 	}
 	if len(parts) == 1 && r.Method == http.MethodGet {
-		f.list(w, collection)
+		f.list(w, path, groupVersion, collection)
 		return
 	}
 	if len(parts) != 2 {
 		fail(w, api.ReasonNotFound, "no such path")
 		return
 	}
-	path := r.URL.Path
 	switch r.Method {
 	case http.MethodGet:
 		obj, ok := f.objects[path]
@@ -186,10 +222,10 @@ func (f *fakeServer) remove(w http.ResponseWriter, path, rv string) {
 	reply(w, f.objects[path])
 }
 
-func (f *fakeServer) list(w http.ResponseWriter, collection string) {
+func (f *fakeServer) list(w http.ResponseWriter, collectionPath, groupVersion, collection string) {
 	var paths []string
 	for p := range f.objects {
-		if strings.HasPrefix(p, "/"+collection+"/") {
+		if strings.HasPrefix(p, collectionPath+"/") {
 			paths = append(paths, p)
 		}
 	}
@@ -199,7 +235,7 @@ func (f *fakeServer) list(w http.ResponseWriter, collection string) {
 		items = append(items, f.objects[p])
 	}
 	reply(w, map[string]any{
-		"apiVersion": api.GroupVersion,
+		"apiVersion": groupVersion,
 		"kind":       listKinds[collection],
 		"metadata":   map[string]any{"resourceVersion": strconv.Itoa(f.rev)},
 		"items":      items,

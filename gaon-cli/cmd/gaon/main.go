@@ -41,5 +41,5 @@ func run(ctx context.Context, args []string, defaultServer string, stdout, stder
 		fmt.Fprintf(stderr, "gaon: %v\n", err)
 		return command.ExitUsage
 	}
-	return command.Run(ctx, api.NewClient(*server, httpClient), fs.Args(), stdout, stderr)
+	return command.Run(ctx, *server, httpClient, fs.Args(), stdout, stderr)
 }

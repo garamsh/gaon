@@ -14,8 +14,9 @@ import (
 
 // document is one YAML document of an apply file, as JSON.
 type document struct {
-	apiKind string
-	json    []byte
+	apiVersion string
+	apiKind    string
+	json       []byte
 }
 
 // parseDocuments splits a YAML stream into its documents. An empty document
@@ -43,7 +44,7 @@ func parseDocuments(data []byte) ([]document, error) {
 		if err := json.Unmarshal(raw, &t); err != nil {
 			return nil, fmt.Errorf("document %d: want a mapping with apiVersion and kind: %w", n, err)
 		}
-		docs = append(docs, document{apiKind: t.Kind, json: raw})
+		docs = append(docs, document{apiVersion: t.APIVersion, apiKind: t.Kind, json: raw})
 	}
 }
 

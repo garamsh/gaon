@@ -49,10 +49,17 @@ spec:
 `
 
 // execute runs one gaon command against f and returns what it printed.
+// --server is the compute group's root.
 func execute(t *testing.T, f *fakeServer, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
+	return executeAt(t, f.url()+computePrefix, args...)
+}
+
+// executeAt runs one gaon command with --server set to server.
+func executeAt(t *testing.T, server string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
 	var out, errOut bytes.Buffer
-	code = command.Run(context.Background(), api.NewClient(f.url(), nil), args, &out, &errOut)
+	code = command.Run(context.Background(), server, nil, args, &out, &errOut)
 	return out.String(), errOut.String(), code
 }
 
@@ -204,7 +211,7 @@ metadata:
 
 			assert.Equal(t, command.ExitFailure, code)
 			assert.Contains(t, stderr, tt.message)
-			assert.Zero(t, f.count(), "requests sent")
+			assert.Zero(t, f.writes(), "writes sent")
 		})
 	}
 
@@ -212,7 +219,7 @@ metadata:
 		f := newFakeServer(t)
 		_, stderr, code := execute(t, f, "apply", "-f", writeFile(t, machineYAML))
 		require.Equal(t, command.ExitOK, code, stderr)
-		assert.NotZero(t, f.count())
+		assert.NotZero(t, f.writes())
 	})
 }
 
@@ -606,7 +613,7 @@ func TestVerbWithoutAPath_IsRefusedLocallyNamingThePath(t *testing.T) {
 func TestUnknownKind_IsRefusedWithTheKindsThereAreAndAKnownOneIsServed(t *testing.T) {
 	f := newFakeServer(t)
 	seedCluster(t, f)
-	before := f.count()
+	before := f.writes()
 
 	for _, args := range [][]string{
 		{"get", "widget"},
@@ -622,13 +629,13 @@ func TestUnknownKind_IsRefusedWithTheKindsThereAreAndAKnownOneIsServed(t *testin
 		assert.Contains(t, message, "unknown kind", args)
 		assert.Contains(t, message, "want one of machine (machines, mc)", args)
 	}
-	assert.Equal(t, before, f.count(), "requests sent")
+	assert.Equal(t, before, f.writes(), "writes sent")
 
 	for _, args := range [][]string{{"get", "machines"}, {"describe", "mc", "web"}, {"delete", "machine", "old"}} {
 		_, stderr, code := execute(t, f, args...)
 		assert.Equal(t, command.ExitOK, code, "%v: %s", args, stderr)
 	}
-	assert.Greater(t, f.count(), before)
+	assert.Greater(t, f.writes(), before)
 }
 
 func TestGet_RefusesAnUnknownOutputFormatAndServesTheKnownOnes(t *testing.T) {
