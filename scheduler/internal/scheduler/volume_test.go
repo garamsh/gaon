@@ -86,7 +86,7 @@ func TestVolumeNode_KeepsOnlyTheNodeTheLocalVolumesArePinnedTo(t *testing.T) {
 	}
 }
 
-func TestVolumeNode_TheNodeThatHoldsTheVolumeIsStillRefusedWhenItDoesNotFit(t *testing.T) {
+func TestVolumeNode_TheNodeThatHoldsTheVolumeStillHasToFit(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(node("a", "1", "1Gi"))
 	f.addNode(node("b", "4", "8Gi"))
