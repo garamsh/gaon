@@ -9,8 +9,8 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 ### Naming and groups
 
 - **`Machine` is the microVM.** A physical machine is the core resource `Node`. A machine naru has discovered but gaon has not admitted is a `Node` whose state is `Discovered`. There is no Host resource. The `Node` schema is in §Node.
-- **API group suffix `gaon.garam.sh`:** `compute.gaon.garam.sh/v1alpha1` holds the core resources named here, `rbac.gaon.garam.sh/v1alpha1` the roles and bindings, `apps.gaon.garam.sh` the default extensions, `apiextensions.gaon.garam.sh` the resource definitions.
-- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Machine, Volume, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions (`CustomResourceDefinition`, in `apiextensions.gaon.garam.sh`, §CustomResourceDefinition), the Driver interface. MachineSet, MachineDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no Machine runs before its network policy is applied, and the default network blocks all outside traffic.
+- **API group suffix `gaon.garam.sh`:** `compute.gaon.garam.sh/v1alpha1` holds the core resources named here, `rbac.gaon.garam.sh/v1alpha1` the roles and bindings, `apps.gaon.garam.sh` the default extensions, `apiextensions.gaon.garam.sh` the resource definitions, `admissionregistration.gaon.garam.sh` the webhook configurations, `admission.gaon.garam.sh` the `AdmissionReview` a webhook receives (§Admission webhooks).
+- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Machine, Volume, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions (`CustomResourceDefinition`, in `apiextensions.gaon.garam.sh`, §CustomResourceDefinition), webhook configurations (`MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration`, in `admissionregistration.gaon.garam.sh`, §Admission webhooks), the Driver interface. MachineSet, MachineDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no Machine runs before its network policy is applied, and the default network blocks all outside traffic.
 
 ### Transport
 
@@ -177,6 +177,17 @@ The resource-definition paths are relative to their own root, `/apis/apiextensio
 | `DELETE /customresourcedefinitions/{name}` | users | delete it and its objects (§CustomResourceDefinition) |
 | `GET /customresourcedefinitions`, `GET /customresourcedefinitions/{name}`, `GET /customresourcedefinitions?watch=true` | all authenticated by certificate | list, read one, subscribe |
 
+The webhook-configuration paths are relative to their own root, `/apis/admissionregistration.gaon.garam.sh/v1alpha1` (§Admission webhooks), and follow the same forms.
+
+| Path | Writer | Use |
+|---|---|---|
+| `PUT /mutatingwebhookconfigurations/{name}` | users | create a configuration, without a version; change its `webhooks`, with one |
+| `DELETE /mutatingwebhookconfigurations/{name}` | users | delete it |
+| `GET /mutatingwebhookconfigurations`, `GET /mutatingwebhookconfigurations/{name}`, `GET /mutatingwebhookconfigurations?watch=true` | all authenticated by certificate | list, read one, subscribe |
+| `PUT /validatingwebhookconfigurations/{name}` | users | create a configuration, without a version; change its `webhooks`, with one |
+| `DELETE /validatingwebhookconfigurations/{name}` | users | delete it |
+| `GET /validatingwebhookconfigurations`, `GET /validatingwebhookconfigurations/{name}`, `GET /validatingwebhookconfigurations?watch=true` | all authenticated by certificate | list, read one, subscribe |
+
 The objects of a registered kind have their own root per definition, `/apis/<group>/<version>`, and the forms of the compute kinds.
 
 | Path | Writer | Use |
@@ -194,7 +205,7 @@ The API server's `--authorization-mode` is `AlwaysAllow`, the default, which all
 - **A request is** a verb on a resource of an API group:
   - `PUT` without `resourceVersion` is `create`, with one `update`; `DELETE` is `delete`; `GET` of one object is `get`, of a collection `list`, and with `watch=true` `watch`;
   - a subresource is named `resource/sub`: `PUT /machines/{name}/status` is `update` on `machines/status`, and `POST /machines/{name}/binding` is `create` on `machines/binding`;
-  - the group and resource of a custom resource are the definition's `group` and `plural` (`PUT /widgets/{name}/status` is `update` on `widgets/status` in `apps.gaon.garam.sh`), and the definitions themselves are `customresourcedefinitions` in `apiextensions.gaon.garam.sh`. `gaon:admin`'s `*` covers both.
+  - the group and resource of a custom resource are the definition's `group` and `plural` (`PUT /widgets/{name}/status` is `update` on `widgets/status` in `apps.gaon.garam.sh`), and the definitions themselves are `customresourcedefinitions` in `apiextensions.gaon.garam.sh`, and the webhook configurations are `mutatingwebhookconfigurations` and `validatingwebhookconfigurations` in `admissionregistration.gaon.garam.sh`. `gaon:admin`'s `*` covers all.
 - **Order.** The Node authorizer first, then the roles bound to the caller. Permissions only add; there is no deny. A request neither allows is `Forbidden`.
 - **The Node authorizer** applies to a caller whose CN equals a Node's name, or the name of the Node it creates. It allows:
   - create its own Node, read it and write its `status`;
@@ -228,7 +239,7 @@ A user registers a resource kind with a `CustomResourceDefinition` in `apiextens
 
 - **Name.** `<plural>.<group>`; any other name is `Invalid`. The whole name is at most 253 characters.
 - **`spec`:**
-  - `group`: a domain of at least two lowercase DNS labels. It may not be `compute.gaon.garam.sh`, `rbac.gaon.garam.sh` or `apiextensions.gaon.garam.sh`, or any later group the core serves. `apps.gaon.garam.sh` is allowed.
+  - `group`: a domain of at least two lowercase DNS labels. It may not be `compute.gaon.garam.sh`, `rbac.gaon.garam.sh`, `apiextensions.gaon.garam.sh`, `admissionregistration.gaon.garam.sh` or `admission.gaon.garam.sh`, or any later group the core serves. `apps.gaon.garam.sh` is allowed.
   - `names`: `kind` and `listKind`, each starting with an uppercase letter and holding letters and digits, and different from each other; `plural` and `singular`, each a lowercase DNS label.
   - `scope`: `Cluster`. `Namespaced` and any other value are `Invalid` until namespaces exist.
   - `versions`: exactly one entry, which is served and stored. Its `name` has the form `v1`, `v1alpha1` or `v2beta3`. It has a `schema.openAPIV3Schema`, and optionally `subresources.status: {}`. More than one version needs conversion and is `Invalid`.
@@ -244,14 +255,30 @@ A user registers a resource kind with a `CustomResourceDefinition` in `apiextens
 
 Wake, exec, file API and console are data-plane features and are not recorded in the Store.
 
+### Admission webhooks
+
+A user registers webhooks the API server calls on a write with a `MutatingWebhookConfiguration` or a `ValidatingWebhookConfiguration` in `admissionregistration.gaon.garam.sh/v1alpha1`, root `/apis/admissionregistration.gaon.garam.sh/v1alpha1`. Both are cluster-scoped and have `apiVersion`, `kind`, `metadata` and `webhooks`, and no `spec` or `status`. Their semantics follow Kubernetes' and the rules below are gaon's own ([ADR 0010](./adr/0010-a-user-registers-admission-webhooks-with-webhook-configurations-the-api-server-calls-them-on-every-accepted-write.md)).
+
+- **A webhook:**
+  - `name`: unique in its configuration, a domain of at least three lowercase DNS labels, at most 253 characters.
+  - `clientConfig`: `url`, an `https` URL with a host and no user, password, query or fragment; `caBundle`, a PEM bundle of at least one certificate, base64 in JSON, required. The bundle is the only trust the API server places in the webhook.
+  - `rules`: at least one; each has non-empty `operations` (`CREATE`, `UPDATE`, `DELETE` or `*`), `apiGroups`, `apiVersions` and `resources`. A group or version is a name or `*`. A resource is `*` (every resource, no subresource), `*/*` (every resource and subresource), `resource`, or `resource/subresource`, with `*` for either part.
+  - `failurePolicy`: `Fail`, the default, or `Ignore`. `timeoutSeconds`: 1 to 30, default 10.
+  - There is no namespace selector, object selector, `sideEffects` or `reinvocationPolicy`.
+- **The call.** `POST` of an `AdmissionReview` (`admission.gaon.garam.sh/v1alpha1`) with `request`: `uid`, `kind`, `resource`, `subResource`, `name`, `operation`, `userInfo` (`username`, `groups`), `object` and `oldObject`. The webhook answers `200` with an `AdmissionReview` whose `response` has the same `uid`, `allowed`, optionally `status` (`code`, `message`), and, from a mutating webhook that allows, `patchType` `JSONPatch` and a base64 RFC 6902 `patch`. No path serves an `AdmissionReview`.
+- **Which writes are sent.** Every write accepted after authorization: a `PUT` without a version is `CREATE`, with one `UPDATE`; a write to `/status` is `UPDATE` with `subResource` `status`; `POST /machines/{name}/binding` is `CREATE` on `machines/binding`; `DELETE` is `DELETE`, with `oldObject` and no `object`. Writes to the two configuration kinds and every read are never sent.
+- **Order of a write.** Authentication, authorization, the mutating webhooks, the API server's own validation (with a custom resource's schema and pruning), the validating webhooks, the Store. Configurations are called by name and the webhooks of one in their order; each mutating webhook sees the object as the previous patch left it. A patch that changes `apiVersion`, `kind`, `metadata.name` or `metadata.resourceVersion` is a failed call.
+- **Failure.** `allowed: false` is `Forbidden` whatever `status.code` says, with a message that names the webhook and carries `status.message`. A failed call is a timeout, a TLS or connection error, a status other than 200, a body that does not decode, a `uid` that is not the request's, or a bad patch; under `Fail` the write is refused as `InternalError`, and under `Ignore` the webhook is skipped.
+- **Types and client.** In `lib/api/`: `MutatingWebhookConfiguration`, `ValidatingWebhookConfiguration`, their lists, `Webhook`, `WebhookClientConfig`, `WebhookRule`, and `AdmissionReview` with `AdmissionRequest` and `AdmissionResponse`. `Client` has `Put`, `Get`, `List`, `Watch` and `Delete` for each kind.
+
 ### Watch
 
 - A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required.
 - Each line of the stream is one JSON event with a `type` and an `object`.
 - Event types, PascalCase as every enum is:
-  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Node, a Lease, a CertificateSigningRequest, a ClusterRole, a ClusterRoleBinding, a CustomResourceDefinition or an object of a registered kind) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
+  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Node, a Lease, a CertificateSigningRequest, a ClusterRole, a ClusterRoleBinding, a CustomResourceDefinition, a MutatingWebhookConfiguration, a ValidatingWebhookConfiguration or an object of a registered kind) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
   - `Error` carries the error object, and is the last event of its stream.
-- The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422, `Expired` 410, `Unauthorized` 401 and `Forbidden` 403. `Unauthorized` is a request with no client certificate and a missing or invalid bearer token; `Forbidden` is a valid token on any request other than creating a CertificateSigningRequest or reading one it created, and, in the `RBAC` mode, a request by certificate that neither the Node authorizer nor a bound role allows (§Authorization).
+- The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422, `Expired` 410, `Unauthorized` 401, `Forbidden` 403 and `InternalError` 500. `Unauthorized` is a request with no client certificate and a missing or invalid bearer token; `Forbidden` is a valid token on any request other than creating a CertificateSigningRequest or reading one it created, and, in the `RBAC` mode, a request by certificate that neither the Node authorizer nor a bound role allows (§Authorization), or a validating or mutating webhook refuses (§Admission webhooks); `InternalError` is a write refused because a call to a webhook whose `failurePolicy` is `Fail` failed.
 - An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
 - The types are in `lib/api/`: `WatchEvent`, `EventType`, `APIError` and `Reason`.
 
@@ -261,6 +288,7 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 - Writers, Lease, watch, OnDemand, group, transport, naming: [ADR 0003](./adr/0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md).
 - Authorization, the `rbac` group, the Node authorizer and the bootstrap roles: [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md), which amends ADR 0005, Decision 4.
 - Resource definitions, custom resources, their schema, the deletion order and the client: [ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md), which uses ADR 0008's rules for authorization.
+- Webhook configurations, `AdmissionReview`, the order of a write and the failure of a call: [ADR 0010](./adr/0010-a-user-registers-admission-webhooks-with-webhook-configurations-the-api-server-calls-them-on-every-accepted-write.md), which places the webhooks after ADR 0008's authorization and around ADR 0009's schema.
 - Bearer-token access and the CertificateSigningRequest: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), which amends ADR 0005.
 - How `resourceVersion`, compare-and-swap and watch map onto the Store: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
 - The Lease validity is measured by the observer because a renew time written by one machine cannot be compared with another machine's clock, which can be stepped.
@@ -276,5 +304,6 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 - **Placement of Namespace** in an API group.
 - **The schemas of the default extensions** (MachineSet, MachineDeployment, Job, Service, Gateway, Autoscaler) in `apps.gaon.garam.sh`: none is written yet.
 - **More than one version of a custom resource,** which needs conversion, and the `scale` subresource and the schema keywords outside §CustomResourceDefinition's list.
+- **Webhook selection and calling:** selectors by label or namespace, a reinvocation policy, a service reference for `clientConfig` and a status code from the webhook wait for a need and, for the last, for a Service resource; the API server's calling of webhooks is the next issue.
 - **Namespaced roles:** `Role` and `RoleBinding` wait for the namespace decision above; only the cluster-scoped kinds exist.
 - **Out of the contract by decision:** Discussion #2 section 6 items 5, 6 and 12 (tenancy, the immediate-bind default, deployment features).

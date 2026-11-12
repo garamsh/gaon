@@ -14,6 +14,7 @@ const (
 	ReasonExpired       Reason = "Expired"
 	ReasonUnauthorized  Reason = "Unauthorized"
 	ReasonForbidden     Reason = "Forbidden"
+	ReasonInternalError Reason = "InternalError"
 )
 
 // APIError is the error object of the API: the body of a failed response and
@@ -34,6 +35,7 @@ var (
 	ErrExpired       = NewAPIError(ReasonExpired, "expired")
 	ErrUnauthorized  = NewAPIError(ReasonUnauthorized, "unauthorized")
 	ErrForbidden     = NewAPIError(ReasonForbidden, "forbidden")
+	ErrInternalError = NewAPIError(ReasonInternalError, "internal error")
 )
 
 // NewAPIError returns the APIError for reason with its HTTP status code.
@@ -65,6 +67,8 @@ func (r Reason) httpStatus() int {
 		return 422
 	case ReasonExpired:
 		return 410
+	case ReasonInternalError:
+		return 500
 	default:
 		return 500
 	}

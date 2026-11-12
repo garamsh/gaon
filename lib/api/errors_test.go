@@ -17,6 +17,7 @@ func TestNewAPIError_AuthenticationReasonsHaveTheirHTTPStatus(t *testing.T) {
 	}{
 		{api.ReasonUnauthorized, api.ErrUnauthorized, 401},
 		{api.ReasonForbidden, api.ErrForbidden, 403},
+		{api.ReasonInternalError, api.ErrInternalError, 500},
 	}
 	for _, tc := range tests {
 		t.Run(string(tc.reason), func(t *testing.T) {

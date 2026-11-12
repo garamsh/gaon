@@ -280,6 +280,72 @@ func (c *Client) WatchCustomResourceDefinitions(ctx context.Context, rv Resource
 	return watch[CustomResourceDefinition](ctx, c, "/customresourcedefinitions", KindCustomResourceDefinition, rv)
 }
 
+// PutMutatingWebhookConfiguration creates o, or changes it when o carries the ResourceVersion it was
+// read at (PUT /mutatingwebhookconfigurations/{name}). Call it on a client whose root is the
+// admissionregistration group's.
+func (c *Client) PutMutatingWebhookConfiguration(ctx context.Context, o *MutatingWebhookConfiguration) (*MutatingWebhookConfiguration, error) {
+	return put(ctx, c, "/mutatingwebhookconfigurations/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteMutatingWebhookConfiguration removes the named MutatingWebhookConfiguration, if it is still at version rv
+// (DELETE /mutatingwebhookconfigurations/{name}).
+func (c *Client) DeleteMutatingWebhookConfiguration(ctx context.Context, name string, rv ResourceVersion) (*MutatingWebhookConfiguration, error) {
+	if rv == "" {
+		return nil, errors.New("delete mutatingwebhookconfigurations: resource version is empty")
+	}
+	return call[MutatingWebhookConfiguration](ctx, c, http.MethodDelete, "/mutatingwebhookconfigurations/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetMutatingWebhookConfiguration returns the named MutatingWebhookConfiguration (GET /mutatingwebhookconfigurations/{name}).
+func (c *Client) GetMutatingWebhookConfiguration(ctx context.Context, name string) (*MutatingWebhookConfiguration, error) {
+	return call[MutatingWebhookConfiguration](ctx, c, http.MethodGet, "/mutatingwebhookconfigurations/"+url.PathEscape(name), nil, nil)
+}
+
+// ListMutatingWebhookConfigurations returns every MutatingWebhookConfiguration and the version to watch from
+// (GET /mutatingwebhookconfigurations).
+func (c *Client) ListMutatingWebhookConfigurations(ctx context.Context) (*MutatingWebhookConfigurationList, error) {
+	return call[MutatingWebhookConfigurationList](ctx, c, http.MethodGet, "/mutatingwebhookconfigurations", nil, nil)
+}
+
+// WatchMutatingWebhookConfigurations streams the changes made after version rv
+// (GET /mutatingwebhookconfigurations?watch=true), as WatchMachines does.
+func (c *Client) WatchMutatingWebhookConfigurations(ctx context.Context, rv ResourceVersion) (*Watch[MutatingWebhookConfiguration], error) {
+	return watch[MutatingWebhookConfiguration](ctx, c, "/mutatingwebhookconfigurations", KindMutatingWebhookConfiguration, rv)
+}
+
+// PutValidatingWebhookConfiguration creates o, or changes it when o carries the ResourceVersion it was
+// read at (PUT /validatingwebhookconfigurations/{name}). Call it on a client whose root is the
+// admissionregistration group's.
+func (c *Client) PutValidatingWebhookConfiguration(ctx context.Context, o *ValidatingWebhookConfiguration) (*ValidatingWebhookConfiguration, error) {
+	return put(ctx, c, "/validatingwebhookconfigurations/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteValidatingWebhookConfiguration removes the named ValidatingWebhookConfiguration, if it is still at version rv
+// (DELETE /validatingwebhookconfigurations/{name}).
+func (c *Client) DeleteValidatingWebhookConfiguration(ctx context.Context, name string, rv ResourceVersion) (*ValidatingWebhookConfiguration, error) {
+	if rv == "" {
+		return nil, errors.New("delete validatingwebhookconfigurations: resource version is empty")
+	}
+	return call[ValidatingWebhookConfiguration](ctx, c, http.MethodDelete, "/validatingwebhookconfigurations/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetValidatingWebhookConfiguration returns the named ValidatingWebhookConfiguration (GET /validatingwebhookconfigurations/{name}).
+func (c *Client) GetValidatingWebhookConfiguration(ctx context.Context, name string) (*ValidatingWebhookConfiguration, error) {
+	return call[ValidatingWebhookConfiguration](ctx, c, http.MethodGet, "/validatingwebhookconfigurations/"+url.PathEscape(name), nil, nil)
+}
+
+// ListValidatingWebhookConfigurations returns every ValidatingWebhookConfiguration and the version to watch from
+// (GET /validatingwebhookconfigurations).
+func (c *Client) ListValidatingWebhookConfigurations(ctx context.Context) (*ValidatingWebhookConfigurationList, error) {
+	return call[ValidatingWebhookConfigurationList](ctx, c, http.MethodGet, "/validatingwebhookconfigurations", nil, nil)
+}
+
+// WatchValidatingWebhookConfigurations streams the changes made after version rv
+// (GET /validatingwebhookconfigurations?watch=true), as WatchMachines does.
+func (c *Client) WatchValidatingWebhookConfigurations(ctx context.Context, rv ResourceVersion) (*Watch[ValidatingWebhookConfiguration], error) {
+	return watch[ValidatingWebhookConfiguration](ctx, c, "/validatingwebhookconfigurations", KindValidatingWebhookConfiguration, rv)
+}
+
 func watch[T any](ctx context.Context, c *Client, path, kind string, rv ResourceVersion) (*Watch[T], error) {
 	if rv == "" {
 		return nil, fmt.Errorf("watch %s: resource version is empty", path)

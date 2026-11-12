@@ -23,6 +23,20 @@ const (
 	APIExtensionsGroupVersion = APIExtensionsGroup + "/" + Version
 )
 
+// The API group and version of the admission webhook configurations, served
+// under their own root beside the compute group's.
+const (
+	AdmissionRegistrationGroup        = "admissionregistration.gaon.garam.sh"
+	AdmissionRegistrationGroupVersion = AdmissionRegistrationGroup + "/" + Version
+)
+
+// The API group and version of AdmissionReview, the body of a call to an
+// admission webhook. No path serves it.
+const (
+	AdmissionGroup        = "admission.gaon.garam.sh"
+	AdmissionGroupVersion = AdmissionGroup + "/" + Version
+)
+
 // The kinds of the resources in this package.
 const (
 	KindMachine     = "Machine"
@@ -43,6 +57,12 @@ const (
 
 	KindCustomResourceDefinition     = "CustomResourceDefinition"
 	KindCustomResourceDefinitionList = "CustomResourceDefinitionList"
+
+	KindMutatingWebhookConfiguration       = "MutatingWebhookConfiguration"
+	KindMutatingWebhookConfigurationList   = "MutatingWebhookConfigurationList"
+	KindValidatingWebhookConfiguration     = "ValidatingWebhookConfiguration"
+	KindValidatingWebhookConfigurationList = "ValidatingWebhookConfigurationList"
+	KindAdmissionReview                    = "AdmissionReview"
 )
 
 // ResourceVersion is the version of an object in the Store. Clients treat it
