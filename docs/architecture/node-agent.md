@@ -109,7 +109,7 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 | stopped, other | `Pending` | false, started again once the restart wait is over |
 | faulted | `Failed` | false, the reason is mvmd's last failure reason; stopped and started again once the restart wait is over |
 
-- **Failures the agent settles itself** go to `Failed` with the `Ready` condition false and a reason: `InvalidSpec` for an image that is not `<repository>@sha256:<digest>` or resources it cannot convert, and `Rejected` for a create mvmd refuses, and the reason a network or storage plugin gives for a Machine it refuses, such as one above a Driver's `max_vcpus` or one naming a kernel the node does not offer, with mvmd's reason as the message. The Driver's limit is not on the Node's status.
+- **Failures the agent settles itself** go to `Failed` with the `Ready` condition false and a reason: `InvalidSpec` for an image that is not `<repository>@sha256:<digest>` or resources it cannot convert, and `Rejected` for a create mvmd refuses, such as one above a Driver's `max_vcpus` or one naming a kernel the node does not offer, with mvmd's reason as the message. The Driver's limit is not on the Node's status. A network or storage plugin's refusal of a Machine fails it with the plugin's own reason and message.
 - **Outcome kind `IN_PROGRESS`** is treated as never produced by mvmd (garamsh/mvmd#307).
 
 ### What the agent does not do yet
@@ -134,4 +134,4 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 
 - **Entrypoint record across a start:** mvmd's documents do not say whether the console log an entrypoint's record is answered from is cleared when a Machine starts. The agent treats a clean record equal to the one it read at the Machine's previous exit as a failure, so a stale record cannot end the restarts; a Machine switched from `Always` to `RerunOnFailure` whose entrypoint keeps exiting cleanly is therefore restarted, at the backoff.
 - **Node addresses:** which addresses the agent reports.
-- **Leaked volumes:** a volume `Attach` readied is given back only when the agent removes the machine or mvmd rejects the create; one readied before the agent stopped and never created again is not found.
+- **Leaked volumes:** a volume `Attach` readied is given back only when the agent removes the machine or mvmd rejects the create; one readied before the agent stopped and never created again is not found. A `Release` that fails after a rejected create is logged and not retried; the volume is given back only if the agent later removes that machine.

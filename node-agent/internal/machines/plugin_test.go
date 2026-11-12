@@ -98,15 +98,18 @@ func TestNetwork_FailsAMachineNamingANetworkItDoesNotServe(t *testing.T) {
 
 func TestNetwork_FailsAMachineWithAPortMvmdWouldRefuse(t *testing.T) {
 	e := start(t, true, nil, withNetwork(t, nil, []string{"10.0.0.0/8"}))
-	bad := machine("bad", 1, node, api.RunAlways)
-	bad.Spec.Ports = []int32{70000}
-	e.gaon.SetMachine(bad)
-	good := machine("good", 1, node, api.RunAlways)
-	good.Spec.Ports = []int32{65535}
-	e.gaon.SetMachine(good)
+	for name, port := range map[string]int32{"zero": 0, "negative": -1, "high": 70000, "above": 65536, "first": 1, "last": 65535} {
+		m := machine(name, 1, node, api.RunAlways)
+		m.Spec.Ports = []int32{port}
+		e.gaon.SetMachine(m)
+	}
 
-	failedWith(t, e, "bad", machines.ReasonInvalidSpec)
-	eventually(t, "control: the highest valid port runs", e.running("good-e1"))
+	for _, name := range []string{"zero", "negative", "high", "above"} {
+		failedWith(t, e, name, machines.ReasonInvalidSpec)
+		assert.NotContains(t, e.mvmd.Calls(), "CreateMachine "+name+"-e1")
+	}
+	eventually(t, "control: port 1 runs", e.running("first-e1"))
+	eventually(t, "control: port 65535 runs", e.running("last-e1"))
 }
 
 // refusingNetwork refuses the Machines named in refuse and fails with a plain
