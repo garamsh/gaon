@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/garamsh/gaon/controllers/internal/csrsigner"
+	"github.com/garamsh/gaon/controllers/internal/garbagecollector"
 	"github.com/garamsh/gaon/controllers/internal/nodelifecycle"
 	"github.com/garamsh/gaon/controllers/internal/nodelifecycle/systemclock"
 	"github.com/garamsh/gaon/lib/api"
@@ -26,6 +28,11 @@ type config struct {
 	root       string
 	httpClient *http.Client
 	lifecycle  nodelifecycle.Config
+	// server is the address of the API server, taken from root. It is empty
+	// when root does not end in the compute group's path: the garbage
+	// collector, which needs the other groups' roots, does not run.
+	server    string
+	collector garbagecollector.Config
 	// signer is nil when no signing files were given: the signer does not run.
 	signer *csrsigner.Config
 }
@@ -42,12 +49,16 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 	signingCert := fs.String("signing-cert", "", "PEM file of the cluster CA certificate that signs CertificateSigningRequests")
 	signingKey := fs.String("signing-key", "", "PEM file of the cluster CA key; given with -signing-cert or not at all")
 	signingDuration := fs.Duration("signing-duration", 8760*time.Hour, "validity of a certificate the signer issues")
+	gcInterval := fs.Duration("gc-interval", 30*time.Second, "time between the end of one garbage collection sweep and the start of the next")
 	files := api.RegisterTLSFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
 	if *root == "" || *margin <= 0 || *duration <= 0 {
 		return config{}, errors.New("flag -api is required, and -lease-margin and -default-lease-duration must be above zero")
+	}
+	if *gcInterval <= 0 {
+		return config{}, errors.New("flag -gc-interval must be above zero")
 	}
 	if *signingDuration <= 0 {
 		return config{}, errors.New("flag -signing-duration must be above zero")
@@ -63,6 +74,10 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 		root:       *root,
 		httpClient: httpClient,
 		lifecycle:  nodelifecycle.Config{Margin: *margin, DefaultLeaseDuration: *duration},
+		collector:  garbagecollector.Config{Interval: *gcInterval},
+	}
+	if base, ok := strings.CutSuffix(strings.TrimSuffix(*root, "/"), "/apis/"+api.GroupVersion); ok {
+		cfg.server = base
 	}
 	if *signingCert != "" {
 		ca, err := csrsigner.LoadCA(*signingCert, *signingKey)
@@ -97,9 +112,23 @@ func main() {
 	} else {
 		log.Info("csr signer does not run: no -signing-cert and -signing-key")
 	}
+	if cfg.server != "" {
+		runners["garbage collector"] = newCollector(cfg, log).Run
+	} else {
+		log.Info("garbage collector does not run: -api does not end in /apis/" + api.GroupVersion)
+	}
 	if !runAll(ctx, log, runners) {
 		os.Exit(1)
 	}
+}
+
+// newCollector builds the garbage collector for the API server at cfg.server.
+func newCollector(cfg config, log *slog.Logger) garbagecollector.Service {
+	definitions := api.NewClient(cfg.server+"/apis/"+api.APIExtensionsGroupVersion, cfg.httpClient)
+	clientFor := func(t api.CustomResourceType) (*api.CustomResourceClient, error) {
+		return api.NewCustomResourceClient(cfg.server, cfg.httpClient, t)
+	}
+	return garbagecollector.NewService(definitions, clientFor, systemclock.Clock{}, cfg.collector, log)
 }
 
 // runAll runs each runner until ctx ends or one fails, which ends the others.

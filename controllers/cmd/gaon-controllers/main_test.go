@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -18,6 +19,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/garamsh/gaon/controllers/internal/garbagecollector"
 	"github.com/garamsh/gaon/controllers/internal/nodelifecycle"
 	"github.com/garamsh/gaon/lib/api"
 )
@@ -249,4 +253,88 @@ func TestRunAll_AFailureEndsTheOthersAndIsReported(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	assert.True(t, runAll(ctx, log, map[string]func(context.Context) error{"waits": waits}), "control: ending by cancellation is not a failure")
+}
+
+func TestParseFlags_TakesTheServerFromTheComputeRootAndRunsTheCollectorOnlyThen(t *testing.T) {
+	root := "http://127.0.0.1:1/apis/" + api.GroupVersion
+
+	withSuffix, err := parseFlags([]string{"-api", root + "/", "-gc-interval", "7s"}, io.Discard)
+	require.NoError(t, err)
+	without, err := parseFlags([]string{"-api", "http://127.0.0.1:1"}, io.Discard)
+	require.NoError(t, err)
+
+	assert.Equal(t, "http://127.0.0.1:1", withSuffix.server)
+	assert.Equal(t, garbagecollector.Config{Interval: 7 * time.Second}, withSuffix.collector)
+	assert.Empty(t, without.server, "no compute suffix, so no other group's root can be derived and the collector does not run")
+	assert.Equal(t, 30*time.Second, without.collector.Interval, "the default interval")
+}
+
+func TestParseFlags_RefusesAGCIntervalAtOrBelowZero(t *testing.T) {
+	for _, d := range []string{"0s", "-1m"} {
+		t.Run(d, func(t *testing.T) {
+			_, err := parseFlags([]string{"-api", "http://127.0.0.1:1", "-gc-interval", d}, io.Discard)
+
+			assert.ErrorContains(t, err, "-gc-interval")
+		})
+	}
+}
+
+// ownedVolumeAPI serves one Volume whose only owner is a MicroVM that is not
+// stored, on the paths the collector reads, and records the Volume's delete.
+func ownedVolumeAPI(t *testing.T) (url string, deleted <-chan string) {
+	t.Helper()
+	got := make(chan string, 1)
+	var mu sync.Mutex
+	volume := api.CustomObject{
+		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindVolume},
+		Metadata: api.ObjectMeta{Name: "data", UID: "uid-v", ResourceVersion: "5", OwnerReferences: []api.OwnerReference{
+			{APIVersion: api.GroupVersion, Kind: api.KindMicroVM, Name: "gone", UID: "uid-m"},
+		}},
+	}
+	writeJSON := func(w http.ResponseWriter, code int, v any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		require.NoError(t, json.NewEncoder(w).Encode(v))
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /apis/"+api.GroupVersion+"/volumes", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		writeJSON(w, http.StatusOK, api.CustomObjectList{Items: []api.CustomObject{volume}})
+	})
+	mux.HandleFunc("DELETE /apis/"+api.GroupVersion+"/volumes/data", func(w http.ResponseWriter, r *http.Request) {
+		got <- r.URL.Query().Get("resourceVersion")
+		writeJSON(w, http.StatusOK, volume)
+	})
+	mux.HandleFunc("GET /apis/{group}/{version}/{plural}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusNotFound, api.NewAPIError(api.ReasonNotFound, "object"))
+	})
+	mux.HandleFunc("GET /apis/{group}/{version}/{plural}", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, api.CustomObjectList{Items: []api.CustomObject{}})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv.URL, got
+}
+
+func TestNewCollector_DeletesAnObjectWhoseOwnerIsGoneThroughTheShippedWiring(t *testing.T) {
+	url, deleted := ownedVolumeAPI(t)
+	cfg, err := parseFlags([]string{"-api", url + "/apis/" + api.GroupVersion}, io.Discard)
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(cfg.server, url), "setup: the collector is pointed at the test server")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- newCollector(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))).Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		assert.ErrorIs(t, <-done, context.Canceled)
+	})
+
+	select {
+	case rv := <-deleted:
+		assert.Equal(t, "5", rv, "deleted at the version it listed")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the collector did not delete the Volume")
+	}
 }
