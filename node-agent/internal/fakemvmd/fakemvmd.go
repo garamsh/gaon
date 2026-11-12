@@ -42,6 +42,8 @@ type Server struct {
 	clock       clock.Clock
 	mu          sync.Mutex
 	machines    map[string]*v1alpha2.Machine
+	requests    map[string]*v1alpha2.CreateMachineRequest
+	legacy      map[string]bool
 	images      []string
 	calls       []string
 	renewals    []Renewal
@@ -66,6 +68,8 @@ func New(t testing.TB, clk clock.Clock) *Server {
 		Socket:   filepath.Join(plugintest.SocketDir(t), "mvmd.sock"),
 		clock:    clk,
 		machines: map[string]*v1alpha2.Machine{},
+		requests: map[string]*v1alpha2.CreateMachineRequest{},
+		legacy:   map[string]bool{},
 		disks:    map[string]*v1alpha2.Disk{},
 		records:  map[string]*v1alpha2.ExecRecord{},
 		silent:   map[string]bool{},
@@ -97,6 +101,27 @@ func (s *Server) Calls() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.calls...)
+}
+
+// CreateRequest returns a copy of the request that created the Machine id, and
+// whether mvmd holds it.
+func (s *Server) CreateRequest(id string) (*v1alpha2.CreateMachineRequest, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.requests[id]
+	if !ok {
+		return nil, false
+	}
+	return proto.Clone(r).(*v1alpha2.CreateMachineRequest), true
+}
+
+// SetLegacyImage marks the image digest as pulled before mvmd kept an
+// image's entrypoint and command apart: a Create naming it with args and no
+// command is refused as PRECONDITION_FAILED.
+func (s *Server) SetLegacyImage(digest string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.legacy[digest] = true
 }
 
 // Renewals returns the deadline renewals mvmd applied.
