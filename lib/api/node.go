@@ -1,5 +1,7 @@
 package api
 
+import "net/netip"
+
 // NodeState is the state a Node's status reports.
 type NodeState string
 
@@ -51,10 +53,13 @@ type NodeCapacity struct {
 
 // NodeStatus is the observed state of a Node.
 type NodeStatus struct {
-	State      NodeState    `json:"state,omitempty"`
-	Capacity   NodeCapacity `json:"capacity"`
-	Addresses  []string     `json:"addresses,omitempty"`
-	Conditions []Condition  `json:"conditions,omitempty"`
+	State     NodeState    `json:"state,omitempty"`
+	Capacity  NodeCapacity `json:"capacity"`
+	Addresses []string     `json:"addresses,omitempty"`
+	// MicroVMPrefixes are the CIDR prefixes the Node's MicroVMs are addressed
+	// from, as mvmd reports them.
+	MicroVMPrefixes []string    `json:"microvmPrefixes,omitempty"`
+	Conditions      []Condition `json:"conditions,omitempty"`
 }
 
 // Validate checks the identity of n.
@@ -62,13 +67,19 @@ func (n *Node) Validate() error {
 	return validateIdentity(n.TypeMeta, GroupVersion, KindNode, n.Metadata)
 }
 
-// ValidateStatus checks that n's status names a known state and that each of
-// its conditions has a known status.
+// ValidateStatus checks that n's status names a known state, that each of its
+// MicroVM prefixes is a CIDR and that each of its conditions has a known
+// status.
 func (n *Node) ValidateStatus() error {
 	switch n.Status.State {
 	case NodeStateDiscovered, NodeStateAdmitted:
 	default:
 		return invalid("status.state is %q, want Discovered or Admitted", n.Status.State)
+	}
+	for _, p := range n.Status.MicroVMPrefixes {
+		if _, err := netip.ParsePrefix(p); err != nil {
+			return invalid("status.microvmPrefixes has %q, which is not a CIDR", p)
+		}
 	}
 	for _, c := range n.Status.Conditions {
 		if err := c.validate(); err != nil {
