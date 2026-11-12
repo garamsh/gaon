@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"time"
 
 	"github.com/garamsh/gaon/lib/api"
@@ -15,10 +16,11 @@ import (
 // Service registers the node and reports its status.
 type Service interface {
 	// Sync creates the Node when the API has none, then writes its status:
-	// state from spec.admitted, capacity from mvmd's runtime info, and the
-	// Ready condition. When mvmd does not answer, Ready is written false
-	// with the error as its message, the stored capacity is kept, and Sync
-	// returns the error.
+	// state from spec.admitted, capacity and MicroVM prefixes from mvmd's
+	// runtime info, and the Ready condition. A prefix that is not a CIDR is
+	// logged and left out. When mvmd does not answer, Ready is written false
+	// with the error as its message, the stored capacity and prefixes are
+	// kept, and Sync returns the error.
 	Sync(ctx context.Context) error
 	// Register returns once the API has the Node, creating it when it has
 	// none and trying again every period when that fails. It returns the
@@ -71,11 +73,13 @@ func (s *service) Run(ctx context.Context, period time.Duration) {
 func (s *service) Sync(ctx context.Context) error {
 	info, runtimeErr := s.runtime.GetRuntimeInfo(ctx, &v1alpha2.GetRuntimeInfoRequest{})
 	var stored api.NodeCapacity
+	var prefixes []string
 	if runtimeErr == nil {
 		var err error
 		if stored, err = capacity(info.GetCapacity()); err != nil {
 			return err
 		}
+		prefixes = s.microVMPrefixes(info.GetMachinePrefixes())
 	}
 	current, err := s.register(ctx)
 	if err != nil {
@@ -88,9 +92,10 @@ func (s *service) Sync(ctx context.Context) error {
 	}
 	if runtimeErr == nil {
 		next.Status.Capacity = stored
+		next.Status.MicroVMPrefixes = prefixes
 		next.Status.Conditions = withReady(current.Status.Conditions, api.ConditionTrue, ReasonRuntimeReachable, "", s.clock.Now())
 	} else {
-		// The stored capacity stays: it is what the Node last had.
+		// The stored capacity and prefixes stay: they are what the Node last had.
 		next.Status.Conditions = withReady(current.Status.Conditions, api.ConditionFalse, ReasonRuntimeUnreachable, runtimeErr.Error(), s.clock.Now())
 	}
 	if _, err := s.nodes.PutNodeStatus(ctx, &next); err != nil {
@@ -100,6 +105,20 @@ func (s *service) Sync(ctx context.Context) error {
 		return fmt.Errorf("get runtime info: %w", runtimeErr)
 	}
 	return nil
+}
+
+// microVMPrefixes returns the prefixes mvmd reports that are CIDRs, and logs
+// each that is not, naming it.
+func (s *service) microVMPrefixes(reported []string) []string {
+	var prefixes []string
+	for _, r := range reported {
+		if _, err := netip.ParsePrefix(r); err != nil {
+			s.log.Warn("mvmd reports a MicroVM prefix that is not a CIDR; not written to the Node's status", "node", s.name, "prefix", r, "error", err)
+			continue
+		}
+		prefixes = append(prefixes, r)
+	}
+	return prefixes
 }
 
 // register returns the stored Node, creating it with an empty spec, by a PUT

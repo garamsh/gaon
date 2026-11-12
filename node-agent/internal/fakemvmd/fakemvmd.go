@@ -48,6 +48,7 @@ type Server struct {
 	events      chan *v1alpha2.WatchEventsResponse
 	sequence    uint64
 	capacity    *v1alpha2.NodeCapacity
+	prefixes    []string
 	failDeletes bool
 	disks       map[string]*v1alpha2.Disk
 	diskFailure v1alpha2.OutcomeKind
@@ -80,6 +81,14 @@ func New(t testing.TB, clk clock.Clock) *Server {
 	go func() { _ = g.Serve(lis) }()
 	t.Cleanup(g.Stop)
 	return s
+}
+
+// SetMachinePrefixes sets the prefixes the runtime info reports as the ones
+// Machine addresses are assigned from.
+func (s *Server) SetMachinePrefixes(prefixes ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prefixes = prefixes
 }
 
 // Calls returns the lifecycle, image and disk-making calls received, in order, each as

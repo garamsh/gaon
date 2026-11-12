@@ -17,9 +17,12 @@ func (s *Server) record(call, id string) {
 }
 
 func (s *Server) GetRuntimeInfo(context.Context, *v1alpha2.GetRuntimeInfoRequest) (*v1alpha2.GetRuntimeInfoResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return &v1alpha2.GetRuntimeInfoResponse{
-		ApiVersions: []string{"mvmd.runtime.v1alpha2"},
-		Capacity:    s.capacity,
+		ApiVersions:     []string{"mvmd.runtime.v1alpha2"},
+		Capacity:        s.capacity,
+		MachinePrefixes: slices.Clone(s.prefixes),
 	}, nil
 }
 

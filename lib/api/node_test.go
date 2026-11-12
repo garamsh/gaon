@@ -53,6 +53,17 @@ func TestNodeValidateStatusRefusesAnUnknownConditionStatus(t *testing.T) {
 	}
 }
 
+func TestNodeValidateStatusRefusesAMicroVMPrefixThatIsNotACIDR(t *testing.T) {
+	n := newNode("node-a")
+	n.Status.State = api.NodeStateAdmitted
+	n.Status.MicroVMPrefixes = []string{"10.1.0.0/16", "fd00:1::/64"}
+	assert.NoError(t, n.ValidateStatus(), "control: valid IPv4 and IPv6 prefixes are accepted")
+	for _, bad := range []string{"", "10.1.0.0", "10.1.0.0/33", "not-a-prefix"} {
+		n.Status.MicroVMPrefixes = []string{"10.1.0.0/16", bad}
+		assert.ErrorIs(t, n.ValidateStatus(), api.ErrInvalid, "%q", bad)
+	}
+}
+
 func TestNodeSpecWritesAdmittedWhenFalse(t *testing.T) {
 	raw, err := json.Marshal(newNode("node-a"))
 	require.NoError(t, err)

@@ -1,6 +1,7 @@
 package node_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -40,6 +41,13 @@ func newService(t *testing.T) (node.Service, *fakegaon.Server, *clock.Fake) {
 }
 
 func newFlakyService(t *testing.T) (node.Service, *fakegaon.Server, *clock.Fake, *flaky) {
+	svc, gaon, _, clk, rt := newLoggingService(t, io.Discard)
+	return svc, gaon, clk, rt
+}
+
+// newLoggingService is newFlakyService with the agent's log written to w, and
+// the fake mvmd returned.
+func newLoggingService(t *testing.T, w io.Writer) (node.Service, *fakegaon.Server, *fakemvmd.Server, *clock.Fake, *flaky) {
 	t.Helper()
 	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clk)
@@ -47,8 +55,8 @@ func newFlakyService(t *testing.T) (node.Service, *fakegaon.Server, *clock.Fake,
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 	rt := &flaky{Runtime: v1alpha2.NewRuntimeServiceClient(conn)}
-	svc := node.NewService("n1", api.NewClient(gaon.URL, nil), rt, clk, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	return svc, gaon, clk, rt
+	svc := node.NewService("n1", api.NewClient(gaon.URL, nil), rt, clk, slog.New(slog.NewTextHandler(w, nil)))
+	return svc, gaon, mvmd, clk, rt
 }
 
 func TestSync_CreatesTheNodeWithAnEmptySpecAndCapacityFromRuntimeInfo(t *testing.T) {
@@ -140,4 +148,43 @@ func TestSync_CreatesTheNodeNotReadyWhenTheRuntimeHasNeverAnswered(t *testing.T)
 	rt.down = true
 	require.Error(t, svc.Sync(context.Background()))
 	assert.Equal(t, api.ConditionFalse, ready(t, gaon).Status)
+}
+
+func TestSync_ReportsTheMicroVMPrefixesMvmdReportsAndNoneWhenItReportsNone(t *testing.T) {
+	svc, gaon, mvmd, clk, _ := newLoggingService(t, io.Discard)
+	mvmd.SetMachinePrefixes("10.1.0.0/16", "fd00:1::/64")
+	require.NoError(t, svc.Sync(context.Background()))
+	n, _ := gaon.Node("n1")
+	assert.Equal(t, []string{"10.1.0.0/16", "fd00:1::/64"}, n.Status.MicroVMPrefixes)
+
+	mvmd.SetMachinePrefixes()
+	clk.Advance(time.Minute)
+	require.NoError(t, svc.Sync(context.Background()))
+	n, _ = gaon.Node("n1")
+	assert.Empty(t, n.Status.MicroVMPrefixes, "a Node whose mvmd reports none shows none")
+}
+
+func TestSync_KeepsTheMicroVMPrefixesWhileTheRuntimeDoesNotAnswer(t *testing.T) {
+	svc, gaon, mvmd, clk, rt := newLoggingService(t, io.Discard)
+	mvmd.SetMachinePrefixes("10.1.0.0/16")
+	require.NoError(t, svc.Sync(context.Background()))
+
+	rt.down = true
+	clk.Advance(time.Minute)
+	require.Error(t, svc.Sync(context.Background()))
+	n, _ := gaon.Node("n1")
+	assert.Equal(t, []string{"10.1.0.0/16"}, n.Status.MicroVMPrefixes)
+}
+
+func TestSync_RefusesAMicroVMPrefixThatIsNotACIDRAndNamesItInTheLog(t *testing.T) {
+	var log bytes.Buffer
+	svc, gaon, mvmd, _, _ := newLoggingService(t, &log)
+	mvmd.SetMachinePrefixes("10.1.0.0/16", "10.2.0.0/33", "10.3.0.0")
+	require.NoError(t, svc.Sync(context.Background()))
+
+	n, _ := gaon.Node("n1")
+	assert.Equal(t, []string{"10.1.0.0/16"}, n.Status.MicroVMPrefixes, "the valid prefix is written, the others are not")
+	assert.Contains(t, log.String(), "10.2.0.0/33")
+	assert.Contains(t, log.String(), "10.3.0.0")
+	assert.NotContains(t, log.String(), "prefix=10.1.0.0/16", "control: a valid prefix is not logged as refused")
 }

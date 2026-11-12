@@ -108,6 +108,7 @@ A Volume is a disk a MicroVM names in its `spec.volumes`. Its semantics follow K
   - `state`: `Discovered` while `spec.admitted` is false, `Admitted` once it is true. The Node Agent writes it. Any other value is refused.
   - `capacity`: cpu, memory and storage, from mvmd's runtime info. The Node Agent writes it.
   - `addresses`: the Node Agent writes it.
+  - `microvmPrefixes`: the CIDR prefixes the Node's MicroVMs are addressed from, which the Node Agent writes from mvmd's runtime info. The cluster learns from it which Node owns which prefix. A Node whose mvmd reports none has none, and a value that is not a CIDR is refused.
   - `conditions`: each has a `status` of `True`, `False` or `Unknown`, and any other value is refused. `Ready` is written by the Node Agent. `LeaseExpired` is written by the node lifecycle controller.
 - **Each writer changes only its own fields**, by compare-and-swap on the whole object, as §Common rules states for every write.
 - **The Node's Lease** is one Lease per Node, named as the Node.
@@ -195,7 +196,7 @@ Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where
 | `GET /volumes/{name}` | all | read one Volume |
 | `GET /volumes?watch=true` | all | subscribe to changes |
 | `PUT /nodes/{name}` | users, Node Agent | users create a Node and admit it; the Node Agent only creates it |
-| `PUT /nodes/{name}/status` | Node Agent, controllers | report state, capacity, addresses and conditions |
+| `PUT /nodes/{name}/status` | Node Agent, controllers | report state, capacity, addresses, MicroVM prefixes and conditions |
 | `GET /nodes` | all | list, with the `resourceVersion` to watch from |
 | `GET /nodes/{name}` | all | read one Node |
 | `GET /nodes?watch=true` | all | subscribe to changes |
