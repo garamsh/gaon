@@ -279,11 +279,12 @@ The group `rbac.gaon.garam.sh/v1alpha1` has the root `/apis/rbac.gaon.garam.sh/v
 
   | Role (group bound) | Rules |
   |---|---|
-  | `gaon:scheduler` (`gaon:schedulers`) | `microvms`, `nodes`, `volumes`: `get`, `list`, `watch`; `microvms/binding`: `create`; `microvms/status`: `update` |
-  | `gaon:controllers` (`gaon:controllers`) | `microvms`, `nodes`, `leases`, `certificatesigningrequests`: `get`, `list`, `watch`; `microvms`: `create`, `update`; `microvms/status`, `nodes/status`, `volumes/status`, `certificatesigningrequests/status`: `update` |
+  | `gaon:scheduler` (`gaon:schedulers`) | `microvms`, `nodes`, `volumes`: `get`, `list`, `watch`; `microvms/binding`: `create`; `microvms/status`: `update`; `leases` of `coordination.gaon.garam.sh`: `get`, `create`, `update` |
+  | `gaon:controllers` (`gaon:controllers`) | every resource of every group: `get`, `list`, `watch`, `delete`; `microvms`: `create`, `update`; `microvms/status`, `nodes/status`, `volumes/status`, `certificatesigningrequests/status`: `update`; `leases` of `coordination.gaon.garam.sh`: `get`, `create`, `update` |
   | `gaon:admin` (`gaon:admins`) | `*` on `*` for every API group |
 
-- **An existing cluster** keeps the roles it has, so its `gaon:scheduler` lacks `volumes` and the scheduler's list of Volumes is `Forbidden` until an administrator adds the rule to the role, or deletes the role so the next API server start creates it ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)).
+- **The coordination Lease and the controllers' read and delete** are [ADR 0021](./adr/0021-the-bootstrap-roles-give-the-scheduler-and-the-controllers-the-coordination-lease-and-the-controllers-read-and-delete-every-resource.md)'s: the scheduler and the controllers take and renew their own Lease, and the controllers read and delete any object, a custom one included, which the garbage collector needs.
+- **An existing cluster** keeps the roles it has, so its `gaon:scheduler` lacks `volumes` and the scheduler's list of Volumes is `Forbidden` until an administrator adds the rule to the role, or deletes the role so the next API server start creates it ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)). The same holds for the Lease rules and the controllers' read and delete of ADR 0021.
 - The types are in `lib/api/`: `ClusterRole`, `PolicyRule` (with `AllowsLabels` and `AllowsSelector`), `ClusterRoleBinding`, `RoleRef` and `Subject`.
 
 ### CustomResourceDefinition
@@ -331,6 +332,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - Event types, PascalCase as every enum is:
   - `Added`, `Modified` and `Deleted` carry the resource being watched (a MicroVM, a Volume, a Node, a Lease, an Event, a CertificateSigningRequest, a ClusterRole, a ClusterRoleBinding, a CustomResourceDefinition, a MutatingWebhookConfiguration, a ValidatingWebhookConfiguration or an object of a registered kind) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
   - `Error` carries the error object, and is the last event of its stream.
+- A watch with a `labelSelector` is judged on the object before and after each change. A `Modified` change whose previous value the Store has compacted cannot be judged and ends the stream with `Expired`.
 - The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422, `Expired` 410, `Unauthorized` 401, `Forbidden` 403 and `InternalError` 500. `Unauthorized` is a request with no client certificate and a missing or invalid bearer token; `Forbidden` is a valid token on any request other than creating a CertificateSigningRequest or reading one it created, and, in the `RBAC` mode, a request by certificate that neither the Node authorizer nor a bound role allows (§Authorization), or a validating or mutating webhook refuses (§Admission webhooks); `InternalError` is a write refused because a call to a webhook whose `failurePolicy` is `Fail` failed.
 - An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
 - The Lease of the coordination group is watched the same way, and so is every custom resource.
