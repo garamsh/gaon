@@ -79,6 +79,14 @@ func (s *service) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list machines: %w", err)
 	}
+	var errs []error
+	volumes, err := s.listVolumes(ctx)
+	if err != nil {
+		if !errors.Is(err, api.ErrForbidden) {
+			return err
+		}
+		errs = append(errs, err)
+	}
 	book, err := newLedger(nodes.Items, machines.Items)
 	if err != nil {
 		return err
@@ -91,32 +99,48 @@ func (s *service) Reconcile(ctx context.Context) error {
 	items := slices.SortedFunc(slices.Values(machines.Items), func(a, b api.Machine) int {
 		return strings.Compare(a.Metadata.Name, b.Metadata.Name)
 	})
-	var errs []error
 	for i := range items {
 		m := &items[i]
 		if m.Metadata.DeletionTimestamp != nil {
+			continue
+		}
+		if volumes == nil && len(m.Spec.Volumes) > 0 {
 			continue
 		}
 		rebinding := m.Spec.NodeName != ""
 		if rebinding && !expired[m.Spec.NodeName] {
 			continue
 		}
-		if err := s.place(ctx, book, m, rebinding); err != nil {
+		if err := s.place(ctx, book, m, needOf(m, volumes), rebinding); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
 }
 
+// listVolumes returns the Volumes by name. After a failed list the map is nil,
+// and Machines that name a Volume wait for a pass where it succeeds.
+func (s *service) listVolumes(ctx context.Context) (map[string]*api.Volume, error) {
+	list, err := s.client.ListVolumes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list volumes: %w", err)
+	}
+	byName := make(map[string]*api.Volume, len(list.Items))
+	for i := range list.Items {
+		byName[list.Items[i].Metadata.Name] = &list.Items[i]
+	}
+	return byName, nil
+}
+
 // place binds m to the Node choose picks. An unbound m that fits none, or whose
 // placement failed on an extender, gets a Scheduled condition saying why; a
 // rebound m keeps the status of its dead Node's epoch, which nobody rewrites.
-func (s *service) place(ctx context.Context, book *ledger, m *api.Machine, rebinding bool) error {
+func (s *service) place(ctx context.Context, book *ledger, m *api.Machine, vols volumeNeed, rebinding bool) error {
 	r, err := requests(m)
 	if err != nil {
 		return err
 	}
-	node, refused, err := s.choose(ctx, book, m, r)
+	node, refused, err := s.choose(ctx, book, m, demand{req: r, volumes: vols})
 	if err != nil {
 		s.log.Warn("not placed", "machine", m.Metadata.Name, "err", err)
 		if rebinding {

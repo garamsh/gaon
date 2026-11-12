@@ -37,14 +37,14 @@ func (r refusals) String() string {
 // every filter, and the Nodes each filter or extender refused. A non-nil error
 // is a failed call to an extender that is not ignorable: m is not placed this
 // pass.
-func (s *service) choose(ctx context.Context, book *ledger, m *api.Machine, req resources) (string, refusals, error) {
+func (s *service) choose(ctx context.Context, book *ledger, m *api.Machine, d demand) (string, refusals, error) {
 	refused := refusals{}
 	var candidates []string
 	for _, name := range book.names {
 		view := book.views[name]
 		var by, reason string
 		for _, f := range filterPlugins {
-			if reason = f.Filter(req, view); reason != "" {
+			if reason = f.Filter(d, view); reason != "" {
 				by = f.Name()
 				break
 			}
@@ -83,7 +83,7 @@ func (s *service) choose(ctx context.Context, book *ledger, m *api.Machine, req 
 	scores := map[string]int{}
 	for _, ws := range s.scores {
 		for _, name := range candidates {
-			scores[name] += ws.weight * ws.plugin.Score(req, book.views[name])
+			scores[name] += ws.weight * ws.plugin.Score(d.req, book.views[name])
 		}
 	}
 	for _, e := range s.extenders {
