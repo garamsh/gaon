@@ -1,0 +1,38 @@
+# What gaon-workloads is allowed, applied by an administrator with
+# `gaon apply -f workloads/deploy/rbac.yaml`. The unit's certificate has the
+# common name gaon-workloads, which the binding names. The unit registers the
+# Job kind itself (ADR 0024), so it may create and update the definitions it
+# labels, and write the MicroVMs it labels.
+apiVersion: rbac.gaon.garam.sh/v1alpha1
+kind: ClusterRole
+metadata:
+  name: gaon:workloads
+rules:
+  - apiGroups: [apiextensions.gaon.garam.sh]
+    resources: [customresourcedefinitions]
+    verbs: [create, update]
+    labelSelector: workloads.gaon.garam.sh/managed-by=gaon-workloads
+  - apiGroups: [apiextensions.gaon.garam.sh]
+    resources: [customresourcedefinitions]
+    verbs: [get]
+  - apiGroups: [compute.gaon.garam.sh]
+    resources: [microvms]
+    verbs: [create, get, list]
+    labelSelector: workloads.gaon.garam.sh/managed-by=gaon-workloads
+  - apiGroups: [workloads.gaon.garam.sh]
+    resources: [jobs]
+    verbs: [get, list, watch]
+  - apiGroups: [workloads.gaon.garam.sh]
+    resources: [jobs/status]
+    verbs: [update]
+---
+apiVersion: rbac.gaon.garam.sh/v1alpha1
+kind: ClusterRoleBinding
+metadata:
+  name: gaon:workloads
+roleRef:
+  kind: ClusterRole
+  name: gaon:workloads
+subjects:
+  - kind: User
+    name: gaon-workloads

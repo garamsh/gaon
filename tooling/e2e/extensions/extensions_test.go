@@ -2,8 +2,8 @@
 
 // Package extensions runs the built gaon services against an embedded etcd
 // with authorization on and shows the extension points work: custom
-// resources, an external controller under RBAC, an admission webhook and a
-// scheduler extender. Nothing here needs KVM; `make e2e-extensions` sets the
+// resources, an external controller under RBAC, an admission webhook, a
+// scheduler extender and the workloads unit. Nothing here needs KVM; `make e2e-extensions` sets the
 // environment the test reads.
 package extensions
 
@@ -54,9 +54,10 @@ var widgetType = api.CustomResourceType{Group: crdGroup, Version: crdVersion, Ki
 
 // cluster is the running system and the clients of the test.
 type cluster struct {
-	ca     *authority
-	server string // https://host:port
-	root   string // the compute API root
+	dir, binDir string
+	ca          *authority
+	server      string // https://host:port
+	root        string // the compute API root
 	// admin is the administrator's client of the compute group; rbac, defs and
 	// hooks are its clients of the other groups.
 	admin, rbac, defs, hooks *api.Client
@@ -79,6 +80,7 @@ func TestExtensions(t *testing.T) {
 	t.Run("external_controller_is_bound_by_rbac", c.externalController)
 	t.Run("webhook_refuses_a_marked_object", c.webhookRefuses)
 	t.Run("extender_filters_out_the_preferred_node", c.extenderFilters)
+	t.Run("workloads_run_a_job_to_completion", c.jobsRun)
 	t.Run("no_service_logged_forbidden", c.noForbidden)
 }
 
@@ -103,7 +105,7 @@ func startCluster(t *testing.T, binDir string) *cluster {
 		"--tls-client-ca", ca.CertFile, "--tls-cert", serverID.CertFile, "--tls-key", serverID.KeyFile,
 		"--bootstrap-token-file", tokenFile, "--authorization-mode", "RBAC")
 	server := "https://" + apiserver.serverAddress(t)
-	c := &cluster{ca: ca, server: server, root: server + "/apis/" + api.GroupVersion, hook: ca.server(t, "webhook")}
+	c := &cluster{dir: dir, binDir: binDir, ca: ca, server: server, root: server + "/apis/" + api.GroupVersion, hook: ca.server(t, "webhook")}
 	c.admin = c.client(t, adminID, api.GroupVersion)
 	c.rbac = c.client(t, adminID, api.RBACGroupVersion)
 	c.defs = c.client(t, adminID, api.APIExtensionsGroupVersion)
