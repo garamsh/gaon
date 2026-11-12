@@ -74,6 +74,7 @@ func (s *Server) CreateMachine(_ context.Context, r *v1alpha2.CreateMachineReque
 	}
 	s.machines[m.Id] = m
 	s.requests[m.Id] = proto.Clone(r).(*v1alpha2.CreateMachineRequest)
+	s.resend(m.Id)
 	return &v1alpha2.CreateMachineResponse{Machine: proto.Clone(m).(*v1alpha2.Machine)}, nil
 }
 
@@ -89,6 +90,7 @@ func (s *Server) StartMachine(_ context.Context, r *v1alpha2.StartMachineRequest
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_PRECONDITION_FAILED, "fencing deadline is not armed")
 	}
 	m.State = v1alpha2.MachineState_MACHINE_STATE_RUNNING
+	s.resend(m.Id)
 	return &v1alpha2.StartMachineResponse{Machine: proto.Clone(m).(*v1alpha2.Machine)}, nil
 }
 

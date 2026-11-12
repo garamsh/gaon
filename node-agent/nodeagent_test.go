@@ -46,11 +46,13 @@ func TestParseConfig_ReadsEveryValueFromItsEnvironmentVariable(t *testing.T) {
 		nodeagent.EnvRestartBackoff:    "3s",
 		nodeagent.EnvRestartBackoffMax: "2m",
 		nodeagent.EnvRestartResetAfter: "8m",
+
+		nodeagent.EnvServiceAccountAudience: "https://env.example",
 	}), io.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, nodeagent.Config{
 		APIServer: "http://api", HTTPClient: &http.Client{}, NodeName: "node-a", MvmdSocket: "/s.sock", ResyncPeriod: 7 * time.Second,
-		RestartBackoff: 3 * time.Second, RestartBackoffMax: 2 * time.Minute, RestartResetAfter: 8 * time.Minute,
+		RestartBackoff: 3 * time.Second, RestartBackoffMax: 2 * time.Minute, RestartResetAfter: 8 * time.Minute, ServiceAccountAudience: "https://env.example",
 		PluginDir: plugin.DefaultDir,
 		Liveness:  liveness.Params{LeaseDuration: 40 * time.Second, RenewPeriod: 6 * time.Second, DeadlineLength: 20 * time.Second, Delta: 4 * time.Second, RPCTimeout: 3 * time.Second},
 	}, cfg)
@@ -96,7 +98,7 @@ func TestParseConfig_DefaultsDeltaToOneSecondAndEveryDefaultPassesTheChecks(t *t
 }
 
 func TestParseConfig_FlagsOverrideEnvironment(t *testing.T) {
-	cfg, err := nodeagent.ParseConfig([]string{"--node-name=from-flag", "--api-server", "http://flag", "--mvmd-socket=/f.sock", "--delta=2s", "--restart-backoff=4s", "--restart-backoff-max=1m", "--restart-reset-after=2m"}, env(required), io.Discard)
+	cfg, err := nodeagent.ParseConfig([]string{"--node-name=from-flag", "--api-server", "http://flag", "--mvmd-socket=/f.sock", "--delta=2s", "--restart-backoff=4s", "--restart-backoff-max=1m", "--restart-reset-after=2m", "--service-account-audience=https://flag.example"}, env(required), io.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, "from-flag", cfg.NodeName)
 	assert.Equal(t, "http://flag", cfg.APIServer)
@@ -105,6 +107,7 @@ func TestParseConfig_FlagsOverrideEnvironment(t *testing.T) {
 	assert.Equal(t, 4*time.Second, cfg.RestartBackoff)
 	assert.Equal(t, time.Minute, cfg.RestartBackoffMax)
 	assert.Equal(t, 2*time.Minute, cfg.RestartResetAfter)
+	assert.Equal(t, "https://flag.example", cfg.ServiceAccountAudience)
 }
 
 func TestParseConfig_RefusesAPluginDirectoryWhoseSocketPathIsOverTheLimit(t *testing.T) {
