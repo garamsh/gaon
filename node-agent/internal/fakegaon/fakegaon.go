@@ -33,15 +33,26 @@ type Server struct {
 	changed  chan struct{}
 	failures map[string]bool
 	puts     []api.Lease
+	csrs     map[string]api.CertificateSigningRequest
+	tls      *tlsState
 }
 
 // New starts a fake and stops it when the test ends.
 func New(t testing.TB) *Server {
 	t.Helper()
+	s, mux := newServer()
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	s.URL = ts.URL
+	return s
+}
+
+func newServer() (*Server, *http.ServeMux) {
 	s := &Server{
 		machines: map[string]api.Machine{},
 		nodes:    map[string]api.Node{},
 		leases:   map[string]api.Lease{},
+		csrs:     map[string]api.CertificateSigningRequest{},
 		changed:  make(chan struct{}),
 		failures: map[string]bool{},
 	}
@@ -55,10 +66,9 @@ func New(t testing.TB) *Server {
 	mux.HandleFunc("PUT /nodes/{name}/status", s.putNodeStatus)
 	mux.HandleFunc("GET /leases/{name}", s.getLease)
 	mux.HandleFunc("PUT /leases/{name}", s.putLease)
-	ts := httptest.NewServer(mux)
-	t.Cleanup(ts.Close)
-	s.URL = ts.URL
-	return s
+	mux.HandleFunc("PUT /certificatesigningrequests/{name}", s.putCSR)
+	mux.HandleFunc("GET /certificatesigningrequests/{name}", s.getCSR)
+	return s, mux
 }
 
 // FailLeaseWrites makes every Lease write fail with a server error while on
