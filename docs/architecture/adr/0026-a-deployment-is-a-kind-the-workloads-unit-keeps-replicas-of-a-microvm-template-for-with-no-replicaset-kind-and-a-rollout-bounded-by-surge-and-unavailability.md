@@ -17,7 +17,7 @@ Append-only: once merged, the body below is not rewritten. A fact later found wr
 
 ## Decision
 
-**The unit registers a fourth definition, `Deployment`, and keeps `spec.replicas` MicroVMs of `spec.template` running, replacing them one bounded step per sweep when the template changes. There is no ReplicaSet kind: the Deployment owns its MicroVMs directly, and a label records which template each was made from.**
+**The unit registers a third definition, `Deployment`, and keeps `spec.replicas` MicroVMs of `spec.template` running, replacing them one bounded step per sweep when the template changes. There is no ReplicaSet kind: the Deployment owns its MicroVMs directly, and a label records which template each was made from.**
 
 1. **The kind.** `Deployment`, plural `deployments`, group `workloads.gaon.garam.sh`, version `v1alpha1`, cluster scoped, with a `status` subresource.
    - `spec.replicas` (required, at least 0), `spec.selector.matchLabels` (required, must not be empty), `spec.template` (required, a MicroVM spec; `runStrategy` is forced to `Always` and the binding is cleared), `spec.strategy`.
