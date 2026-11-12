@@ -2,6 +2,7 @@ package resourceapi
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/garamsh/gaon/lib/api"
@@ -66,7 +67,9 @@ func (s *service) updateMachine(ctx context.Context, m *api.Machine) (*api.Machi
 }
 
 // BindMachine sets the node and the epoch of the Machine if b carries its
-// current version and the epoch after its current one.
+// current version and the epoch after its current one. It pins each Volume
+// the Machine uses to the node in the same transaction, and writes nothing if
+// the Machine or any Volume it uses changed since they were read.
 func (s *service) BindMachine(ctx context.Context, name string, b api.Binding) (*api.Machine, error) {
 	if err := s.mutateBinding(ctx, name, &b); err != nil {
 		return nil, err
@@ -82,10 +85,109 @@ func (s *service) BindMachine(ctx context.Context, name string, b api.Binding) (
 		return nil, err
 	}
 	m.Metadata.Generation++
+	used, err := s.pinVolumes(ctx, m, b.NodeName)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.validateBinding(ctx, name, b); err != nil {
 		return nil, err
 	}
-	return m, machines.update(ctx, s.st, m, rev)
+	for _, u := range used {
+		if u.pinned == nil {
+			continue
+		}
+		if err := validate(ctx, s, volumes, "", api.OperationUpdate, u.pinned, u.stored); err != nil {
+			return nil, err
+		}
+	}
+	return m, s.commitBinding(ctx, m, rev, used)
+}
+
+// usedVolume is a Volume a Machine being bound uses, as stored and at the
+// revision it was read at. pinned is the Volume the binding writes, or nil
+// where the binding changes nothing of it.
+type usedVolume struct {
+	stored   *api.Volume
+	revision int64
+	pinned   *api.Volume
+}
+
+// pinVolumes reads the Volumes m uses and pins them to node, sending each
+// change to the mutating webhooks. A webhook may not change what the pin set.
+func (s *service) pinVolumes(ctx context.Context, m *api.Machine, node string) ([]*usedVolume, error) {
+	var used []*usedVolume
+	byName := map[string]*usedVolume{}
+	pinning := map[string]*api.Volume{}
+	for _, mv := range m.Spec.Volumes {
+		if byName[mv.Name] != nil {
+			continue
+		}
+		v, vrev, err := volumes.get(ctx, s.st, mv.Name)
+		if errors.Is(err, api.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		u := &usedVolume{stored: v, revision: vrev}
+		byName[mv.Name] = u
+		used = append(used, u)
+		c := *v
+		c.Metadata.Finalizers = slices.Clone(v.Metadata.Finalizers)
+		pinning[mv.Name] = &c
+	}
+	changed, err := m.PinVolumes(node, pinning)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range changed {
+		u := byName[v.Metadata.Name]
+		pinned := *v
+		if err := mutateAgainst(ctx, s, volumes, "", api.OperationUpdate, v, u.stored); err != nil {
+			return nil, err
+		}
+		if !sameJSON(v.Spec, pinned.Spec) || !slices.Equal(v.Metadata.Finalizers, pinned.Metadata.Finalizers) {
+			return nil, api.NewAPIError(api.ReasonInvalid, "a webhook changed the spec or the finalizers the binding set on volume %q", v.Metadata.Name)
+		}
+		v.Status, v.Metadata.DeletionTimestamp = u.stored.Status, u.stored.Metadata.DeletionTimestamp
+		v.Metadata.Generation = nextGeneration(u.stored.Metadata.Generation, u.stored.Spec, v.Spec)
+		u.pinned = v
+	}
+	return used, nil
+}
+
+// commitBinding writes m and the pinned Volumes in one transaction. Each Volume
+// m uses holds its place in it, so that a change to one of them since it was
+// read refuses the binding.
+func (s *service) commitBinding(ctx context.Context, m *api.Machine, rev int64, used []*usedVolume) error {
+	value, err := machines.encode(m)
+	if err != nil {
+		return err
+	}
+	writes := []Write{{Key: machines.key(m.Metadata.Name), Value: value, Revision: rev}}
+	for _, u := range used {
+		w := Write{Key: volumes.key(u.stored.Metadata.Name), Revision: u.revision}
+		if u.pinned != nil {
+			if w.Value, err = volumes.encode(u.pinned); err != nil {
+				return err
+			}
+		}
+		writes = append(writes, w)
+	}
+	got, err := s.st.Transact(ctx, writes)
+	if errors.Is(err, ErrStale) {
+		return api.NewAPIError(api.ReasonConflict, "machine %q or a volume it uses was changed since it was read", m.Metadata.Name)
+	}
+	if err != nil {
+		return err
+	}
+	m.Metadata.ResourceVersion = version(got)
+	for _, u := range used {
+		if u.pinned != nil {
+			u.pinned.Metadata.ResourceVersion = version(got)
+		}
+	}
+	return nil
 }
 
 // PutMachineStatus replaces the status of the stored Machine m was read at,

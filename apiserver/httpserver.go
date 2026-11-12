@@ -55,6 +55,10 @@ func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tok
 	mux.HandleFunc("DELETE "+root+"/machines/{name}", h.guard(api.Group, "machines", fixed(api.VerbDelete), deleteObject(h, svc.DeleteMachine)))
 	mux.HandleFunc("GET "+root+"/machines/{name}", h.guard(api.Group, "machines", fixed(api.VerbGet), get(h, svc.GetMachine)))
 	mux.HandleFunc("GET "+root+"/machines", h.guard(api.Group, "machines", readVerb, listOrWatch(h, svc.ListMachines, svc.WatchMachines)))
+	mux.HandleFunc("PUT "+root+"/volumes/{name}", h.guard(api.Group, "volumes", putVerb, h.putVolume(svc)))
+	mux.HandleFunc("DELETE "+root+"/volumes/{name}", h.guard(api.Group, "volumes", fixed(api.VerbDelete), deleteObject(h, svc.DeleteVolume)))
+	mux.HandleFunc("GET "+root+"/volumes/{name}", h.guard(api.Group, "volumes", fixed(api.VerbGet), get(h, svc.GetVolume)))
+	mux.HandleFunc("GET "+root+"/volumes", h.guard(api.Group, "volumes", readVerb, listOrWatch(h, svc.ListVolumes, svc.WatchVolumes)))
 	mux.HandleFunc("PUT "+root+"/volumes/{name}/status", h.guard(api.Group, "volumes/status", fixed(api.VerbUpdate), put(h, svc.PutVolumeStatus)))
 	mux.HandleFunc("PUT "+root+"/nodes/{name}", h.guard(api.Group, "nodes", putVerb, put(h, svc.PutNode)))
 	mux.HandleFunc("PUT "+root+"/nodes/{name}/status", h.guard(api.Group, "nodes/status", fixed(api.VerbUpdate), put(h, svc.PutNodeStatus)))
@@ -284,6 +288,26 @@ func (h *handler) putMachine(svc resourceapi.Service) http.HandlerFunc {
 			}
 		}
 		out, err := svc.PutMachine(r.Context(), name, &in)
+		h.respond(w, r, out, err)
+	}
+}
+
+// putVolume writes a Volume, and an update of one only as far as the caller's
+// grant reaches: a Node's grant is its finalizer.
+func (h *handler) putVolume(svc resourceapi.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in api.Volume
+		if !h.decode(w, r, &in) {
+			return
+		}
+		name := r.PathValue("name")
+		if in.Metadata.ResourceVersion != "" {
+			if err := h.az.AuthorizeVolumeUpdate(r.Context(), callerOf(r).caller(), name, &in); err != nil {
+				h.fail(w, r, err)
+				return
+			}
+		}
+		out, err := svc.PutVolume(r.Context(), name, &in)
 		h.respond(w, r, out, err)
 	}
 }

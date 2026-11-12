@@ -43,7 +43,7 @@ func TestBootstrap_TheRulesAreThoseOfADR0008(t *testing.T) {
 
 	read := []api.Verb{api.VerbGet, api.VerbList, api.VerbWatch}
 	assert.Equal(t, []api.PolicyRule{
-		{APIGroups: []string{api.Group}, Resources: []string{"machines", "nodes"}, Verbs: read},
+		{APIGroups: []string{api.Group}, Resources: []string{"machines", "nodes", "volumes"}, Verbs: read},
 		{APIGroups: []string{api.Group}, Resources: []string{"machines/binding"}, Verbs: []api.Verb{api.VerbCreate}},
 		{APIGroups: []string{api.Group}, Resources: []string{"machines/status"}, Verbs: []api.Verb{api.VerbUpdate}},
 	}, scheduler.Rules)

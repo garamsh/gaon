@@ -109,6 +109,25 @@ func (s *Store) Delete(ctx context.Context, key string, revision int64) (resourc
 	return entry(prev.Key, prev.Value, resp.Header.Revision), nil
 }
 
+func (s *Store) Transact(ctx context.Context, writes []resourceapi.Write) (int64, error) {
+	var conds []clientv3.Cmp
+	var ops []clientv3.Op
+	for _, w := range writes {
+		conds = append(conds, clientv3.Compare(clientv3.ModRevision(w.Key), "=", w.Revision))
+		if w.Value != nil {
+			ops = append(ops, clientv3.OpPut(w.Key, string(w.Value)))
+		}
+	}
+	resp, err := s.cli.Txn(ctx).If(conds...).Then(ops...).Commit()
+	if err != nil {
+		return 0, fmt.Errorf("transact over %d keys: %w", len(writes), err)
+	}
+	if !resp.Succeeded {
+		return 0, resourceapi.ErrStale
+	}
+	return resp.Header.Revision, nil
+}
+
 func (s *Store) Watch(ctx context.Context, prefix string, revision int64) (<-chan resourceapi.Event, error) {
 	in := s.cli.Watch(ctx, prefix, clientv3.WithPrefix(), clientv3.WithRev(revision+1), clientv3.WithPrevKV())
 	out := make(chan resourceapi.Event)

@@ -146,11 +146,11 @@ func TestCustomObject_OnlyThePathOfAServedKindAndVersionExists(t *testing.T) {
 	base := "/apis/" + appsGroup
 
 	for name, path := range map[string]string{
-		"another version": base + "/v1/widgets",
-		"another plural":  base + "/v1alpha1/gadgets",
-		"another group":   "/apis/other.gaon.garam.sh/v1alpha1/widgets",
-		"the singular":    base + "/v1alpha1/widget",
-		"a core plural":   "/apis/" + api.GroupVersion + "/volumes",
+		"another version":                    base + "/v1/widgets",
+		"another plural":                     base + "/v1alpha1/gadgets",
+		"another group":                      "/apis/other.gaon.garam.sh/v1alpha1/widgets",
+		"the singular":                       base + "/v1alpha1/widget",
+		"a built-in plural of another group": "/apis/" + api.GroupVersion + "/clusterroles",
 	} {
 		code, _ := e.sendAbsolute(t, http.MethodGet, path, "")
 		assert.Equal(t, http.StatusNotFound, code, name)

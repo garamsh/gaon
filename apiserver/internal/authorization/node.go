@@ -32,8 +32,18 @@ func (a *rbac) node(ctx context.Context, user string, r Request) (bool, error) {
 		if r.Verb == api.VerbUpdate {
 			return a.bound(ctx, user, r.Name)
 		}
+	case "volumes":
+		switch r.Verb {
+		case api.VerbGet, api.VerbList, api.VerbWatch:
+			return a.isNode(ctx, user)
+		case api.VerbUpdate:
+			return a.pinned(ctx, user, r.Name)
+		}
 	case "volumes/status":
 		if r.Verb == api.VerbUpdate {
+			if ok, err := a.pinned(ctx, user, r.Name); ok || err != nil {
+				return ok, err
+			}
 			return a.uses(ctx, user, r.Name)
 		}
 	case "certificatesigningrequests":
@@ -60,6 +70,15 @@ func (a *rbac) bound(ctx context.Context, user, name string) (bool, error) {
 		return false, err
 	}
 	return m.Spec.NodeName == user, nil
+}
+
+// pinned reports whether the Volume name is pinned to the Node user.
+func (a *rbac) pinned(ctx context.Context, user, name string) (bool, error) {
+	v, err := a.src.GetVolume(ctx, name)
+	if ok, err := found(err); !ok || err != nil {
+		return false, err
+	}
+	return v.Spec.NodeName == user, nil
 }
 
 // uses reports whether a Machine bound to the Node user mounts the Volume
