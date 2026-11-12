@@ -269,10 +269,15 @@ func runDelete(ctx context.Context, c *api.Client, args []string, out io.Writer)
 	if k.del == nil {
 		return refusal("delete", k, "DELETE", "/{name}")
 	}
-	if err := k.del(ctx, c, operands[1]); err != nil {
+	marked, err := k.del(ctx, c, operands[1])
+	if err != nil {
 		return fmt.Errorf("delete %s/%s: %w", k.name, operands[1], err)
 	}
-	fmt.Fprintf(out, "%s/%s marked for deletion\n", k.name, operands[1])
+	if marked {
+		fmt.Fprintf(out, "%s/%s marked for deletion\n", k.name, operands[1])
+		return nil
+	}
+	fmt.Fprintf(out, "%s/%s deleted\n", k.name, operands[1])
 	return nil
 }
 

@@ -14,7 +14,7 @@ Basis: [resource-api.md](./resource-api.md) §Paths and the types of `lib/api/`.
 | `gaon get [-o table\|yaml\|json] KIND` | Prints every resource of a kind. Default `table`. |
 | `gaon get [-o table\|yaml\|json] KIND NAME` | Prints one resource. Default `table`. |
 | `gaon describe KIND NAME` | Prints one resource as labelled lines and its status conditions. |
-| `gaon delete KIND NAME` | Sets the `deletionTimestamp` of a resource. |
+| `gaon delete KIND NAME` | Sets the `deletionTimestamp` of a resource, which the server removes at once if no finalizer holds it. |
 
 - **Global flag:** `--server URL` is the group and version root of the resource API, `http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1`, in full; `GAON_SERVER` is its default. It comes before the command. With neither, the CLI exits with a usage error.
 - **TLS flags:** `--tls-ca`, `--tls-cert` and `--tls-key` come before the command, like `--server`, and have no environment variable. All three give a mutual TLS 1.3 client built by `lib/api/` that trusts only the CA file; none gives plain HTTP, for a loopback server. One or two, or a file that cannot be read or does not fit, end the CLI with a usage error naming what is missing, before any request.
@@ -75,7 +75,7 @@ An empty value prints as `-`.
 
 ### Delete
 
-`delete` reads the resource, then deletes it at the version it read. A change between the two is reported as a `Conflict`. The resource is only marked; the Node Agent removes its finalizer after release.
+`delete` reads the resource, then deletes it at the version it read. A change between the two is reported as a `Conflict`. What it prints follows the server's answer. A resource that still has finalizers comes back with its `deletionTimestamp` set; the command prints `KIND/NAME marked for deletion`, and the owner of each finalizer removes it after its work is done (a Machine's Node Agent after release). A resource with no finalizer, such as a Volume with no `nodeName` or a Machine the Node Agent has not yet started, is removed by the server at once, and the command prints `KIND/NAME deleted`.
 
 ## Rationale
 

@@ -413,18 +413,42 @@ func TestGet_ReadsFlagsWhereverTheyStandAmongTheOperands(t *testing.T) {
 	})
 }
 
-func TestApply_CreatesAVolumeAndDeleteMarksIt(t *testing.T) {
+func TestApply_CreatesAVolume(t *testing.T) {
 	f := newFakeServer(t)
 
 	stdout, stderr, code := execute(t, f, "apply", "-f", writeFile(t, volumeYAML))
 	require.Equal(t, command.ExitOK, code, stderr)
 	assert.Equal(t, "volume/data created\n", stdout)
 	assert.Equal(t, "10Gi", string(load[api.Volume](f, "/volumes/data").Spec.Storage))
+}
 
-	stdout, stderr, code = execute(t, f, "delete", "volumes", "data")
-	require.Equal(t, command.ExitOK, code, stderr)
-	assert.Equal(t, "volume/data marked for deletion\n", stdout)
-	assert.NotNil(t, load[api.Volume](f, "/volumes/data").Metadata.DeletionTimestamp)
+func TestDelete_ReportsWhatTheServerAnswered(t *testing.T) {
+	t.Run("an object with a finalizer is marked, and stays", func(t *testing.T) {
+		f := newFakeServer(t)
+		m := newMachine("web", api.RunAlways)
+		m.Metadata.Finalizers = []string{api.NodeAgentFinalizer}
+		f.seed("/machines/web", m)
+
+		stdout, stderr, code := execute(t, f, "delete", "machine", "web")
+
+		require.Equal(t, command.ExitOK, code, stderr)
+		assert.Equal(t, "machine/web marked for deletion\n", stdout)
+		assert.NotNil(t, load[api.Machine](f, "/machines/web").Metadata.DeletionTimestamp)
+	})
+
+	t.Run("a volume with no finalizer is removed at once", func(t *testing.T) {
+		f := newFakeServer(t)
+		_, stderr, code := execute(t, f, "apply", "-f", writeFile(t, volumeYAML))
+		require.Equal(t, command.ExitOK, code, stderr)
+
+		stdout, stderr, code := execute(t, f, "delete", "volumes", "data")
+
+		require.Equal(t, command.ExitOK, code, stderr)
+		assert.Equal(t, "volume/data deleted\n", stdout)
+		_, stderr, code = execute(t, f, "get", "volume", "data")
+		assert.Equal(t, command.ExitFailure, code)
+		assert.Contains(t, stderr, "NotFound")
+	})
 }
 
 func TestDescribe_PrintsTheObjectAndItsStatusConditions(t *testing.T) {
@@ -504,7 +528,9 @@ func TestDescribe_PrintsTheObjectAndItsStatusConditions(t *testing.T) {
 func TestDelete_MarksAMachineForDeletionAtItsCurrentVersion(t *testing.T) {
 	t.Run("deletes", func(t *testing.T) {
 		f := newFakeServer(t)
-		f.seed("/machines/web", newMachine("web", api.RunAlways))
+		m := newMachine("web", api.RunAlways)
+		m.Metadata.Finalizers = []string{api.NodeAgentFinalizer}
+		f.seed("/machines/web", m)
 
 		stdout, stderr, code := execute(t, f, "delete", "machine", "web")
 

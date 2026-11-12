@@ -47,7 +47,7 @@ type kind struct {
 	collection          string
 	get                 func(ctx context.Context, c *api.Client, name string) (result, error)
 	list                func(ctx context.Context, c *api.Client) (result, error)
-	del                 func(ctx context.Context, c *api.Client, name string) error
+	del                 func(ctx context.Context, c *api.Client, name string) (marked bool, err error)
 	parse               func(doc []byte) (change, error)
 }
 
@@ -220,13 +220,19 @@ func (s spec[T, L]) kind() kind {
 		}
 	}
 	if s.del != nil {
-		k.del = func(ctx context.Context, c *api.Client, name string) error {
+		k.del = func(ctx context.Context, c *api.Client, name string) (bool, error) {
 			cur, err := s.get(c, ctx, name)
 			if err != nil {
-				return err
+				return false, err
 			}
-			_, err = s.del(c, ctx, name, s.meta(cur).ResourceVersion)
-			return err
+			res, err := s.del(c, ctx, name, s.meta(cur).ResourceVersion)
+			if err != nil {
+				return false, err
+			}
+			// The answer shows which: an object that is still held by a
+			// finalizer comes back marked, any other has been removed.
+			m := s.meta(res)
+			return m.DeletionTimestamp != nil && len(m.Finalizers) > 0, nil
 		}
 	}
 	if s.put != nil {
