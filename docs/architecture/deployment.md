@@ -59,7 +59,6 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 ## Open questions
 
 - **Garbage collection of CertificateSigningRequests.** The contract has no delete path, so requests stay in the Store ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md)).
-- **Organization in a signed subject.** The signer signs the subject it is given today; until it refuses an Organization, `RBAC` mode lets a token holder obtain an administrator's certificate ([ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md)).
 - **Growth beyond one member.** More etcd members, and a control plane that is not one Node, wait for their own ADR; the scheduler and the controllers then need leader election or another way to run once.
 - **Skew policy.** Which Node Agent and API server versions work together is left to `v1beta1`.
 - **Node API.** How gaon calls naru's node API to apply a config is not decided ([ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md)).
