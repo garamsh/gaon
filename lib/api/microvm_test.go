@@ -74,7 +74,7 @@ func TestMicroVMValidateUpdate(t *testing.T) {
 		{"kernel changed", func(m *api.MicroVM) { m.Spec.Kernel = "6.12" }, false},
 		{"root disk size changed", func(m *api.MicroVM) { m.Spec.RootDiskSize = "10Gi" }, false},
 		{"networks changed", func(m *api.MicroVM) { m.Spec.Networks = []string{"default"} }, false},
-		{"ports changed", func(m *api.MicroVM) { m.Spec.Ports = []int32{22} }, false},
+		{"ports changed", func(m *api.MicroVM) { m.Spec.Ports = []api.MicroVMPort{{Port: 22, Protocol: api.ProtocolTCP}} }, false},
 		{"nodeSelector changed", func(m *api.MicroVM) { m.Spec.NodeSelector = map[string]string{"zone": "a"} }, false},
 		{"requiredCapabilities changed", func(m *api.MicroVM) { m.Spec.RequiredCapabilities = []string{"snapshot"} }, false},
 		{"nodeName changed", func(m *api.MicroVM) { m.Spec.NodeName = "node-b" }, false},

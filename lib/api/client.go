@@ -487,6 +487,112 @@ func watch[T any](ctx context.Context, c *Client, path, kind string, rv Resource
 	return newWatch[T](kind, resp.Body), nil
 }
 
+// PutSecret creates o, or changes it when o carries the ResourceVersion it was
+// read at (PUT /secrets/{name}). Call it on a client whose root is the compute
+// group's.
+func (c *Client) PutSecret(ctx context.Context, o *Secret) (*Secret, error) {
+	return put(ctx, c, "/secrets/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteSecret removes the named Secret, if it is still at version rv
+// (DELETE /secrets/{name}).
+func (c *Client) DeleteSecret(ctx context.Context, name string, rv ResourceVersion) (*Secret, error) {
+	if rv == "" {
+		return nil, errors.New("delete secrets: resource version is empty")
+	}
+	return call[Secret](ctx, c, http.MethodDelete, "/secrets/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetSecret returns the named Secret (GET /secrets/{name}).
+func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error) {
+	return call[Secret](ctx, c, http.MethodGet, "/secrets/"+url.PathEscape(name), nil, nil)
+}
+
+// ListSecrets returns every Secret and the version to watch from
+// (GET /secrets).
+func (c *Client) ListSecrets(ctx context.Context) (*SecretList, error) {
+	return call[SecretList](ctx, c, http.MethodGet, "/secrets", c.listQuery(), nil)
+}
+
+// WatchSecrets streams the changes made after version rv
+// (GET /secrets?watch=true).
+func (c *Client) WatchSecrets(ctx context.Context, rv ResourceVersion) (*Watch[Secret], error) {
+	return watch[Secret](ctx, c, "/secrets", KindSecret, rv)
+}
+
+// PutConfigMap creates o, or changes it when o carries the ResourceVersion it was
+// read at (PUT /configmaps/{name}). Call it on a client whose root is the compute
+// group's.
+func (c *Client) PutConfigMap(ctx context.Context, o *ConfigMap) (*ConfigMap, error) {
+	return put(ctx, c, "/configmaps/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteConfigMap removes the named ConfigMap, if it is still at version rv
+// (DELETE /configmaps/{name}).
+func (c *Client) DeleteConfigMap(ctx context.Context, name string, rv ResourceVersion) (*ConfigMap, error) {
+	if rv == "" {
+		return nil, errors.New("delete configmaps: resource version is empty")
+	}
+	return call[ConfigMap](ctx, c, http.MethodDelete, "/configmaps/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetConfigMap returns the named ConfigMap (GET /configmaps/{name}).
+func (c *Client) GetConfigMap(ctx context.Context, name string) (*ConfigMap, error) {
+	return call[ConfigMap](ctx, c, http.MethodGet, "/configmaps/"+url.PathEscape(name), nil, nil)
+}
+
+// ListConfigMaps returns every ConfigMap and the version to watch from
+// (GET /configmaps).
+func (c *Client) ListConfigMaps(ctx context.Context) (*ConfigMapList, error) {
+	return call[ConfigMapList](ctx, c, http.MethodGet, "/configmaps", c.listQuery(), nil)
+}
+
+// WatchConfigMaps streams the changes made after version rv
+// (GET /configmaps?watch=true).
+func (c *Client) WatchConfigMaps(ctx context.Context, rv ResourceVersion) (*Watch[ConfigMap], error) {
+	return watch[ConfigMap](ctx, c, "/configmaps", KindConfigMap, rv)
+}
+
+// PutServiceAccount creates o, or changes it when o carries the ResourceVersion it was
+// read at (PUT /serviceaccounts/{name}). Call it on a client whose root is the compute
+// group's.
+func (c *Client) PutServiceAccount(ctx context.Context, o *ServiceAccount) (*ServiceAccount, error) {
+	return put(ctx, c, "/serviceaccounts/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteServiceAccount removes the named ServiceAccount, if it is still at version rv
+// (DELETE /serviceaccounts/{name}).
+func (c *Client) DeleteServiceAccount(ctx context.Context, name string, rv ResourceVersion) (*ServiceAccount, error) {
+	if rv == "" {
+		return nil, errors.New("delete serviceaccounts: resource version is empty")
+	}
+	return call[ServiceAccount](ctx, c, http.MethodDelete, "/serviceaccounts/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetServiceAccount returns the named ServiceAccount (GET /serviceaccounts/{name}).
+func (c *Client) GetServiceAccount(ctx context.Context, name string) (*ServiceAccount, error) {
+	return call[ServiceAccount](ctx, c, http.MethodGet, "/serviceaccounts/"+url.PathEscape(name), nil, nil)
+}
+
+// ListServiceAccounts returns every ServiceAccount and the version to watch from
+// (GET /serviceaccounts).
+func (c *Client) ListServiceAccounts(ctx context.Context) (*ServiceAccountList, error) {
+	return call[ServiceAccountList](ctx, c, http.MethodGet, "/serviceaccounts", c.listQuery(), nil)
+}
+
+// WatchServiceAccounts streams the changes made after version rv
+// (GET /serviceaccounts?watch=true).
+func (c *Client) WatchServiceAccounts(ctx context.Context, rv ResourceVersion) (*Watch[ServiceAccount], error) {
+	return watch[ServiceAccount](ctx, c, "/serviceaccounts", KindServiceAccount, rv)
+}
+
+// CreateServiceAccountToken asks for a token of the ServiceAccount name, bound
+// to the MicroVM req names (POST /serviceaccounts/{name}/token). The answer's
+// status carries the token; nothing is stored.
+func (c *Client) CreateServiceAccountToken(ctx context.Context, name string, req *TokenRequest) (*TokenRequest, error) {
+	return call[TokenRequest](ctx, c, http.MethodPost, "/serviceaccounts/"+url.PathEscape(name)+"/token", nil, req)
+}
+
 func put[T any](ctx context.Context, c *Client, path string, in *T) (*T, error) {
 	return call[T](ctx, c, http.MethodPut, path, nil, in)
 }
