@@ -9,6 +9,7 @@ Basis: [resource-api.md](./resource-api.md) §MicroVM, §Node, §Volume, §Lease
 ### What it does
 
 - Each pass lists the Nodes, the MicroVMs and the Volumes, and binds each MicroVM that needs a binding through `POST /microvms/{name}/binding`. It is the only writer of `/binding`.
+- **It acts only while it holds the Lease `gaon-scheduler`** of the coordination group, on every Node of the control plane but one at a time. A scheduler that does not hold it polls the Lease and runs no pass; one that loses it stops its loop and contends again, and a term starts with a new service, so no pass takes anything from the term before. The Lease, its times and the flags: [ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md) and [deployment.md](./deployment.md).
 - It polls: `gaon-scheduler` runs a pass at start and then every `-interval` (default 5 seconds). A pass holds no state from the one before.
 - It reaches the API over plain HTTP, or over mutual TLS 1.3 when `-tls-ca`, `-tls-cert` and `-tls-key` are all given, with a client `lib/api` builds. Given one or two of them, or a file that cannot be read or does not fit, it exits with a usage error naming what is missing. The flags have no environment variable. Calls time out after 30 seconds either way.
 - A MicroVM with `deletionTimestamp` set is left alone.
@@ -60,6 +61,7 @@ Decided in [ADR 0011](./adr/0011-the-scheduler-places-through-filter-and-score-p
 ## Rationale
 
 - Rebinding waits for a confirmation made by another unit because Lease expiry is measured by an observer ([resource-api.md](./resource-api.md) §Lease and fencing), and invariant 1 depends on it.
+- One scheduler acts at a time because two would bind one MicroVM from the same view; the binding's compare-and-swap already makes the second fail, and the Lease keeps the second from trying: [ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md).
 - A pass that rebuilds the view from two lists, instead of watching, needs no cache to keep consistent, and the binding's compare-and-swap makes a stale view harmless.
 
 ## Open questions

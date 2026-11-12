@@ -35,6 +35,7 @@ type config struct {
 	collector garbagecollector.Config
 	// signer is nil when no signing files were given: the signer does not run.
 	signer *csrsigner.Config
+	leader *api.LeaderElectionFlags
 }
 
 // parseFlags reads the flags in args and builds the HTTP client the --tls
@@ -51,6 +52,7 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 	signingDuration := fs.Duration("signing-duration", 8760*time.Hour, "validity of a certificate the signer issues")
 	gcInterval := fs.Duration("gc-interval", 30*time.Second, "time between the end of one garbage collection sweep and the start of the next")
 	files := api.RegisterTLSFlags(fs)
+	leader := api.RegisterLeaderElectionFlags(fs, "gaon-controllers")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -75,6 +77,7 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 		httpClient: httpClient,
 		lifecycle:  nodelifecycle.Config{Margin: *margin, DefaultLeaseDuration: *duration},
 		collector:  garbagecollector.Config{Interval: *gcInterval},
+		leader:     leader,
 	}
 	if base, ok := strings.CutSuffix(strings.TrimSuffix(*root, "/"), "/apis/"+api.GroupVersion); ok {
 		cfg.server = base
@@ -103,23 +106,41 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	client := api.NewClient(cfg.root, cfg.httpClient)
-	runners := map[string]func(context.Context) error{
-		"node lifecycle controller": nodelifecycle.NewService(client, systemclock.Clock{}, cfg.lifecycle, log).Run,
-	}
-	if cfg.signer != nil {
-		runners["csr signer"] = csrsigner.NewService(client, *cfg.signer, log).Run
-	} else {
-		log.Info("csr signer does not run: no -signing-cert and -signing-key")
-	}
-	if cfg.server != "" {
-		runners["garbage collector"] = newCollector(cfg, log).Run
-	} else {
-		log.Info("garbage collector does not run: -api does not end in /apis/" + api.GroupVersion)
-	}
-	if !runAll(ctx, log, runners) {
+	if err := run(ctx, cfg, log); err != nil {
+		log.Error("stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+// run runs the controllers while this process holds the coordination Lease, or
+// at once when leader election is off. Each term builds its controllers anew,
+// so that a process that lost the Lease and took it again starts from the
+// Store's state.
+func run(ctx context.Context, cfg config, log *slog.Logger) error {
+	elector, err := cfg.leader.Elector(cfg.root, cfg.httpClient)
+	if err != nil {
+		return err
+	}
+	client := api.NewClient(cfg.root, cfg.httpClient)
+	return api.RunLeading(ctx, elector, func(ctx context.Context) error {
+		runners := map[string]func(context.Context) error{
+			"node lifecycle controller": nodelifecycle.NewService(client, systemclock.Clock{}, cfg.lifecycle, log).Run,
+		}
+		if cfg.signer != nil {
+			runners["csr signer"] = csrsigner.NewService(client, *cfg.signer, log).Run
+		} else {
+			log.Info("csr signer does not run: no -signing-cert and -signing-key")
+		}
+		if cfg.server != "" {
+			runners["garbage collector"] = newCollector(cfg, log).Run
+		} else {
+			log.Info("garbage collector does not run: -api does not end in /apis/" + api.GroupVersion)
+		}
+		if !runAll(ctx, log, runners) {
+			return errors.New("a controller stopped")
+		}
+		return nil
+	})
 }
 
 // newCollector builds the garbage collector for the API server at cfg.server.

@@ -1,6 +1,6 @@
 # ADR 0004: The Store is etcd, starting as one cell of one member
 
-> Status: accepted
+> Status: accepted; its single member is superseded by ADR-0023
 > Date: 2026-11-11
 
 Drafted for garamsh/gaon#2. The decisions are the project owner's, taken in the gaon PM session of 2026-11-11 and recorded on that issue. They answer item 4 of the open questions in garamsh/discussions Discussion #2 ([section 6](https://github.com/garamsh/discussions/discussions/2#discussioncomment-19288322)) in part.
