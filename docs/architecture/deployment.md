@@ -20,9 +20,16 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 
 ### Certificates
 
-- **M1: an operator or tooling issues the files** (a CA, the API server's certificate and key, and one client certificate and key per caller), and naru delivers them as files in the Node's config. A Node Agent's certificate has its Node name as CN. What each side's flags take is in [apiserver.md](./apiserver.md) §Running and [node-agent.md](./node-agent.md) §Configuration.
-- **Renewal is the operator's.** Each service reads its files at start, so a replaced file takes effect at the next start of that service.
-- **End state: gaon's own CA with a bootstrap and CSR flow.** Its design is not decided; see open questions.
+- **One cluster CA, gaon's own.** Its certificate is the API server's client CA, and its certificate and key are files that `gaon-controllers` signs with. An operator or tooling creates them and naru delivers them as files in the control-plane Node's config, with the API server's certificate and key and one client certificate and key for each caller that is not a Node Agent (the scheduler, the controllers and the CLI). What each side's flags take is in [apiserver.md](./apiserver.md) §Running and [node-agent.md](./node-agent.md) §Configuration.
+- **A Node Agent gets its certificate by a CertificateSigningRequest.**
+  - Its config carries a bootstrap token as a file and a writable directory for the agent's key and certificate: `--bootstrap-token-file` and `--cert-dir`. garamsh/naru#37 wires them as `/run/gaon/bootstrap-token` and `/var/lib/naru/gaon-node-agent`.
+  - The API server learns the valid tokens from a file, `--bootstrap-token-file`, and accepts a token only to create a request and read one it created.
+  - The signer in `gaon-controllers` approves a request whose CN is a Node name and whose requester is a token or that Node's own certificate, and signs it for `--signing-duration`, 8760h by default.
+  - The agent renews at two thirds of the validity, over its own certificate, and swaps the pair without a restart.
+  - The flow is in [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) and the resource in [resource-api.md](./resource-api.md) §CertificateSigningRequest.
+- **A token can obtain a certificate for any Node name.** A token is revoked by removing it from the file and restarting the API server; certificates already issued stay valid until they expire.
+- **Operator-supplied files still work.** A Node Agent given `--tls-cert` and `--tls-key` uses them and does not bootstrap, and the two sets of flags are mutually exclusive. The scheduler, the controllers and the CLI keep operator-issued certificates signed by the same CA.
+- **Renewal of an operator-supplied certificate is the operator's.** Each service reads its files at start, so a replaced file takes effect at the next start of that service.
 
 ### Config shape
 
@@ -40,10 +47,11 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 - Who starts gaon's services and how gaon relates to naru: [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md).
 - One etcd member, and what its loss costs: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
 - Mutual TLS, one certificate per caller, and issuance outside gaon: [ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md).
+- The bootstrap token, the signing request and renewal, which narrow ADR 0005 for Node Agents: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md).
 
 ## Open questions
 
-- **The CSR flow.** How a Node obtains its first certificate from gaon's CA, who approves it, and how it fits a node OS that delivers certificates as files.
+- **Garbage collection of CertificateSigningRequests.** The contract has no delete path, so requests stay in the Store ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md)).
 - **Growth beyond one member.** More etcd members, and a control plane that is not one Node, wait for their own ADR; the scheduler and the controllers then need leader election or another way to run once.
 - **Skew policy.** Which Node Agent and API server versions work together is left to `v1beta1`.
 - **Node API.** How gaon calls naru's node API to apply a config is not decided ([ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md)).
