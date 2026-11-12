@@ -17,9 +17,10 @@ const maxBody = 1 << 20
 // Client calls the resource API. Every write is a compare-and-swap on the
 // ResourceVersion the object or request carries; an empty one creates.
 type Client struct {
-	root  string
-	http  *http.Client
-	token string
+	root     string
+	http     *http.Client
+	token    string
+	selector Selector
 }
 
 // ClientOption changes how a Client sends its requests.
@@ -32,6 +33,23 @@ type ClientOption func(*Client)
 // presenting it.
 func WithBearerToken(token string) ClientOption {
 	return func(c *Client) { c.token = token }
+}
+
+// WithLabelSelector makes the lists and the watches of the Client ask only for
+// the objects whose labels sel selects, in the query parameter labelSelector.
+// A watch by it sends Added when an object starts to match, and Deleted when
+// it stops matching or is removed. The empty selector asks for every object.
+// Reads and writes of one object are not changed.
+func WithLabelSelector(sel Selector) ClientOption {
+	return func(c *Client) { c.selector = sel }
+}
+
+// listQuery is the query of a list or a watch by c, or nil for none.
+func (c *Client) listQuery() url.Values {
+	if len(c.selector) == 0 {
+		return nil
+	}
+	return url.Values{LabelSelectorParam: {c.selector.String()}}
 }
 
 // NewClient returns a Client for the API whose group and version root is
@@ -82,7 +100,7 @@ func (c *Client) GetMicroVM(ctx context.Context, name string) (*MicroVM, error) 
 // ListMicroVMs returns every MicroVM and the version to watch from
 // (GET /microvms).
 func (c *Client) ListMicroVMs(ctx context.Context) (*MicroVMList, error) {
-	return call[MicroVMList](ctx, c, http.MethodGet, "/microvms", nil, nil)
+	return call[MicroVMList](ctx, c, http.MethodGet, "/microvms", c.listQuery(), nil)
 }
 
 // WatchMicroVMs streams the changes made after version rv
@@ -110,7 +128,7 @@ func (c *Client) GetNode(ctx context.Context, name string) (*Node, error) {
 
 // ListNodes returns every Node and the version to watch from (GET /nodes).
 func (c *Client) ListNodes(ctx context.Context) (*NodeList, error) {
-	return call[NodeList](ctx, c, http.MethodGet, "/nodes", nil, nil)
+	return call[NodeList](ctx, c, http.MethodGet, "/nodes", c.listQuery(), nil)
 }
 
 // WatchNodes streams the changes made after version rv
@@ -126,7 +144,7 @@ func (c *Client) GetLease(ctx context.Context, name string) (*Lease, error) {
 
 // ListLeases returns every Lease and the version to watch from (GET /leases).
 func (c *Client) ListLeases(ctx context.Context) (*LeaseList, error) {
-	return call[LeaseList](ctx, c, http.MethodGet, "/leases", nil, nil)
+	return call[LeaseList](ctx, c, http.MethodGet, "/leases", c.listQuery(), nil)
 }
 
 // WatchLeases streams the changes made after version rv
@@ -159,7 +177,7 @@ func (c *Client) GetVolume(ctx context.Context, name string) (*Volume, error) {
 // ListVolumes returns every Volume and the version to watch from
 // (GET /volumes).
 func (c *Client) ListVolumes(ctx context.Context) (*VolumeList, error) {
-	return call[VolumeList](ctx, c, http.MethodGet, "/volumes", nil, nil)
+	return call[VolumeList](ctx, c, http.MethodGet, "/volumes", c.listQuery(), nil)
 }
 
 // WatchVolumes streams the changes made after version rv
@@ -201,7 +219,7 @@ func (c *Client) GetCertificateSigningRequest(ctx context.Context, name string) 
 // ListCertificateSigningRequests returns every request and the version to
 // watch from (GET /certificatesigningrequests).
 func (c *Client) ListCertificateSigningRequests(ctx context.Context) (*CertificateSigningRequestList, error) {
-	return call[CertificateSigningRequestList](ctx, c, http.MethodGet, "/certificatesigningrequests", nil, nil)
+	return call[CertificateSigningRequestList](ctx, c, http.MethodGet, "/certificatesigningrequests", c.listQuery(), nil)
 }
 
 // WatchCertificateSigningRequests streams the changes made after version rv
@@ -234,7 +252,7 @@ func (c *Client) GetClusterRole(ctx context.Context, name string) (*ClusterRole,
 // ListClusterRoles returns every ClusterRole and the version to watch from
 // (GET /clusterroles).
 func (c *Client) ListClusterRoles(ctx context.Context) (*ClusterRoleList, error) {
-	return call[ClusterRoleList](ctx, c, http.MethodGet, "/clusterroles", nil, nil)
+	return call[ClusterRoleList](ctx, c, http.MethodGet, "/clusterroles", c.listQuery(), nil)
 }
 
 // WatchClusterRoles streams the changes made after version rv
@@ -267,7 +285,7 @@ func (c *Client) GetClusterRoleBinding(ctx context.Context, name string) (*Clust
 // ListClusterRoleBindings returns every ClusterRoleBinding and the version to watch from
 // (GET /clusterrolebindings).
 func (c *Client) ListClusterRoleBindings(ctx context.Context) (*ClusterRoleBindingList, error) {
-	return call[ClusterRoleBindingList](ctx, c, http.MethodGet, "/clusterrolebindings", nil, nil)
+	return call[ClusterRoleBindingList](ctx, c, http.MethodGet, "/clusterrolebindings", c.listQuery(), nil)
 }
 
 // WatchClusterRoleBindings streams the changes made after version rv
@@ -304,7 +322,7 @@ func (c *Client) GetCustomResourceDefinition(ctx context.Context, name string) (
 // ListCustomResourceDefinitions returns every definition and the version to
 // watch from (GET /customresourcedefinitions).
 func (c *Client) ListCustomResourceDefinitions(ctx context.Context) (*CustomResourceDefinitionList, error) {
-	return call[CustomResourceDefinitionList](ctx, c, http.MethodGet, "/customresourcedefinitions", nil, nil)
+	return call[CustomResourceDefinitionList](ctx, c, http.MethodGet, "/customresourcedefinitions", c.listQuery(), nil)
 }
 
 // WatchCustomResourceDefinitions streams the changes made after version rv
@@ -337,7 +355,7 @@ func (c *Client) GetMutatingWebhookConfiguration(ctx context.Context, name strin
 // ListMutatingWebhookConfigurations returns every MutatingWebhookConfiguration and the version to watch from
 // (GET /mutatingwebhookconfigurations).
 func (c *Client) ListMutatingWebhookConfigurations(ctx context.Context) (*MutatingWebhookConfigurationList, error) {
-	return call[MutatingWebhookConfigurationList](ctx, c, http.MethodGet, "/mutatingwebhookconfigurations", nil, nil)
+	return call[MutatingWebhookConfigurationList](ctx, c, http.MethodGet, "/mutatingwebhookconfigurations", c.listQuery(), nil)
 }
 
 // WatchMutatingWebhookConfigurations streams the changes made after version rv
@@ -370,7 +388,7 @@ func (c *Client) GetValidatingWebhookConfiguration(ctx context.Context, name str
 // ListValidatingWebhookConfigurations returns every ValidatingWebhookConfiguration and the version to watch from
 // (GET /validatingwebhookconfigurations).
 func (c *Client) ListValidatingWebhookConfigurations(ctx context.Context) (*ValidatingWebhookConfigurationList, error) {
-	return call[ValidatingWebhookConfigurationList](ctx, c, http.MethodGet, "/validatingwebhookconfigurations", nil, nil)
+	return call[ValidatingWebhookConfigurationList](ctx, c, http.MethodGet, "/validatingwebhookconfigurations", c.listQuery(), nil)
 }
 
 // WatchValidatingWebhookConfigurations streams the changes made after version rv
@@ -379,11 +397,85 @@ func (c *Client) WatchValidatingWebhookConfigurations(ctx context.Context, rv Re
 	return watch[ValidatingWebhookConfiguration](ctx, c, "/validatingwebhookconfigurations", KindValidatingWebhookConfiguration, rv)
 }
 
+// PutCoordinationLease creates l, or changes it when l carries the
+// ResourceVersion it was read at (PUT /leases/{name}). Call it on a client
+// whose root is the coordination group's. Two holders that write at the same
+// version cannot both succeed, so the write is the compare-and-swap of a lock.
+func (c *Client) PutCoordinationLease(ctx context.Context, l *CoordinationLease) (*CoordinationLease, error) {
+	return put(ctx, c, "/leases/"+url.PathEscape(l.Metadata.Name), l)
+}
+
+// GetCoordinationLease returns the named Lease (GET /leases/{name}). Call it on
+// a client whose root is the coordination group's.
+func (c *Client) GetCoordinationLease(ctx context.Context, name string) (*CoordinationLease, error) {
+	return call[CoordinationLease](ctx, c, http.MethodGet, "/leases/"+url.PathEscape(name), nil, nil)
+}
+
+// ListCoordinationLeases returns every Lease and the version to watch from
+// (GET /leases). Call it on a client whose root is the coordination group's.
+func (c *Client) ListCoordinationLeases(ctx context.Context) (*CoordinationLeaseList, error) {
+	return call[CoordinationLeaseList](ctx, c, http.MethodGet, "/leases", c.listQuery(), nil)
+}
+
+// WatchCoordinationLeases streams the changes made after version rv
+// (GET /leases?watch=true), as WatchMicroVMs does. Call it on a client whose
+// root is the coordination group's.
+func (c *Client) WatchCoordinationLeases(ctx context.Context, rv ResourceVersion) (*Watch[CoordinationLease], error) {
+	return watch[CoordinationLease](ctx, c, "/leases", KindCoordinationLease, rv)
+}
+
+// DeleteCoordinationLease removes the named Lease if it is still at version rv
+// (DELETE /leases/{name}). Call it on a client whose root is the coordination
+// group's.
+func (c *Client) DeleteCoordinationLease(ctx context.Context, name string, rv ResourceVersion) (*CoordinationLease, error) {
+	if rv == "" {
+		return nil, errors.New("delete lease: resource version is empty")
+	}
+	return call[CoordinationLease](ctx, c, http.MethodDelete, "/leases/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// PutClusterEvent creates e, or changes it when e carries the ResourceVersion
+// it was read at (PUT /events/{name}).
+func (c *Client) PutClusterEvent(ctx context.Context, e *ClusterEvent) (*ClusterEvent, error) {
+	return put(ctx, c, "/events/"+url.PathEscape(e.Metadata.Name), e)
+}
+
+// GetClusterEvent returns the named Event (GET /events/{name}).
+func (c *Client) GetClusterEvent(ctx context.Context, name string) (*ClusterEvent, error) {
+	return call[ClusterEvent](ctx, c, http.MethodGet, "/events/"+url.PathEscape(name), nil, nil)
+}
+
+// ListClusterEvents returns every Event and the version to watch from
+// (GET /events).
+func (c *Client) ListClusterEvents(ctx context.Context) (*ClusterEventList, error) {
+	return call[ClusterEventList](ctx, c, http.MethodGet, "/events", c.listQuery(), nil)
+}
+
+// WatchClusterEvents streams the changes made after version rv
+// (GET /events?watch=true), as WatchMicroVMs does.
+func (c *Client) WatchClusterEvents(ctx context.Context, rv ResourceVersion) (*Watch[ClusterEvent], error) {
+	return watch[ClusterEvent](ctx, c, "/events", KindEvent, rv)
+}
+
+// DeleteClusterEvent removes the named Event if it is still at version rv
+// (DELETE /events/{name}).
+func (c *Client) DeleteClusterEvent(ctx context.Context, name string, rv ResourceVersion) (*ClusterEvent, error) {
+	if rv == "" {
+		return nil, errors.New("delete event: resource version is empty")
+	}
+	return call[ClusterEvent](ctx, c, http.MethodDelete, "/events/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
 func watch[T any](ctx context.Context, c *Client, path, kind string, rv ResourceVersion) (*Watch[T], error) {
 	if rv == "" {
 		return nil, fmt.Errorf("watch %s: resource version is empty", path)
 	}
-	query := url.Values{"watch": {"true"}, "resourceVersion": {string(rv)}}
+	query := c.listQuery()
+	if query == nil {
+		query = url.Values{}
+	}
+	query.Set("watch", "true")
+	query.Set("resourceVersion", string(rv))
 	resp, err := c.send(ctx, http.MethodGet, path, query, nil)
 	if err != nil {
 		return nil, err

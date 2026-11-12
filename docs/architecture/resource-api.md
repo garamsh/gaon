@@ -9,8 +9,8 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 ### Naming and groups
 
 - **`MicroVM` is the microVM.** A physical machine is the core resource `Node`. A machine naru has discovered but gaon has not admitted is a `Node` whose state is `Discovered`. There is no Host resource. The `Node` schema is in §Node.
-- **API group suffix `gaon.garam.sh`:** `compute.gaon.garam.sh/v1alpha1` holds the core resources named here, `rbac.gaon.garam.sh/v1alpha1` the roles and bindings, `apps.gaon.garam.sh` the default extensions, `apiextensions.gaon.garam.sh` the resource definitions, `admissionregistration.gaon.garam.sh` the webhook configurations, `admission.gaon.garam.sh` the `AdmissionReview` a webhook receives (§Admission webhooks).
-- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, MicroVM, Volume, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions (`CustomResourceDefinition`, in `apiextensions.gaon.garam.sh`, §CustomResourceDefinition), webhook configurations (`MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration`, in `admissionregistration.gaon.garam.sh`, §Admission webhooks), the Driver interface. MicroVMSet, MicroVMDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no MicroVM runs before its network policy is applied, and the default network blocks all outside traffic.
+- **API group suffix `gaon.garam.sh`:** `compute.gaon.garam.sh/v1alpha1` holds the core resources named here, `rbac.gaon.garam.sh/v1alpha1` the roles and bindings, `apps.gaon.garam.sh` the default extensions, `apiextensions.gaon.garam.sh` the resource definitions, `admissionregistration.gaon.garam.sh` the webhook configurations, `admission.gaon.garam.sh` the `AdmissionReview` a webhook receives (§Admission webhooks), `coordination.gaon.garam.sh` the `Lease` a controller holds for leader election (§Metadata, §Coordination Lease and Event).
+- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Event, MicroVM, Volume, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions (`CustomResourceDefinition`, in `apiextensions.gaon.garam.sh`, §CustomResourceDefinition), webhook configurations (`MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration`, in `admissionregistration.gaon.garam.sh`, §Admission webhooks), the Driver interface. MicroVMSet, MicroVMDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no MicroVM runs before its network policy is applied, and the default network blocks all outside traffic.
 
 ### Transport
 
@@ -25,10 +25,24 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 - Every resource has `apiVersion`, `kind`, `metadata`, `spec` and `status`.
 - Each section has one writer: `spec` users and controllers, `/binding` the Scheduler, `/status` the Node Agent for what runs on its node and controllers for the rest.
 - Every write is a compare-and-swap on `resourceVersion`. A change of `spec` is tracked by `generation` and `observedGeneration`.
-- Deletion sets `deletionTimestamp`; the owner of each finalizer removes it when its work is done. Ownership and garbage collection use `ownerReferences`.
+- Deletion sets `deletionTimestamp`; the owner of each finalizer removes it when its work is done. Ownership and garbage collection use `ownerReferences` (§Metadata).
 - **A finalizer's owner adds and removes it through `PUT /microvms/{name}`**, by compare-and-swap, changing only its own entry of `metadata.finalizers`. The Node Agent's finalizer is `compute.gaon.garam.sh/node-agent`: it adds it before it first starts a MicroVM bound to its Node, and removes it once a MicroVM with `deletionTimestamp` set is released on mvmd. The API server removes a MicroVM on the write that clears its last finalizer. A Volume's finalizer is added and removed the same way through `PUT /volumes/{name}` (§Volume).
 - A `PUT` without `metadata.resourceVersion` creates the object and answers `AlreadyExists` if it exists; a `PUT` with one is the compare-and-swap. A `DELETE` carries the version in the query `resourceVersion`.
 - Enum values are PascalCase, fields camelCase, quantities in `500m` and `4Gi` form, and detail is carried in `conditions`.
+
+### Metadata
+
+Every kind, the custom resources included, has the same `metadata` ([[ADR 0018](./adr/0018-metadata-gains-uid-labels-and-owner-references-lists-take-a-label-selector-lease-and-event-are-new-kinds-and-a-role-rule-may-carry-a-label-selector.md)]). Every field below is omitted when empty, so an object written without them reads and writes as before.
+
+- **`uid`** is a version 4 UUID the API server sets at create, replacing any value the request carries. It never changes: an update that carries another is `Invalid`, and one that carries none keeps the stored one. An object deleted and created again has another. An object stored before has none and takes one on its next write.
+- **`labels`.** A key is an optional prefix and a name joined by `/`: the prefix a lowercase DNS subdomain of at most 253 characters, the name 1 to 63 characters of alphanumerics, `-`, `_` and `.`, beginning and ending with an alphanumeric. A value is empty or at most 63 characters of that form. Anything else is `Invalid`.
+- **`annotations`** have the keys of labels and any string as a value, at most 256 KiB for keys and values together.
+- **`ownerReferences`** have `apiVersion`, `kind`, `name`, `uid`, `controller` and `blockOwnerDeletion`. The first three are required; `uid` is the owner's, required on a reference at create and on one an update adds, and a reference stored without one may stay. At most one reference is `controller: true`. `blockOwnerDeletion: true` means the dependent holds up the deletion of its owner when the owner is deleted in the foreground. What garbage collection does with them is not part of this contract yet.
+- **Label selectors.** A list and a watch of any kind take the query parameter `labelSelector`:
+  - the forms are `key=value`, `key==value`, `key!=value`, `key in (v1,v2)`, `key notin (v1,v2)`, `key` and `!key`, joined by commas, every requirement holding. `!=` and `notin` hold for an object without the label. `gt` and `lt` are not supported;
+  - an empty or absent selector selects every object. Text that does not parse, or a key or value invalid in a label, is `Invalid`;
+  - a list answers the objects selected. A watch sends `Added` when an object starts to match, `Deleted` when it stops matching or is removed, each with the object as it is after the change, and `Modified` for a change to an object that matches before and after.
+- **The types** are in `lib/api/`: `UID`, `ObjectMeta`, `OwnerReference`, `Selector`, `ParseSelector`, and the client option `WithLabelSelector`.
 
 ### MicroVM
 
@@ -125,6 +139,11 @@ A request for a client certificate from the cluster CA, used by a Node Agent to 
 | δ | 1s | not measured in mvmd; above a real-time thread's wake-up and a SIGKILL (mvmd ADR 0003), and the Node Agent's check 30 >= 15 + 1 + 2x2 holds |
 | Expiry margin | 5s | covers the rate error between two monotonic clocks, well under 1% of 30s; a larger margin only delays rebinding |
 
+### Coordination Lease and Event
+
+- **`Lease` of `coordination.gaon.garam.sh/v1alpha1`** is a lock any controller can hold, for leader election, with the root `/apis/coordination.gaon.garam.sh/v1alpha1`. It is a different kind from the Node's `Lease` (§Lease and fencing). `spec` has `holder` (empty for a released lease), `renewTime` and `durationSeconds`, positive. A candidate takes or renews it by compare-and-swap on the `resourceVersion` it read, and expiry is measured by the observer as for the Node's Lease. The group is reserved. The types are `CoordinationLease` and `CoordinationLeaseList`.
+- **`Event` of `compute.gaon.garam.sh/v1alpha1`** records that something happened to an object. It has `metadata` and `spec`, and no `status`. `spec` has `involvedObject` (`apiVersion`, `kind` and `name` required, `uid`), a required `reason`, a `message` of at most 1024 bytes, a `type` of `Normal` or `Warning`, a `count` of at least 1, and `firstTimestamp` and `lastTimestamp`, the last not before the first. A reporter that sees an event again raises `count` and moves `lastTimestamp`. An update keeps `involvedObject`, `reason` and `type`, and does not lower `count`. Nothing expires an Event. The types are `ClusterEvent`, `ClusterEventList` and `ObjectReference`.
+
 ### Invariants
 
 | # | Invariant | Writer it constrains |
@@ -169,6 +188,13 @@ Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where
 | `GET /certificatesigningrequests` | all authenticated by certificate | list, with the `resourceVersion` to watch from |
 | `GET /certificatesigningrequests/{name}` | all; a token holder only a request it created | read one request |
 | `GET /certificatesigningrequests?watch=true` | all authenticated by certificate | subscribe to changes |
+| `PUT /events/{name}` | controllers, Node Agent, users | create an Event, without a version; raise its `count`, with one |
+| `DELETE /events/{name}` | users | delete it |
+| `GET /events` | all | list, with the `resourceVersion` to watch from |
+| `GET /events/{name}` | all | read one Event |
+| `GET /events?watch=true` | all | subscribe to changes |
+
+Every list and watch path in this section takes `labelSelector` (§Metadata).
 
 The RBAC paths are relative to their own root, `/apis/rbac.gaon.garam.sh/v1alpha1` (§RBAC), and follow the same forms: `PUT`, `DELETE` and `GET` of one, a list and a watch.
 
@@ -199,6 +225,14 @@ The webhook-configuration paths are relative to their own root, `/apis/admission
 | `PUT /validatingwebhookconfigurations/{name}` | users | create a configuration, without a version; change its `webhooks`, with one |
 | `DELETE /validatingwebhookconfigurations/{name}` | users | delete it |
 | `GET /validatingwebhookconfigurations`, `GET /validatingwebhookconfigurations/{name}`, `GET /validatingwebhookconfigurations?watch=true` | all authenticated by certificate | list, read one, subscribe |
+
+The Lease paths are relative to their own root, `/apis/coordination.gaon.garam.sh/v1alpha1` (§Coordination Lease and Event), and follow the same forms.
+
+| Path | Writer | Use |
+|---|---|---|
+| `PUT /leases/{name}` | controllers | create a Lease, without a version; take or renew it, with one |
+| `DELETE /leases/{name}` | controllers, users | delete it |
+| `GET /leases`, `GET /leases/{name}`, `GET /leases?watch=true` | all authenticated by certificate | list, read one, subscribe |
 
 The objects of a registered kind have their own root per definition, `/apis/<group>/<version>`, and the forms of the compute kinds.
 
@@ -233,8 +267,14 @@ The API server's `--authorization-mode` is `AlwaysAllow`, the default, which all
 
 The group `rbac.gaon.garam.sh/v1alpha1` has the root `/apis/rbac.gaon.garam.sh/v1alpha1`. Both kinds have `apiVersion`, `kind` and `metadata`, and no `spec` or `status`; they are cluster-scoped.
 
-- **`ClusterRole`:** `rules`, a list; each rule has non-empty `apiGroups`, `resources` and `verbs`, lists of names. A resource is `microvms` or a subresource `microvms/status`; `*` as a whole name matches every value, and a name with `*` inside it is not a wildcard. The verbs are `get`, `list`, `watch`, `create`, `update`, `delete` and `*`; any other verb is `Invalid`. A role with no rules is valid and grants nothing.
+- **`ClusterRole`:** `rules`, a list; each rule has non-empty `apiGroups`, `resources` and `verbs`, lists of names. A resource is `microvms` or a subresource `microvms/status`; `*` as a whole name matches every value, and a name with `*` inside it is not a wildcard. The verbs are `get`, `list`, `watch`, `create`, `update`, `delete` and `*`; any other verb is `Invalid`. A rule may carry `labelSelector`, a selector of §Metadata's syntax; one that does not parse is `Invalid`, and a rule without one is unrestricted. A role with no rules is valid and grants nothing.
 - **`ClusterRoleBinding`:** `roleRef` (`kind` `ClusterRole` and `name`) and `subjects`, each with `kind` `User` or `Group` and a `name`. An empty `roleRef`, another kind and an unknown subject kind are `Invalid`.
+- **The label-selector rule** ([[ADR 0018](./adr/0018-metadata-gains-uid-labels-and-owner-references-lists-take-a-label-selector-lease-and-event-are-new-kinds-and-a-role-rule-may-carry-a-label-selector.md)]). A request on an object whose labels fall outside the `labelSelector` of a rule is not allowed by that rule. Each rule is judged alone, since permissions only add.
+  - `get`, `update` and `delete` are judged on the labels of the stored object, an object that does not exist counting as one with no labels. An `update` is also judged on the labels in the request body, so a write cannot move an object into or out of the selection.
+  - `create` is judged on the labels of the object in the request body. A mutating webhook that changes them afterwards is not judged again.
+  - `list` and `watch` are allowed only when the request carries a `labelSelector` that selects nothing the rule's selector does not. A request with no selector, or a wider one, is `Forbidden`; the server does not filter the answer.
+  - A subresource is judged on the stored object's labels.
+  - A caller holds a rule with a selector, for the escalation check, only through a rule of the same groups, resources and verbs with no selector or with a selector the new one is within.
 - **Bootstrap roles.** In `RBAC` mode the API server creates each of these that is missing at start and never overwrites one, with a binding of each to a group, all in the group `compute.gaon.garam.sh` unless said:
 
   | Role (group bound) | Rules |
@@ -244,7 +284,7 @@ The group `rbac.gaon.garam.sh/v1alpha1` has the root `/apis/rbac.gaon.garam.sh/v
   | `gaon:admin` (`gaon:admins`) | `*` on `*` for every API group |
 
 - **An existing cluster** keeps the roles it has, so its `gaon:scheduler` lacks `volumes` and the scheduler's list of Volumes is `Forbidden` until an administrator adds the rule to the role, or deletes the role so the next API server start creates it ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)).
-- The types are in `lib/api/`: `ClusterRole`, `PolicyRule`, `ClusterRoleBinding`, `RoleRef` and `Subject`.
+- The types are in `lib/api/`: `ClusterRole`, `PolicyRule` (with `AllowsLabels` and `AllowsSelector`), `ClusterRoleBinding`, `RoleRef` and `Subject`.
 
 ### CustomResourceDefinition
 
@@ -252,7 +292,7 @@ A user registers a resource kind with a `CustomResourceDefinition` in `apiextens
 
 - **Name.** `<plural>.<group>`; any other name is `Invalid`. The whole name is at most 253 characters.
 - **`spec`:**
-  - `group`: a domain of at least two lowercase DNS labels. It may not be `compute.gaon.garam.sh`, `rbac.gaon.garam.sh`, `apiextensions.gaon.garam.sh`, `admissionregistration.gaon.garam.sh` or `admission.gaon.garam.sh`, or any later group the core serves. `apps.gaon.garam.sh` is allowed.
+  - `group`: a domain of at least two lowercase DNS labels. It may not be `compute.gaon.garam.sh`, `rbac.gaon.garam.sh`, `apiextensions.gaon.garam.sh`, `admissionregistration.gaon.garam.sh`, `admission.gaon.garam.sh` or `coordination.gaon.garam.sh`, or any later group the core serves. `apps.gaon.garam.sh` is allowed.
   - `names`: `kind` and `listKind`, each starting with an uppercase letter and holding letters and digits, and different from each other; `plural` and `singular`, each a lowercase DNS label.
   - `scope`: `Cluster`. `Namespaced` and any other value are `Invalid` until namespaces exist.
   - `versions`: exactly one entry, which is served and stored. Its `name` has the form `v1`, `v1alpha1` or `v2beta3`. It has a `schema.openAPIV3Schema`, and optionally `subresources.status: {}`. More than one version needs conversion and is `Invalid`.
@@ -286,13 +326,14 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 
 ### Watch
 
-- A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required.
+- A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required. It may carry `labelSelector` (§Metadata).
 - Each line of the stream is one JSON event with a `type` and an `object`.
 - Event types, PascalCase as every enum is:
-  - `Added`, `Modified` and `Deleted` carry the resource being watched (a MicroVM, a Volume, a Node, a Lease, a CertificateSigningRequest, a ClusterRole, a ClusterRoleBinding, a CustomResourceDefinition, a MutatingWebhookConfiguration, a ValidatingWebhookConfiguration or an object of a registered kind) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
+  - `Added`, `Modified` and `Deleted` carry the resource being watched (a MicroVM, a Volume, a Node, a Lease, an Event, a CertificateSigningRequest, a ClusterRole, a ClusterRoleBinding, a CustomResourceDefinition, a MutatingWebhookConfiguration, a ValidatingWebhookConfiguration or an object of a registered kind) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
   - `Error` carries the error object, and is the last event of its stream.
 - The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422, `Expired` 410, `Unauthorized` 401, `Forbidden` 403 and `InternalError` 500. `Unauthorized` is a request with no client certificate and a missing or invalid bearer token; `Forbidden` is a valid token on any request other than creating a CertificateSigningRequest or reading one it created, and, in the `RBAC` mode, a request by certificate that neither the Node authorizer nor a bound role allows (§Authorization), or a validating or mutating webhook refuses (§Admission webhooks); `InternalError` is a write refused because a call to a webhook whose `failurePolicy` is `Fail` failed.
 - An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
+- The Lease of the coordination group is watched the same way, and so is every custom resource.
 - The types are in `lib/api/`: `WatchEvent`, `EventType`, `APIError` and `Reason`.
 
 ## Rationale
@@ -301,6 +342,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - Writers, Lease, watch, OnDemand, group, transport, naming: [ADR 0003](./adr/0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md).
 - Authorization, the `rbac` group, the Node authorizer and the bootstrap roles: [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md), which amends ADR 0005, Decision 4.
 - Resource definitions, custom resources, their schema, the deletion order and the client: [ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md), which uses ADR 0008's rules for authorization.
+- Metadata, label selectors, owner references, the coordination Lease, the Event and the label-selector rule: [ADR 0018](./adr/0018-metadata-gains-uid-labels-and-owner-references-lists-take-a-label-selector-lease-and-event-are-new-kinds-and-a-role-rule-may-carry-a-label-selector.md), which adds a field to ADR 0008's rules and a group to ADR 0009's reserved ones.
 - Webhook configurations, `AdmissionReview`, the order of a write and the failure of a call: [ADR 0010](./adr/0010-a-user-registers-admission-webhooks-with-webhook-configurations-the-api-server-calls-them-on-every-accepted-write.md), which places the webhooks after ADR 0008's authorization and around ADR 0009's schema.
 - Volume creation, the `local` class, pinning at the binding, deletion and the Volume's writers: [ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md), which adds `volumes` to ADR 0008's `gaon:scheduler` role and widens its Node authorizer.
 - Bearer-token access and the CertificateSigningRequest: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), which amends ADR 0005.
@@ -320,4 +362,5 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - **More than one version of a custom resource,** which needs conversion, and the `scale` subresource and the schema keywords outside §CustomResourceDefinition's list.
 - **Webhook selection and calling:** selectors by label or namespace, a reinvocation policy, a service reference for `clientConfig` and a status code from the webhook wait for a need and, for the last, for a Service resource; the API server's calling of webhooks is the next issue.
 - **Namespaced roles:** `Role` and `RoleBinding` wait for the namespace decision above; only the cluster-scoped kinds exist.
+- **Event expiry:** how long an Event stays, and whether the count of Events is limited.
 - **Out of the contract by decision:** Discussion #2 section 6 items 5, 6 and 12 (tenancy, the immediate-bind default, deployment features).
