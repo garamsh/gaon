@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -29,8 +30,11 @@ var usage = `usage:
   gaon [--server URL] describe KIND NAME
   gaon [--server URL] delete KIND NAME
 
-URL is the API root, http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1
-KIND is one of ` + strings.Join(kindSpellings(), ", ")
+URL is the compute group's root, http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1.
+The roots of the other groups are derived from it.
+KIND is one of ` + strings.Join(kindSpellings(kinds), ", ") + `,
+or a kind a CustomResourceDefinition registers, by its singular, its plural or
+the definition's name`
 
 // usageError is a mistake in the command line, as against a failed request.
 type usageError struct{ msg string }
@@ -43,8 +47,8 @@ func usagef(format string, args ...any) error {
 
 // Run executes one gaon command, args being the command line after the
 // global flags, and returns the process exit code.
-func Run(ctx context.Context, c *api.Client, args []string, stdout, stderr io.Writer) int {
-	err := run(ctx, c, args, stdout)
+func Run(ctx context.Context, server string, httpClient *http.Client, args []string, stdout, stderr io.Writer) int {
+	err := run(ctx, &cluster{server: server, http: httpClient}, args, stdout)
 	var u *usageError
 	switch {
 	case err == nil:
@@ -61,20 +65,20 @@ func Run(ctx context.Context, c *api.Client, args []string, stdout, stderr io.Wr
 	}
 }
 
-func run(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
+func run(ctx context.Context, cl *cluster, args []string, out io.Writer) error {
 	if len(args) == 0 {
 		return usagef("no command")
 	}
 	rest := args[1:]
 	switch args[0] {
 	case "apply":
-		return runApply(ctx, c, rest, out)
+		return runApply(ctx, cl, rest, out)
 	case "get":
-		return runGet(ctx, c, rest, out)
+		return runGet(ctx, cl, rest, out)
 	case "describe":
-		return runDescribe(ctx, c, rest, out)
+		return runDescribe(ctx, cl, rest, out)
 	case "delete":
-		return runDelete(ctx, c, rest, out)
+		return runDelete(ctx, cl, rest, out)
 	case "-h", "-help", "--help", "help":
 		return flag.ErrHelp
 	default:
@@ -109,16 +113,7 @@ func parseFlags(name string, args []string, define func(*flag.FlagSet)) ([]strin
 	return operands, nil
 }
 
-// lookupKind resolves the operand naming a kind.
-func lookupKind(operand string) (kind, error) {
-	k, ok := kindByName(strings.ToLower(operand))
-	if !ok {
-		return kind{}, usagef("unknown kind %q, want one of %s", operand, strings.Join(kindSpellings(), ", "))
-	}
-	return k, nil
-}
-
-func runApply(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
+func runApply(ctx context.Context, cl *cluster, args []string, out io.Writer) error {
 	var file string
 	operands, err := parseFlags("apply", args, func(fs *flag.FlagSet) { fs.StringVar(&file, "f", "", "YAML file") })
 	if err != nil {
@@ -145,12 +140,18 @@ func runApply(ctx context.Context, c *api.Client, args []string, out io.Writer) 
 	}
 	items := make([]item, len(docs))
 	for i, d := range docs {
-		k, ok := kindByAPIKind(d.apiKind)
+		k, ok, err := resolveDocument(ctx, cl, d)
+		if err != nil {
+			return fmt.Errorf("apply %s: document %d: %w", file, i+1, err)
+		}
 		if !ok {
-			return fmt.Errorf("apply %s: document %d: unknown kind %q", file, i+1, d.apiKind)
+			return fmt.Errorf("apply %s: document %d: unknown kind %q in apiVersion %q", file, i+1, d.apiKind, d.apiVersion)
 		}
 		if k.parse == nil {
 			return refusal("apply", k, "PUT", "/{name}")
+		}
+		if _, err := cl.client(k.group); err != nil {
+			return fmt.Errorf("apply %s: document %d: %w", file, i+1, err)
 		}
 		ch, err := k.parse(d.json)
 		if err != nil {
@@ -159,7 +160,7 @@ func runApply(ctx context.Context, c *api.Client, args []string, out io.Writer) 
 		items[i] = item{k, ch}
 	}
 	for _, it := range items {
-		verb, err := applyOne(ctx, c, it.change)
+		verb, err := applyOne(ctx, cl, it.change)
 		label := it.kind.name + "/" + it.change.name
 		if err != nil {
 			return fmt.Errorf("apply %s: %w", label, err)
@@ -173,10 +174,10 @@ func runApply(ctx context.Context, c *api.Client, args []string, out io.Writer) 
 // "configured". The version it swaps against is the file's, or else the
 // current one, so a change made after that read fails the write. It is never
 // retried.
-func applyOne(ctx context.Context, c *api.Client, ch change) (string, error) {
+func applyOne(ctx context.Context, cl *cluster, ch change) (string, error) {
 	version, verb := ch.version, "configured"
 	if version == "" {
-		cur, err := ch.current(ctx, c)
+		cur, err := ch.current(ctx, cl)
 		switch {
 		case errors.Is(err, api.ErrNotFound):
 			verb = "created"
@@ -186,7 +187,7 @@ func applyOne(ctx context.Context, c *api.Client, ch change) (string, error) {
 			version = cur
 		}
 	}
-	err := ch.send(ctx, c, version)
+	err := ch.send(ctx, cl, version)
 	if errors.Is(err, api.ErrConflict) || errors.Is(err, api.ErrAlreadyExists) {
 		return "", fmt.Errorf("not applied, changed by someone else since it was read: %w", err)
 	}
@@ -196,7 +197,7 @@ func applyOne(ctx context.Context, c *api.Client, ch change) (string, error) {
 	return verb, nil
 }
 
-func runGet(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
+func runGet(ctx context.Context, cl *cluster, args []string, out io.Writer) error {
 	format := "table"
 	operands, err := parseFlags("get", args, func(fs *flag.FlagSet) { fs.StringVar(&format, "o", format, "table, yaml or json") })
 	if err != nil {
@@ -205,18 +206,18 @@ func runGet(ctx context.Context, c *api.Client, args []string, out io.Writer) er
 	if len(operands) < 1 || len(operands) > 2 {
 		return usagef("get: want KIND [NAME]")
 	}
-	k, err := lookupKind(operands[0])
-	if err != nil {
+	if err := checkFormat(format); err != nil {
 		return err
 	}
-	if err := checkFormat(format); err != nil {
+	k, err := resolveKind(ctx, cl, operands[0])
+	if err != nil {
 		return err
 	}
 	if len(operands) == 1 {
 		if k.list == nil {
 			return refusal("get", k, "GET", "")
 		}
-		res, err := k.list(ctx, c)
+		res, err := k.list(ctx, cl)
 		if err != nil {
 			return fmt.Errorf("get %s: %w", k.name, err)
 		}
@@ -225,14 +226,14 @@ func runGet(ctx context.Context, c *api.Client, args []string, out io.Writer) er
 	if k.get == nil {
 		return refusal("get", k, "GET", "/{name}")
 	}
-	res, err := k.get(ctx, c, operands[1])
+	res, err := k.get(ctx, cl, operands[1])
 	if err != nil {
 		return fmt.Errorf("get %s/%s: %w", k.name, operands[1], err)
 	}
 	return render(out, format, res)
 }
 
-func runDescribe(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
+func runDescribe(ctx context.Context, cl *cluster, args []string, out io.Writer) error {
 	operands, err := parseFlags("describe", args, func(*flag.FlagSet) {})
 	if err != nil {
 		return err
@@ -240,21 +241,21 @@ func runDescribe(ctx context.Context, c *api.Client, args []string, out io.Write
 	if len(operands) != 2 {
 		return usagef("describe: want KIND NAME")
 	}
-	k, err := lookupKind(operands[0])
+	k, err := resolveKind(ctx, cl, operands[0])
 	if err != nil {
 		return err
 	}
 	if k.get == nil {
 		return refusal("describe", k, "GET", "/{name}")
 	}
-	res, err := k.get(ctx, c, operands[1])
+	res, err := k.get(ctx, cl, operands[1])
 	if err != nil {
 		return fmt.Errorf("describe %s/%s: %w", k.name, operands[1], err)
 	}
 	return describe(out, k, res)
 }
 
-func runDelete(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
+func runDelete(ctx context.Context, cl *cluster, args []string, out io.Writer) error {
 	operands, err := parseFlags("delete", args, func(*flag.FlagSet) {})
 	if err != nil {
 		return err
@@ -262,14 +263,14 @@ func runDelete(ctx context.Context, c *api.Client, args []string, out io.Writer)
 	if len(operands) != 2 {
 		return usagef("delete: want KIND NAME")
 	}
-	k, err := lookupKind(operands[0])
+	k, err := resolveKind(ctx, cl, operands[0])
 	if err != nil {
 		return err
 	}
 	if k.del == nil {
 		return refusal("delete", k, "DELETE", "/{name}")
 	}
-	marked, err := k.del(ctx, c, operands[1])
+	marked, err := k.del(ctx, cl, operands[1])
 	if err != nil {
 		return fmt.Errorf("delete %s/%s: %w", k.name, operands[1], err)
 	}
