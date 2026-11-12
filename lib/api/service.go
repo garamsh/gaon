@@ -110,6 +110,18 @@ func (s *Service) Validate() error {
 	return s.Status.validate(s.Spec)
 }
 
+// KeepAllocated gives s the clusterIP and loadBalancerIP of old where s leaves
+// them empty, as Kubernetes does for an update that does not carry them. The
+// API server calls it before ValidateUpdate, which refuses a different value.
+func (s *Service) KeepAllocated(old *Service) {
+	if s.Spec.ClusterIP == "" {
+		s.Spec.ClusterIP = old.Spec.ClusterIP
+	}
+	if s.Spec.LoadBalancerIP == "" {
+		s.Spec.LoadBalancerIP = old.Spec.LoadBalancerIP
+	}
+}
+
 // ValidateUpdate checks that s keeps the type, clusterIP and loadBalancerIP
 // of old, and is otherwise valid. The API server keeps the stored status.
 func (s *Service) ValidateUpdate(old *Service) error {

@@ -155,6 +155,35 @@ func TestServiceValidateUpdateKeepsTheAddressesAndTheType(t *testing.T) {
 	assert.NoError(t, same.ValidateUpdate(lb))
 }
 
+func TestServiceKeepAllocatedFillsOnlyEmptyAddresses(t *testing.T) {
+	stored := newService("web")
+	stored.Spec.Type = api.ServiceLoadBalancer
+	stored.Spec.ClusterIP = "10.96.0.10"
+	stored.Spec.LoadBalancerIP = "192.168.1.50"
+	update := func(mutate func(s *api.Service)) *api.Service {
+		s := newService("web")
+		s.Spec.Type = api.ServiceLoadBalancer
+		mutate(s)
+		s.KeepAllocated(stored)
+		return s
+	}
+
+	both := update(func(s *api.Service) {})
+	assert.Equal(t, "10.96.0.10", both.Spec.ClusterIP)
+	assert.Equal(t, "192.168.1.50", both.Spec.LoadBalancerIP)
+	assert.NoError(t, both.ValidateUpdate(stored), "an update that carries neither address is accepted")
+
+	same := update(func(s *api.Service) { s.Spec.ClusterIP = "10.96.0.10" })
+	assert.NoError(t, same.ValidateUpdate(stored))
+
+	other := update(func(s *api.Service) { s.Spec.ClusterIP = "10.96.0.11" })
+	assert.Equal(t, "10.96.0.11", other.Spec.ClusterIP, "a value that is given is not replaced")
+	assert.ErrorIs(t, other.ValidateUpdate(stored), api.ErrInvalid)
+
+	otherLAN := update(func(s *api.Service) { s.Spec.LoadBalancerIP = "192.168.1.51" })
+	assert.ErrorIs(t, otherLAN.ValidateUpdate(stored), api.ErrInvalid)
+}
+
 func TestServiceSpecEffectiveTypeAndHeadless(t *testing.T) {
 	assert.Equal(t, api.ServiceClusterIP, api.ServiceSpec{}.EffectiveType())
 	assert.Equal(t, api.ServiceLoadBalancer, api.ServiceSpec{Type: api.ServiceLoadBalancer}.EffectiveType())
