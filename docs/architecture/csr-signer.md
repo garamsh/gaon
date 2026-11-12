@@ -26,11 +26,11 @@ The rules are checked in order and the first failure is recorded as `Denied`, wi
 | Order | Rule | Reason |
 |---|---|---|
 | 1 | `spec.request` parses as PKCS#10 and its signature verifies | `InvalidRequest` |
-| 2 | The subject is exactly one attribute, a CN, which is non-empty and does not start with `bootstrap:` | `InvalidSubject` |
+| 2 | The subject is exactly two attributes: a CN, which is non-empty and does not start with `bootstrap:`, and one Organization, `gaon:nodes` | `InvalidSubject` |
 | 3 | The request carries no subject alternative name and no extension other than an extended key usage of client auth alone | `DisallowedExtension` |
 | 4 | `spec.username` starts with `bootstrap:`, or equals the CN, which is a renewal | `UnauthorizedRequester` |
 
-- **The CN has no other format rule**, and its Node need not exist: an agent asks for its certificate before it registers its Node. A token can therefore obtain a certificate for any Node name ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) §Consequences).
+- **The CN has no other format rule than rule 2's**, and its Node need not exist: an agent asks for its certificate before it registers its Node. A token can therefore obtain a certificate for any Node name ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) §Consequences).
 - **An empty username fails rule 4.** A certificate holder asking for another CN fails it too.
 
 ### What it signs
@@ -48,7 +48,7 @@ The rules are checked in order and the first failure is recorded as `Denied`, wi
 
 - The approval rule is the one the contract states ([resource-api.md](./resource-api.md) §CertificateSigningRequest), split into four checks so each denial names the one that failed.
 - Rule 3 keeps a certificate to what a Node Agent asks for, client authentication under its CN, and nothing a request could add to it.
-- Rule 2 refuses any subject attribute besides the CN because a certificate's Organization values are its groups ([ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md)), and the signer copies the subject it is given. Refusing every other attribute, not only Organization, means no attribute a later authorizer reads can be requested.
+- Rule 2 allows one Organization, `gaon:nodes`, because a certificate's Organization values are its groups ([ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md)) and the signer copies the subject it is given; the one value marks a Node to a verifier outside gaon and no role grants it ([ADR 0022](./adr/0022-a-nodes-certificate-carries-the-organization-gaon-nodes-and-the-signer-signs-no-other-organization.md)). Refusing every other attribute, a second Organization included, means no attribute a later authorizer reads can be requested.
 - A request is decided once, because `status` is the signer's only output and a second decision could replace a certificate the Node Agent already holds.
 - `NotBefore` is set back so that a Node whose clock is behind the signer's does not refuse the certificate it has just been given.
 

@@ -12,6 +12,7 @@ Append-only: once merged, the body below is not rewritten. A fact later found wr
 - **A Node's certificate today is a CN and nothing else.** The signer approves a subject of exactly one CN, so a Node Agent's certificate cannot be told from any other certificate whose CN is a name, by anyone who reads the subject.
 - **A verifier outside gaon needs to tell a Node from the other identities the cluster CA signs.** The one named in the goal is an external condition on the certificate's subject, such as a cloud provider's role-trust policy for pulling images, which can match an Organization and has no way to know a Node's name.
 - **An Organization is a group to the API server** ([ADR 0008](./0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md), Decision 1). A signer that signs the Organization a requester chooses lets a token holder obtain `O=gaon:admins`, so the signer must decide which Organization it signs.
+- **The consequence in ADR 0008 and the passage that carries it are narrowed here.** ADR 0008 §Consequences, "The signer must refuse an Organization in a request's subject", is what [csr-signer.md](../csr-signer.md) rule 2 implements; ADR 0008's Decisions are unchanged.
 - **The Node authorizer keys on the CN** and on the Node existing ([ADR 0008](./0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md), Decision 5). It reads no Organization.
 
 ## Decision
