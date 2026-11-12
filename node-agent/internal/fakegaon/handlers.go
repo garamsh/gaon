@@ -18,11 +18,16 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func (s *Server) listMachines(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	if s.refuseWithoutNode(w, r, api.NewAPIError(api.ReasonForbidden, "%q may not list machines", s.node)) {
+		s.mu.Unlock()
+		return
+	}
 	if r.URL.Query().Get("watch") == "true" {
+		s.mu.Unlock()
 		s.watch(w, r)
 		return
 	}
-	s.mu.Lock()
 	defer s.mu.Unlock()
 	list := api.MachineList{
 		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachineList},
@@ -170,6 +175,13 @@ func (s *Server) putNode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if next.Metadata.ResourceVersion == "" {
+		s.attempts++
+		if s.holdNode {
+			writeError(w, &api.APIError{Code: http.StatusServiceUnavailable, Reason: "Unavailable", Message: "store is down"})
+			return
+		}
+	}
 	n, found := s.nodes[next.Metadata.Name]
 	if err := checkVersion(found, n.Metadata.ResourceVersion, next.Metadata.ResourceVersion, next.Metadata.Name); err != nil {
 		writeError(w, err)
@@ -232,6 +244,9 @@ func (s *Server) putLease(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	if s.failures["leases"] {
 		writeError(w, &api.APIError{Code: http.StatusServiceUnavailable, Reason: "Unavailable", Message: "store is down"})
+		return
+	}
+	if s.refuseWithoutNode(w, r, api.NewAPIError(api.ReasonInvalid, "lease %q is named as no existing node", next.Metadata.Name)) {
 		return
 	}
 	l, found := s.leases[next.Metadata.Name]

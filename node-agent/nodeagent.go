@@ -46,14 +46,23 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 		ReadTimeout:       cfg.Liveness.RPCTimeout,
 	}, client, runtime, cfg.Network, cfg.Storage, clk, log)
 
-	loops := []func(context.Context){
-		live.Run,
-		func(ctx context.Context) { nodes.Run(ctx, cfg.ResyncPeriod) },
-		runs.Run,
-	}
+	// Everything but the certificate renewal needs the Node, which the API
+	// server's authorization refuses until it exists.
+	loops := []func(context.Context){func(ctx context.Context) {
+		if nodes.Register(ctx, cfg.ResyncPeriod) != nil {
+			return
+		}
+		runAll(ctx, live.Run, func(ctx context.Context) { nodes.Run(ctx, cfg.ResyncPeriod) }, runs.Run)
+	}}
 	if renewCertificate != nil {
 		loops = append(loops, renewCertificate)
 	}
+	runAll(ctx, loops...)
+	return nil
+}
+
+// runAll runs each loop in its own goroutine and returns when all have.
+func runAll(ctx context.Context, loops ...func(context.Context)) {
 	var wg sync.WaitGroup
 	for _, run := range loops {
 		wg.Add(1)
@@ -63,5 +72,4 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 		}()
 	}
 	wg.Wait()
-	return nil
 }

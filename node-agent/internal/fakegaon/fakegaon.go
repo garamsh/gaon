@@ -33,6 +33,10 @@ type Server struct {
 	changed  chan struct{}
 	failures map[string]bool
 	puts     []api.Lease
+	node     string
+	holdNode bool
+	attempts int
+	refused  []string
 	csrs     map[string]api.CertificateSigningRequest
 	tls      *tlsState
 }
@@ -77,6 +81,61 @@ func (s *Server) FailLeaseWrites(on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failures["leases"] = on
+}
+
+// RequireNode makes the server refuse, as the API server's RBAC does, a
+// Machine list or watch and a Lease write while the Node name does not exist,
+// and records each refusal.
+func (s *Server) RequireNode(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.node = name
+}
+
+// HoldNodeCreation makes every attempt to create a Node fail with a server
+// error while on is true.
+func (s *Server) HoldNodeCreation(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.holdNode = on
+}
+
+// NodeCreations returns how many times a Node has been asked for, by a PUT
+// without a version, whether or not it was created.
+func (s *Server) NodeCreations() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.attempts
+}
+
+// Refused returns the requests refused for the absence of the Node named by
+// RequireNode, as "METHOD path", in order.
+func (s *Server) Refused() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.refused...)
+}
+
+// SetNode stores n, as a user or an earlier agent does.
+func (s *Server) SetNode(n api.Node) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n.TypeMeta = api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindNode}
+	s.rev++
+	n.Metadata.ResourceVersion = version(s.rev)
+	s.nodes[n.Metadata.Name] = n
+}
+
+// refuseWithoutNode answers a request that needs the Node named by
+// RequireNode with the refusal its absence gives, and reports whether it did.
+// The caller holds s.mu.
+func (s *Server) refuseWithoutNode(w http.ResponseWriter, r *http.Request, e *api.APIError) bool {
+	if _, ok := s.nodes[s.node]; s.node == "" || ok {
+		return false
+	}
+	s.refused = append(s.refused, r.Method+" "+r.URL.Path)
+	writeError(w, e)
+	return true
 }
 
 // Machine returns the stored Machine name.
