@@ -1,8 +1,8 @@
 # Workloads
 
-What `gaon-workloads` does: it registers the kinds `Job`, `CronJob` and `Deployment`, runs a Job's MicroVMs to completion, creates a Job from a CronJob at each scheduled time and keeps the replicas of a Deployment. The unit is `workloads/` and its binary is `gaon-workloads`. It is a client of the public resource API through `lib/api` and imports no other unit's `internal/` packages.
+What `gaon-workloads` does: it registers the kinds `Job`, `CronJob`, `Deployment` and `StatefulSet`, runs a Job's MicroVMs to completion, creates a Job from a CronJob at each scheduled time, keeps the replicas of a Deployment and keeps the named replicas of a StatefulSet with their Volumes. The unit is `workloads/` and its binary is `gaon-workloads`. It is a client of the public resource API through `lib/api` and imports no other unit's `internal/` packages.
 
-Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-registers-and-runs-to-completion-as-a-client-of-the-public-api.md), [ADR 0025](./adr/0025-a-cronjob-is-a-kind-the-workloads-unit-runs-by-creating-a-job-from-its-template-at-each-scheduled-time-only-while-it-leads.md) for the CronJob, [ADR 0026](./adr/0026-a-deployment-is-a-kind-the-workloads-unit-keeps-replicas-of-a-microvm-template-for-with-no-replicaset-kind-and-a-rollout-bounded-by-surge-and-unavailability.md) for the Deployment, [ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md) for the definition and [ADR 0018](./adr/0018-metadata-gains-uid-labels-and-owner-references-lists-take-a-label-selector-lease-and-event-are-new-kinds-and-a-role-rule-may-carry-a-label-selector.md) for `uid`, owner references and label-selector rules.
+Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-registers-and-runs-to-completion-as-a-client-of-the-public-api.md), [ADR 0025](./adr/0025-a-cronjob-is-a-kind-the-workloads-unit-runs-by-creating-a-job-from-its-template-at-each-scheduled-time-only-while-it-leads.md) for the CronJob, [ADR 0026](./adr/0026-a-deployment-is-a-kind-the-workloads-unit-keeps-replicas-of-a-microvm-template-for-with-no-replicaset-kind-and-a-rollout-bounded-by-surge-and-unavailability.md) for the Deployment, [ADR 0030](./adr/0030-a-statefulset-is-a-kind-the-workloads-unit-keeps-named-replicas-of-a-microvm-template-for-each-with-a-volume-it-keeps-when-the-replica-goes.md) for the StatefulSet, [ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md) for the definition and [ADR 0018](./adr/0018-metadata-gains-uid-labels-and-owner-references-lists-take-a-label-selector-lease-and-event-are-new-kinds-and-a-role-rule-may-carry-a-label-selector.md) for `uid`, owner references and label-selector rules.
 
 ## Current decisions
 
@@ -22,9 +22,15 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 - **Strategy**: `type` is `RollingUpdate` (absent is this) or `Recreate`. `rollingUpdate.maxSurge` and `maxUnavailable` are each a whole number or a whole number of percent, **written as a string** (`"1"`, `"25%"`) and checked by the schema's `pattern`, because the schema subset has no int-or-string; each defaults to `25%`. A surge percentage rounds up, an unavailability percentage rounds down, and when both are 0 one replica may be unavailable. `Recreate` is a surge of 0 and an unavailability of `replicas`.
 - **Status**: `observedGeneration` (the object's `metadata.generation` when the counts were taken), `replicas`, `readyReplicas`, `updatedReplicas`, `availableReplicas`. They count the owned MicroVMs that are not being deleted and have not failed; `readyReplicas` those whose Ready condition is True; `updatedReplicas` those made from the current template; `availableReplicas` equals `readyReplicas`, there being no minimum ready time. The counts are taken before the sweep's step, so the status is a sweep behind.
 
+- **`StatefulSet`** of the same group and version, plural `statefulsets`, cluster scoped, with a `status` subresource.
+- **Spec**: `replicas` (required, at least 0), `selector.matchLabels` (required, not empty), `template` (required, a MicroVM spec; the unit forces `runStrategy` to `Always` and clears `nodeName` and `bindingEpoch`), `volumeClaimTemplates`, `podManagementPolicy` and `updateStrategy`.
+- **Claim templates**: each is a `name` and a Volume `spec` (`storageClass` required). The entry of `template.volumes` of the same name is the mount. A name must be set, unique and mounted by such an entry.
+- **Policy and strategy**: `podManagementPolicy` is `OrderedReady` (absent is this) or `Parallel`. `updateStrategy.type` is `RollingUpdate` (absent is this) or `OnDelete`; `rollingUpdate.partition` is at least 0 and absent is 0.
+- **Status**: `observedGeneration`, `replicas`, `readyReplicas` and `updatedReplicas`, counted as a Deployment's are.
+
 ### Registration
 
-- At start the unit reads the definitions `jobs.workloads.gaon.garam.sh`, `cronjobs.workloads.gaon.garam.sh` and `deployments.workloads.gaon.garam.sh`, each in turn: it creates it when absent, updates it at the stored `resourceVersion` when its spec differs, and writes nothing when equal. A failure to register makes the process exit with the error.
+- At start the unit reads the definitions `jobs.workloads.gaon.garam.sh`, `cronjobs.workloads.gaon.garam.sh`, `deployments.workloads.gaon.garam.sh` and `statefulsets.workloads.gaon.garam.sh`, each in turn: it creates it when absent, updates it at the stored `resourceVersion` when its spec differs, and writes nothing when equal. A failure to register makes the process exit with the error.
 - The definition carries the label `workloads.gaon.garam.sh/managed-by=gaon-workloads`, which the unit's role names.
 
 ### The run
@@ -54,6 +60,18 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 - **An unusable Deployment** (an empty selector, a strategy the schema should have refused, a spec that does not decode) does nothing and is logged; the others are served.
 - **Scaling, rollouts and deleted replicas survive a handover**: every decision is read from the Store and the names are deterministic, so the new holder continues from what exists, and a create the old holder got in last answers `AlreadyExists`.
 
+### The stateful replicas
+
+- **A replica is a MicroVM the StatefulSet owns** (by `apiVersion`, `kind`, `name` and `uid`) named `<statefulset>-<ordinal>`, for the ordinals 0 to `replicas - 1`. It carries the labels `managed-by=gaon-workloads`, `workloads.gaon.garam.sh/statefulset=<name>`, `workloads.gaon.garam.sh/ordinal=<ordinal>`, `workloads.gaon.garam.sh/replica-name=<name>`, `workloads.gaon.garam.sh/template-hash=<hash>` and the selector's labels; the ordinal and the name are its stable identity. A MicroVM the set owns whose name is not `<statefulset>-<n>` with `n` written without sign or leading zero is not a replica and is left alone.
+- **A Volume per claim template and replica**, named `<claim>-<statefulset>-<ordinal>`, which the replica mounts through the template's volume entry of the claim's name, renamed to it. The unit creates a Volume, labeled `managed-by=gaon-workloads` and `workloads.gaon.garam.sh/statefulset=<name>`, before the replica, only when none of its name is listed. **It never deletes a Volume and gives it no owner reference**, so a replacement, a scale-down and the deletion of the StatefulSet all leave it.
+- **A replacement has the name and the Volume of the replica it replaces.** A replica is missing when no MicroVM of its name exists, so nothing is created while the old one is being deleted and its node agent has not released it. A Failed replica is deleted and made again.
+- **`OrderedReady`** creates the lowest missing ordinal, one per sweep, only while every lower ordinal exists and is Ready. It deletes the highest ordinal above `replicas`, one per sweep, the next once it is gone.
+- **`Parallel`** creates every missing ordinal and deletes every ordinal above `replicas` in one sweep.
+- **`OnDelete`** replaces nothing; a replica a user deletes is made again from the current template.
+- **`RollingUpdate`** deletes the highest ordinal from `partition` up that is not of the current template, and only while every other ordinal exists, is Ready and is not being deleted. It acts only when no ordinal is missing or above `replicas`. Ordinals below `partition` are not replaced, but one that is deleted is made from the current template.
+- **An unusable StatefulSet** (an empty selector, a policy, type or partition the schema should have refused, a claim template mounted by no volume or named twice, a spec that does not decode) does nothing and is logged; the others are served.
+- **An ordered creation or a rollout survives a handover**: every decision is read from the Store and the names are deterministic.
+
 ### Election
 
 - **It acts only while it holds the coordination Lease `gaon-workloads`**, as `gaon-scheduler` and `gaon-controllers` do ([ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md)): it runs on each control-plane Node and the others poll the Lease and do nothing else, not even registering the kind. Each term, from taking the Lease to losing it, runs a new service that registers and sweeps from the Store's state; a term that ends cancels the sweep.
@@ -63,7 +81,7 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 ### Identity and role
 
 - The certificate's common name is `gaon-workloads`. `workloads/deploy/rbac.yaml` holds the ClusterRole and ClusterRoleBinding `gaon:workloads`; an administrator applies it with `gaon apply -f`. Without it the unit is refused.
-- The role: `create` and `update` of definitions labeled `managed-by=gaon-workloads`; `get` of definitions with no selector; `create`, `get`, `list` and `delete` of MicroVMs labeled `managed-by=gaon-workloads`; `get`, `list`, `watch` of `jobs`; `create` and `delete` of `jobs` labeled `managed-by=gaon-workloads`; `update` of `jobs/status`; `list` of `cronjobs` and `update` of `cronjobs/status`; `list` of `deployments` and `update` of `deployments/status`; `get`, `create` and `update` of `leases` of the coordination group, which a rule cannot narrow to the Lease `gaon-workloads` because a rule names no object and a `get` of an absent Lease is judged on no labels.
+- The role: `create` and `update` of definitions labeled `managed-by=gaon-workloads`; `get` of definitions with no selector; `create`, `get`, `list` and `delete` of MicroVMs labeled `managed-by=gaon-workloads`; `get`, `list`, `watch` of `jobs`; `create` and `delete` of `jobs` labeled `managed-by=gaon-workloads`; `update` of `jobs/status`; `list` of `cronjobs` and `update` of `cronjobs/status`; `list` of `deployments` and `update` of `deployments/status`; `list` of `statefulsets` and `update` of `statefulsets/status`; `create` and `list` of Volumes labeled `managed-by=gaon-workloads`, and no `delete`; `get`, `create` and `update` of `leases` of the coordination group, which a rule cannot narrow to the Lease `gaon-workloads` because a rule names no object and a `get` of an absent Lease is judged on no labels.
 - **A `get` of an absent object is judged on no labels**, so a selector rule refuses it. The unselected `get` of definitions is what lets the unit find its definition is missing. `resource-api.md` §Authorization allows only what the Node authorizer or a bound role allows under `RBAC`, so the server's requirement of the RBAC `get` is what the document states.
 
 ### Deployment
@@ -79,6 +97,8 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 
 - Keeping no ReplicaSet kind leaves one list and one pass for a rollout; the cost is no rollout history and no rollback ([ADR 0026](./adr/0026-a-deployment-is-a-kind-the-workloads-unit-keeps-replicas-of-a-microvm-template-for-with-no-replicaset-kind-and-a-rollout-bounded-by-surge-and-unavailability.md)).
 
+- Keeping the Volumes and the names of a StatefulSet's replicas through a replacement is what a stateful workload needs; the cost is that the Volumes outlive the set until a user deletes them ([ADR 0030](./adr/0030-a-statefulset-is-a-kind-the-workloads-unit-keeps-named-replicas-of-a-microvm-template-for-each-with-a-volume-it-keeps-when-the-replica-goes.md)).
+
 ## Open questions
 
 - **A name held by an unlabeled MicroVM stalls the Job**: the unit cannot list it, so each sweep's create answers `AlreadyExists` and is logged. A generated name suffix would remove it.
@@ -92,3 +112,7 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 - **No progress deadline, pause or rollback.** A template that never becomes ready holds a rollout, with its surge replica kept, until the spec changes.
 - **No minimum ready time**: a replica is available as soon as it is Ready.
 - **A selector change adopts and releases nothing**; ownership is by owner reference.
+- **A StatefulSet keeps no revision**, so a replica below `partition` that is deleted is made from the current template, and a rollout waits on any replica that is not Ready.
+- **A StatefulSet's scale-down does not wait for the lower ordinals to be Ready.**
+- **A StatefulSet's Volumes are never deleted by the unit**; a user removes them.
+- **No DNS**: the identity is in labels; nothing serves the names.

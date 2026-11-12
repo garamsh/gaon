@@ -53,12 +53,17 @@ type electionAPI struct {
 	// of the replicas it checks and the agents it plays.
 	dep   *api.CustomObject
 	fleet fleetState
+	// sts is the StatefulSet the server holds, if a test sets one, and volumes
+	// are the Volumes written to it, with volumePuts counting the writes.
+	sts        *api.CustomObject
+	volumes    map[string]api.Volume
+	volumePuts int
 }
 
 func newElectionAPI(t *testing.T) *electionAPI {
 	t.Helper()
 	a := &electionAPI{microvms: map[string]api.MicroVM{}, work: map[string]int{}, creates: map[string]int{}, polls: map[string]int{},
-		jobs: map[string]api.CustomObject{}, jobPuts: map[string]int{}, deletes: map[string]int{}}
+		jobs: map[string]api.CustomObject{}, jobPuts: map[string]int{}, deletes: map[string]int{}, volumes: map[string]api.Volume{}}
 	ts := httptest.NewServer(http.HandlerFunc(a.serve))
 	t.Cleanup(ts.Close)
 	a.URL = ts.URL
@@ -147,6 +152,18 @@ func (a *electionAPI) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(path, "/deployments/") && strings.HasSuffix(path, "/status"):
 		a.work[who]++
 		a.putDeploymentStatus(w, r, fail)
+	case strings.HasSuffix(path, "/statefulsets"):
+		a.work[who]++
+		a.listStatefulSets(w)
+	case strings.Contains(path, "/statefulsets/") && strings.HasSuffix(path, "/status"):
+		a.work[who]++
+		a.putStatefulSetStatus(w, r, fail)
+	case strings.HasSuffix(path, "/volumes"):
+		a.work[who]++
+		a.listVolumes(w)
+	case strings.Contains(path, "/volumes/") && r.Method == http.MethodPut:
+		a.work[who]++
+		a.putVolume(w, r, fail)
 	case strings.Contains(path, "/microvms/") && r.Method == http.MethodDelete:
 		a.work[who]++
 		a.deletes[who]++

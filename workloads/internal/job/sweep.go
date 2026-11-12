@@ -11,7 +11,7 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// sweep reconciles every Job once, then every CronJob, then every Deployment.
+// sweep reconciles every Job once, then every CronJob, then every Deployment, then every StatefulSet.
 // A failure of one object is logged and does not stop the others.
 func (s *service) sweep(ctx context.Context) {
 	if jobs, err := s.jobs.List(ctx); err != nil {
@@ -21,6 +21,7 @@ func (s *service) sweep(ctx context.Context) {
 		s.sweepCronJobs(ctx, jobs.Items)
 	}
 	s.sweepDeployments(ctx)
+	s.sweepStatefulSets(ctx)
 }
 
 func (s *service) sweepJobs(ctx context.Context, jobs []api.CustomObject) {

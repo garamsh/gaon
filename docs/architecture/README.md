@@ -31,7 +31,7 @@ Current architecture of the system and the decisions behind it. This file is the
   - [node-agent.md](./node-agent.md): what `gaon-node-agent` does on a node: registration, Lease and fencing renewal, and running bound MicroVMs on mvmd.
   - [cli.md](./cli.md): the `gaon` client CLI, its commands and how `apply` treats a concurrent change.
   - [deployment.md](./deployment.md): which gaon services run on which Node, what a Node's config carries for them, how certificates reach them and which gaon commit is run.
-  - [workloads.md](./workloads.md): how `gaon-workloads` registers the `Job` and `CronJob` kinds, runs a Job's MicroVMs to completion with retries and creates a Job from a CronJob at each scheduled time, as a client of the public API.
+  - [workloads.md](./workloads.md): how `gaon-workloads` registers the `Job`, `CronJob`, `Deployment` and `StatefulSet` kinds, runs a Job's MicroVMs to completion with retries, creates a Job from a CronJob at each scheduled time, keeps a Deployment's replicas and a StatefulSet's named replicas with their Volumes, as a client of the public API.
   - [e2e.md](./e2e.md): how the end-to-end test of M1 runs, what it asserts, and what the host needs.
 - ADRs
   - [0001](./adr/0001-the-repository-is-a-go-workspace-of-executable-units-partitioned-by-responsibility.md): the repository is a Go workspace of executable units, each its own module, partitioned by responsibility.
@@ -60,3 +60,4 @@ Current architecture of the system and the decisions behind it. This file is the
   - [0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-registers-and-runs-to-completion-as-a-client-of-the-public-api.md): a Job is a custom resource kind the workloads unit registers and runs to completion as a client of the public API.
   - [0025](./adr/0025-a-cronjob-is-a-kind-the-workloads-unit-runs-by-creating-a-job-from-its-template-at-each-scheduled-time-only-while-it-leads.md): a CronJob is a kind the workloads unit runs by creating a Job from its template at each scheduled time, only while it leads.
   - [0026](./adr/0026-a-deployment-is-a-kind-the-workloads-unit-keeps-replicas-of-a-microvm-template-for-with-no-replicaset-kind-and-a-rollout-bounded-by-surge-and-unavailability.md): a Deployment is a kind the workloads unit keeps replicas of a MicroVM template for, with no ReplicaSet kind and a rollout bounded by surge and unavailability.
+  - [0030](./adr/0030-a-statefulset-is-a-kind-the-workloads-unit-keeps-named-replicas-of-a-microvm-template-for-each-with-a-volume-it-keeps-when-the-replica-goes.md): a StatefulSet is a kind the workloads unit keeps named replicas of a MicroVM template for, each with a Volume it keeps when the replica goes.

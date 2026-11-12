@@ -1,10 +1,12 @@
 # What gaon-workloads is allowed, applied by an administrator with
 # `gaon apply -f workloads/deploy/rbac.yaml`. The unit's certificate has the
 # common name gaon-workloads, which the binding names. The unit registers the
-# Job, CronJob and Deployment kinds itself (ADR 0024, ADR 0025, ADR 0026), so it
-# may create and update the definitions it labels, create and delete the
-# MicroVMs it labels, and create and delete the Jobs it labels, which it makes
-# for a CronJob's scheduled times. It acts only while it holds the
+# Job, CronJob, Deployment and StatefulSet kinds itself (ADR 0024, ADR 0025,
+# ADR 0026, ADR 0030), so it may create and update the definitions it labels,
+# create and delete the MicroVMs it labels, create and list the Volumes it
+# labels, which it makes for a StatefulSet's replicas and never deletes, and
+# create and delete the Jobs it labels, which it makes for a CronJob's
+# scheduled times. It acts only while it holds the
 # coordination Lease gaon-workloads (ADR 0024 Errata, ADR 0023), which it reads,
 # creates and renews.
 apiVersion: rbac.gaon.garam.sh/v1alpha1
@@ -22,6 +24,10 @@ rules:
   - apiGroups: [compute.gaon.garam.sh]
     resources: [microvms]
     verbs: [create, get, list, delete]
+    labelSelector: workloads.gaon.garam.sh/managed-by=gaon-workloads
+  - apiGroups: [compute.gaon.garam.sh]
+    resources: [volumes]
+    verbs: [create, list]
     labelSelector: workloads.gaon.garam.sh/managed-by=gaon-workloads
   - apiGroups: [coordination.gaon.garam.sh]
     resources: [leases]
@@ -47,6 +53,12 @@ rules:
     verbs: [list]
   - apiGroups: [workloads.gaon.garam.sh]
     resources: [deployments/status]
+    verbs: [update]
+  - apiGroups: [workloads.gaon.garam.sh]
+    resources: [statefulsets]
+    verbs: [list]
+  - apiGroups: [workloads.gaon.garam.sh]
+    resources: [statefulsets/status]
     verbs: [update]
 ---
 apiVersion: rbac.gaon.garam.sh/v1alpha1
