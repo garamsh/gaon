@@ -44,6 +44,9 @@ func (s *Server) CreateMachine(_ context.Context, r *v1alpha2.CreateMachineReque
 	if k := r.GetKernel(); k != "" && len(s.Kernels) > 0 && !slices.Contains(s.Kernels, k) {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED, "the node offers no kernel "+k)
 	}
+	if err := s.checkProcess(r); err != nil {
+		return nil, err
+	}
 	if _, ok := s.machines[r.GetMachineId()]; ok {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_CONFLICT, "machine exists")
 	}
@@ -70,6 +73,7 @@ func (s *Server) CreateMachine(_ context.Context, r *v1alpha2.CreateMachineReque
 		NetworkPolicy: r.GetNetworkPolicy(),
 	}
 	s.machines[m.Id] = m
+	s.requests[m.Id] = proto.Clone(r).(*v1alpha2.CreateMachineRequest)
 	return &v1alpha2.CreateMachineResponse{Machine: proto.Clone(m).(*v1alpha2.Machine)}, nil
 }
 
