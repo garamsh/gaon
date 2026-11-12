@@ -1,6 +1,6 @@
 # ADR 0006: A gaon deployment is one control-plane Node, its services configured by argv and files, pinned by commit
 
-> Status: accepted
+> Status: accepted; its one control-plane Node is superseded by ADR-0023
 > Date: 2026-11-11
 
 Drafted for garamsh/gaon#58. The decisions are the project owner's, recorded in [the PM's decision comment on that issue](https://github.com/garamsh/gaon/issues/58#issuecomment-6798341752). They answer the questions naru's PM raised on 2026-11-11, before taking on garamsh/naru#19, which carries gaon's binaries in naru's image. Code claims hold for garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`.

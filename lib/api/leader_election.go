@@ -89,11 +89,11 @@ func (e *LeaderElector) Run(ctx context.Context, lead func(ctx context.Context))
 	}
 	var seen observation
 	for ctx.Err() == nil {
-		held, ok := e.acquire(ctx, &seen)
+		held, took, ok := e.acquire(ctx, &seen)
 		if !ok {
 			return ctx.Err()
 		}
-		e.lead(ctx, held, lead)
+		e.lead(ctx, held, took, lead)
 		seen = observation{}
 	}
 	return ctx.Err()
@@ -106,15 +106,15 @@ type observation struct {
 }
 
 // acquire tries every RetryPeriod until this process holds the Lease or ctx ends.
-func (e *LeaderElector) acquire(ctx context.Context, seen *observation) (*CoordinationLease, bool) {
+func (e *LeaderElector) acquire(ctx context.Context, seen *observation) (*CoordinationLease, time.Time, bool) {
 	for {
 		start := e.Clock.Now()
 		if held, ok := e.tryAcquire(ctx, seen, start); ok {
-			return held, true
+			return held, start, true
 		}
 		select {
 		case <-ctx.Done():
-			return nil, false
+			return nil, time.Time{}, false
 		case <-e.Clock.After(e.RetryPeriod):
 		}
 	}
@@ -154,9 +154,10 @@ func (e *LeaderElector) write(ctx context.Context, l *CoordinationLease, now tim
 	return stored, true
 }
 
-// lead runs the term of a holder that holds the Lease as held, renewed at the
-// start of its first write.
-func (e *LeaderElector) lead(ctx context.Context, held *CoordinationLease, lead func(context.Context)) {
+// lead runs the term of a holder that holds the Lease as held, which it took
+// by a write begun at took on the elector's clock. The Lease's own renew time is
+// the server's echo of a wall-clock value and carries no reading of that clock.
+func (e *LeaderElector) lead(ctx context.Context, held *CoordinationLease, took time.Time, lead func(context.Context)) {
 	termCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan struct{})
@@ -165,7 +166,7 @@ func (e *LeaderElector) lead(ctx context.Context, held *CoordinationLease, lead 
 		lead(termCtx)
 	}()
 
-	renewed := held.Spec.RenewTime
+	renewed := took
 	for {
 		select {
 		case <-ctx.Done():

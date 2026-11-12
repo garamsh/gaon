@@ -146,6 +146,9 @@ type memberClient struct {
 	cut   string
 	// held counts the calls that were held because the connection hangs.
 	held atomic.Int32
+	// skew is added to the renew time of every Lease a write returns, as a server
+	// whose clock is not the elector's would stamp it.
+	skew time.Duration
 }
 
 // Ways to cut a connection.
@@ -197,7 +200,11 @@ func (m *memberClient) PutCoordinationLease(ctx context.Context, l *api.Coordina
 	if err := m.gate(ctx); err != nil {
 		return nil, err
 	}
-	return m.store.put(l)
+	stored, err := m.store.put(l)
+	if err == nil {
+		stored.Spec.RenewTime = stored.Spec.RenewTime.Add(m.skew)
+	}
+	return stored, err
 }
 
 // member is one process that contends for the Lease and records when it acts.
@@ -229,6 +236,8 @@ type election struct {
 	clock   *electionClock
 	store   *leaseStore
 	members []*member
+	// skew is given to the client of every member started.
+	skew time.Duration
 }
 
 func newElection(t *testing.T, ids ...string) *election {
@@ -242,7 +251,7 @@ func newElection(t *testing.T, ids ...string) *election {
 }
 
 func (e *election) start(id string) *member {
-	m := &member{id: id, client: &memberClient{store: e.store}, done: make(chan struct{})}
+	m := &member{id: id, client: &memberClient{store: e.store, skew: e.skew}, done: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
 	elector := &api.LeaderElector{
@@ -523,6 +532,30 @@ func TestLeaderElector_RunRefusesSettingsThatLetTwoHoldersAct(t *testing.T) {
 			change(&e)
 			assert.Error(t, e.Validate())
 			assert.Error(t, e.Run(context.Background(), func(context.Context) { t.Error("lead was called") }))
+		})
+	}
+}
+
+// The first term's renew deadline counts from the elector's own reading of its
+// clock when the take began, not from the renew time the server returns, which
+// is a wall-clock value another host may have stamped.
+func TestLeaderElector_TheFirstTermEndsAtTheRenewDeadlineWhateverRenewTimeTheServerReturns(t *testing.T) {
+	for name, skew := range map[string]time.Duration{"server agrees": 0, "server an hour ahead": time.Hour} {
+		t.Run(name, func(t *testing.T) {
+			e := &election{t: t, clock: newElectionClock(), store: &leaseStore{}, skew: skew}
+			m := e.start("a")
+			e.members = []*member{m}
+			e.settle()
+			require.True(t, m.isActing(), "the member took the Lease")
+			took := e.clock.Now()
+
+			// No renewal is acknowledged from here on.
+			m.client.setCut(failing)
+			for e.clock.Now().Add(electionRetry).Before(took.Add(electionDeadline)) {
+				require.Equal(t, []string{"a"}, e.step(), "still acting at %s, before the renew deadline", e.clock.Now())
+			}
+			assert.Empty(t, e.step(), "stops acting at the take's start plus the renew deadline")
+			assert.Equal(t, took.Add(electionDeadline), e.clock.Now())
 		})
 	}
 }
