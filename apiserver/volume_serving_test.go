@@ -17,6 +17,8 @@ func TestPutVolume_CreateStartsPendingWhateverStatusItCarries(t *testing.T) {
 	v := volume("v1")
 	v.Status = api.VolumeStatus{Phase: api.VolumeBound, Attachment: &api.Attachment{MachineName: "m1", BindingEpoch: 1}, Capacity: "1Gi"}
 	v.Metadata.Generation = 7
+	then := time.Now().UTC()
+	v.Metadata.DeletionTimestamp = &then
 
 	created, err := e.api.PutVolume(ctx(t), v)
 	require.NoError(t, err)
@@ -24,6 +26,7 @@ func TestPutVolume_CreateStartsPendingWhateverStatusItCarries(t *testing.T) {
 	assert.Nil(t, created.Status.Attachment)
 	assert.Empty(t, created.Status.Capacity)
 	assert.Equal(t, int64(1), created.Metadata.Generation)
+	assert.Nil(t, created.Metadata.DeletionTimestamp, "a Volume is not created already deleting")
 	assert.NotEmpty(t, created.Metadata.ResourceVersion)
 
 	got, err := e.api.GetVolume(ctx(t), "v1")
@@ -94,10 +97,12 @@ func TestPutVolume_UpdateIsCompareAndSwapAndTakesNeitherStatusNorDeletionTime(t 
 	now := time.Now().UTC()
 	forged.Metadata.DeletionTimestamp = &now
 	forged.Metadata.Finalizers = []string{holdFinalizer}
+	forged.Metadata.Generation = 9
 	updated, err := e.api.PutVolume(ctx(t), &forged)
 	require.NoError(t, err)
 	assert.Equal(t, api.VolumePending, updated.Status.Phase, "a status the body carries is not stored")
 	assert.Nil(t, updated.Metadata.DeletionTimestamp, "a deletion time the body carries is not stored")
+	assert.Equal(t, int64(1), updated.Metadata.Generation, "a generation the body carries is not stored")
 
 	_, err = e.api.PutVolume(ctx(t), &forged)
 	assert.ErrorIs(t, err, api.ErrConflict, "the version the first update replaced")

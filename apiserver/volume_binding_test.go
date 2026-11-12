@@ -244,3 +244,121 @@ func TestBindMachine_TwoBindingsOfOneVolumeToTwoNodesPinItOnce(t *testing.T) {
 	assert.Equal(t, nodes[winner], mustGet(t, e, names[winner]).Spec.NodeName)
 	assert.Empty(t, mustGet(t, e, names[loser]).Spec.NodeName, "the loser stays unbound")
 }
+
+func TestBindMachine_AMutatingWebhookMayNotChangeWhatThePinSet(t *testing.T) {
+	tests := []struct {
+		name  string
+		ops   string
+		want  error
+		check func(t *testing.T, v *api.Volume)
+	}{
+		{name: "a spec field", ops: `[{"op":"replace","path":"/spec/storage","value":"9Gi"}]`, want: api.ErrInvalid},
+		{name: "the node the pin set", ops: `[{"op":"remove","path":"/spec/nodeName"}]`, want: api.ErrInvalid},
+		{name: "a finalizer", ops: `[{"op":"add","path":"/metadata/finalizers/-","value":"example.com/extra"}]`, want: api.ErrInvalid},
+		{
+			name: "the status", ops: `[{"op":"replace","path":"/status/phase","value":"Bound"}]`,
+			check: func(t *testing.T, v *api.Volume) {
+				assert.Equal(t, api.VolumePending, v.Status.Phase, "the stored status is kept")
+			},
+		},
+		{
+			name: "the deletion time", ops: `[{"op":"add","path":"/metadata/deletionTimestamp","value":"2030-01-01T00:00:00Z"}]`,
+			check: func(t *testing.T, v *api.Volume) {
+				assert.Nil(t, v.Metadata.DeletionTimestamp, "the stored deletion time is kept")
+			},
+		},
+		{
+			name: "an owner, as the control that a webhook may change something else", ops: `[{"op":"add","path":"/metadata/ownerReferences","value":[{"apiVersion":"v1","kind":"Owner","name":"o"}]}]`,
+			check: func(t *testing.T, v *api.Volume) {
+				assert.Len(t, v.Metadata.OwnerReferences, 1, "the webhook's change is stored")
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.createVolume(t, "v1")
+			m := e.machineUsing(t, "m1", "v1")
+			volumeBefore := e.getVolume(t, "v1")
+			machineBefore := mustGet(t, e, "m1")
+			w := newWebhookServer(t)
+			w.answer = func(c call) *api.AdmissionResponse { return patch(c, tc.ops) }
+			e.mutating(t, "pin", w.hook("pin.hooks.example", "/", "volumes"))
+
+			_, err := e.api.BindMachine(ctx(t), "m1", binding(m, "n1", 1))
+			if tc.want == nil {
+				require.NoError(t, err)
+				assert.Equal(t, "n1", e.getVolume(t, "v1").Spec.NodeName)
+				tc.check(t, e.getVolume(t, "v1"))
+				return
+			}
+			assert.ErrorIs(t, err, tc.want)
+			assert.Equal(t, volumeBefore, e.getVolume(t, "v1"), "the Volume is not written")
+			assert.Equal(t, machineBefore, mustGet(t, e, "m1"), "the Machine is not bound")
+
+			w.answer = func(c call) *api.AdmissionResponse { return allow(c) }
+			_, err = e.api.BindMachine(ctx(t), "m1", binding(m, "n1", 1))
+			assert.NoError(t, err, "control: the same binding once the webhook leaves it alone")
+		})
+	}
+}
+
+func TestBindMachine_AVolumeThePinLeavesAsItIsHoldsItsPlaceInTheTransaction(t *testing.T) {
+	tests := []struct {
+		name string
+		// interfere runs between the binding's read of the Volume and its
+		// commit; nil is the control.
+		interfere func(t *testing.T, e *env)
+		want      error
+	}{
+		{name: "control: nothing changes", want: nil},
+		{
+			name: "the Volume is changed",
+			interfere: func(t *testing.T, e *env) {
+				v := e.getVolume(t, "v1")
+				v.Metadata.Finalizers = append(v.Metadata.Finalizers, holdFinalizer)
+				_, err := e.api.PutVolume(ctx(t), v)
+				require.NoError(t, err)
+			},
+			want: api.ErrConflict,
+		},
+		{
+			name: "the Volume starts to be deleted",
+			interfere: func(t *testing.T, e *env) {
+				_, err := e.api.DeleteVolume(ctx(t), "v1", e.getVolume(t, "v1").Metadata.ResourceVersion)
+				require.NoError(t, err)
+			},
+			want: api.ErrConflict,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.createVolume(t, "v1")
+			bound := e.bind(t, e.machineUsing(t, "m1", "v1"), "n1", 1)
+			pinned := e.getVolume(t, "v1")
+
+			// The rebinding to the same node changes nothing of the Volume. The
+			// webhook runs after the Volume was read and before the commit.
+			var once atomic.Bool
+			w := newWebhookServer(t)
+			w.serve = func(rw http.ResponseWriter, r *http.Request, c call) {
+				if tc.interfere != nil && once.CompareAndSwap(false, true) {
+					tc.interfere(t, e)
+				}
+				reply(rw, allow(c))
+			}
+			e.validating(t, "between", w.hook("between.hooks.example", "/", "machines/binding"))
+
+			_, err := e.api.BindMachine(ctx(t), "m1", binding(bound, "n1", 2))
+			if tc.want == nil {
+				assert.NoError(t, err)
+				assert.Equal(t, pinned, e.getVolume(t, "v1"), "the Volume is not written")
+				return
+			}
+			require.NotEmpty(t, w.received(), "the webhook ran between the read and the commit")
+			assert.ErrorIs(t, err, tc.want)
+			assert.Equal(t, api.Epoch(1), mustGet(t, e, "m1").Spec.BindingEpoch, "the Machine is not rebound")
+		})
+	}
+}

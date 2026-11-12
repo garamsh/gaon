@@ -113,8 +113,15 @@ func TestNodeAuthorizer_ANodeChangesOnlyItsFinalizerOfAVolumePinnedToIt(t *testi
 	_, err = f.node1.PutVolume(ctx(t), &elsewhere)
 	assert.ErrorIs(t, err, api.ErrForbidden, "a Volume pinned to no Node")
 
+	// The status and what the server sets are not the Node's to be held to.
+	stale := *v
+	stale.Metadata.ResourceVersion = "1"
+	_, err = f.node1.PutVolume(ctx(t), &stale)
+	assert.ErrorIs(t, err, api.ErrConflict, "a stale version is the server's to refuse, not the authorizer's")
 	removed := *v
 	removed.Metadata.Finalizers = nil
+	removed.Status.Phase = api.VolumeReleased
+	removed.Metadata.Generation = 9
 	cleared, err := f.node1.PutVolume(ctx(t), &removed)
 	require.NoError(t, err, "control: removing its finalizer")
 	cleared.Metadata.Finalizers = []string{api.NodeAgentFinalizer}
