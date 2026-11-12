@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 
@@ -87,6 +88,13 @@ func newEnvWith(t *testing.T, opts envOptions) *env {
 // a start that fails on a taken address is made again on new ports.
 func startEtcd(t *testing.T) string {
 	t.Helper()
+	return startEtcdWith(t, nil)
+}
+
+// startEtcdWith is startEtcd serving its clients over TLS as tlsInfo says, or
+// plain HTTP where it is nil.
+func startEtcdWith(t *testing.T, tlsInfo *transport.TLSInfo) string {
+	t.Helper()
 	const attempts = 10
 	for attempt := 1; ; attempt++ {
 		cfg := embed.NewConfig()
@@ -94,6 +102,10 @@ func startEtcd(t *testing.T) string {
 		cfg.LogLevel = "panic"
 		cfg.TickMs, cfg.ElectionMs = 10, 100
 		client, peer := freeURL(t), freeURL(t)
+		if tlsInfo != nil {
+			client.Scheme = "https"
+			cfg.ClientTLSInfo = *tlsInfo
+		}
 		cfg.ListenClientUrls, cfg.AdvertiseClientUrls = []url.URL{client}, []url.URL{client}
 		cfg.ListenPeerUrls, cfg.AdvertisePeerUrls = []url.URL{peer}, []url.URL{peer}
 		cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)

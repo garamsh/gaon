@@ -38,6 +38,30 @@ func TestParseConfig_TLSFlags(t *testing.T) {
 	assert.Equal(t, "key.pem", cfg.TLSKey)
 }
 
+func TestParseConfig_EtcdTLSFlags(t *testing.T) {
+	cfg, err := apiserver.ParseConfig([]string{"-etcd-ca-file", "ca.pem", "-etcd-cert-file", "cert.pem", "-etcd-key-file", "key.pem"})
+	require.NoError(t, err)
+	assert.Equal(t, "ca.pem", cfg.EtcdCA)
+	assert.Equal(t, "cert.pem", cfg.EtcdCert)
+	assert.Equal(t, "key.pem", cfg.EtcdKey)
+}
+
+func TestParseConfig_EtcdTLSNamesTheMissingFlag(t *testing.T) {
+	all := map[string]string{"etcd-ca-file": "ca.pem", "etcd-cert-file": "cert.pem", "etcd-key-file": "key.pem"}
+	for missing := range all {
+		t.Run(missing, func(t *testing.T) {
+			var args []string
+			for flag, file := range all {
+				if flag != missing {
+					args = append(args, "-"+flag, file)
+				}
+			}
+			_, err := apiserver.ParseConfig(args)
+			assert.ErrorContains(t, err, "missing "+missing)
+		})
+	}
+}
+
 func TestParseConfig_Refuses(t *testing.T) {
 	for name, args := range map[string][]string{
 		"no endpoint":      {"-etcd-endpoints", " , "},

@@ -47,7 +47,11 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 	if addr, ok := ln.Addr().(*net.TCPAddr); tlsCfg == nil && (!ok || !addr.IP.IsLoopback()) {
 		return fmt.Errorf("listener %s is not a loopback address and no TLS files are given", ln.Addr())
 	}
-	st, err := etcdstore.New(ctx, cfg.Endpoints, cfg.DialTimeout)
+	etcdTLS, err := cfg.etcdTLS()
+	if err != nil {
+		return err
+	}
+	st, err := etcdstore.New(ctx, cfg.Endpoints, cfg.DialTimeout, etcdTLS)
 	if err != nil {
 		return err
 	}

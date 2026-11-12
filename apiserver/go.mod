@@ -6,6 +6,7 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/garamsh/gaon/lib/api v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.12.1
+	go.etcd.io/etcd/client/pkg/v3 v3.6.16
 	go.etcd.io/etcd/client/v3 v3.6.16
 	go.etcd.io/etcd/server/v3 v3.6.16
 	go.uber.org/zap v1.28.0
@@ -44,7 +45,6 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect
 	go.etcd.io/etcd/api/v3 v3.6.16 // indirect
-	go.etcd.io/etcd/client/pkg/v3 v3.6.16 // indirect
 	go.etcd.io/etcd/pkg/v3 v3.6.16 // indirect
 	go.etcd.io/raft/v3 v3.6.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
