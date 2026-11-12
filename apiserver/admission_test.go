@@ -118,8 +118,9 @@ func TestWebhookConfigurations_AreAuthorizedAsTheirOwnResources(t *testing.T) {
 	addr, _ := c.start(t, apiserver.ModeRBAC)
 	w := newWebhookServer(t)
 	admin := c.admissionClient(t, addr, adminID)
+	_, adminRBAC := c.clients(t, addr, adminID)
+	holder := c.admissionClient(t, addr, who{"holder", nil})
 	stranger := c.admissionClient(t, addr, strangerID)
-	controllers := c.admissionClient(t, addr, controllersID)
 	mutating := &api.MutatingWebhookConfiguration{
 		TypeMeta: api.TypeMeta{APIVersion: api.AdmissionRegistrationGroupVersion, Kind: api.KindMutatingWebhookConfiguration},
 		Metadata: api.ObjectMeta{Name: "cfg"},
@@ -131,25 +132,43 @@ func TestWebhookConfigurations_AreAuthorizedAsTheirOwnResources(t *testing.T) {
 		Webhooks: []api.Webhook{w.hook("a.hooks.example", "/", "machines")},
 	}
 
-	for _, denied := range []*api.Client{stranger, controllers} {
-		_, err := denied.PutMutatingWebhookConfiguration(ctx(t), mutating)
-		assert.ErrorIs(t, err, api.ErrForbidden)
-		_, err = denied.PutValidatingWebhookConfiguration(ctx(t), validating)
-		assert.ErrorIs(t, err, api.ErrForbidden)
-		_, err = denied.ListMutatingWebhookConfigurations(ctx(t))
-		assert.ErrorIs(t, err, api.ErrForbidden)
-		_, err = denied.ListValidatingWebhookConfigurations(ctx(t))
-		assert.ErrorIs(t, err, api.ErrForbidden)
-	}
+	// A caller without a role is refused every verb of both kinds.
+	_, err := stranger.PutMutatingWebhookConfiguration(ctx(t), mutating)
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = stranger.PutValidatingWebhookConfiguration(ctx(t), validating)
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = stranger.ListMutatingWebhookConfigurations(ctx(t))
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = stranger.ListValidatingWebhookConfigurations(ctx(t))
+	assert.ErrorIs(t, err, api.ErrForbidden)
+
+	// A role on one kind's resource lets the holder write and read that kind
+	// and not the other.
+	all := []api.Verb{api.VerbGet, api.VerbList, api.VerbCreate, api.VerbUpdate, api.VerbDelete}
+	_, err = adminRBAC.PutClusterRole(ctx(t), clusterRole("mutating-only", rule(api.AdmissionRegistrationGroup, "mutatingwebhookconfigurations", all...)))
+	require.NoError(t, err)
+	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("mutating-only", "mutating-only", userSubject("holder")))
+	require.NoError(t, err)
+
+	created, err := holder.PutMutatingWebhookConfiguration(ctx(t), mutating)
+	require.NoError(t, err)
+	_, err = holder.GetMutatingWebhookConfiguration(ctx(t), "cfg")
+	require.NoError(t, err)
+	_, err = holder.ListMutatingWebhookConfigurations(ctx(t))
+	require.NoError(t, err)
+	_, err = holder.PutValidatingWebhookConfiguration(ctx(t), validating)
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = holder.ListValidatingWebhookConfigurations(ctx(t))
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = holder.DeleteMutatingWebhookConfiguration(ctx(t), "cfg", created.Metadata.ResourceVersion)
+	require.NoError(t, err)
+
+	// The admin holds both.
 	m, err := admin.PutMutatingWebhookConfiguration(ctx(t), mutating)
 	require.NoError(t, err)
 	v, err := admin.PutValidatingWebhookConfiguration(ctx(t), validating)
 	require.NoError(t, err)
-	_, err = admin.GetMutatingWebhookConfiguration(ctx(t), "cfg")
-	require.NoError(t, err)
-	_, err = stranger.DeleteMutatingWebhookConfiguration(ctx(t), "cfg", m.Metadata.ResourceVersion)
-	assert.ErrorIs(t, err, api.ErrForbidden)
-	_, err = stranger.DeleteValidatingWebhookConfiguration(ctx(t), "cfg", v.Metadata.ResourceVersion)
+	_, err = holder.DeleteValidatingWebhookConfiguration(ctx(t), "cfg", v.Metadata.ResourceVersion)
 	assert.ErrorIs(t, err, api.ErrForbidden)
 	_, err = admin.DeleteMutatingWebhookConfiguration(ctx(t), "cfg", m.Metadata.ResourceVersion)
 	require.NoError(t, err)
