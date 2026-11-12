@@ -632,3 +632,50 @@ func TestExtender_TimeoutIsTheConfiguredOne(t *testing.T) {
 	require.NoError(t, reconcileWith(t, client, loadConfig(t, configHeader+extenderYAML(ext.URL, "filterVerb: filter", "timeout: 50ms"))))
 	assert.Empty(t, f.machine("m1").Spec.NodeName)
 }
+
+func TestExtender_RedirectIsAFailedCallAndIsNotFollowed(t *testing.T) {
+	var elsewhere atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhere.Add(1)
+		var body struct {
+			NodeNames []string `json:"nodeNames"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		answer(w, map[string]any{"nodeNames": body.NodeNames})
+	}))
+	t.Cleanup(target.Close)
+
+	var redirect atomic.Bool
+	ext := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if redirect.Load() {
+			http.Redirect(w, r, target.URL+"/filter", http.StatusTemporaryRedirect)
+			return
+		}
+		var body struct {
+			NodeNames []string `json:"nodeNames"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		answer(w, map[string]any{"nodeNames": body.NodeNames})
+	}))
+	t.Cleanup(ext.Close)
+	cfg := loadConfig(t, configHeader+extenderYAML(ext.URL+"/ext", "filterVerb: filter"))
+
+	t.Run("control: the same extender answering 200 directly places the Machine", func(t *testing.T) {
+		f, client := newFakeAPI(t)
+		twoNodes(f)
+		require.NoError(t, reconcileWith(t, client, cfg))
+		assert.Equal(t, "a", f.machine("m1").Spec.NodeName)
+	})
+
+	t.Run("a 307 fails the call: the Machine stays unbound with ExtenderError and nothing is sent elsewhere", func(t *testing.T) {
+		redirect.Store(true)
+		f, client := newFakeAPI(t)
+		twoNodes(f)
+		require.NoError(t, reconcileWith(t, client, cfg))
+		m := f.machine("m1")
+		assert.Empty(t, m.Spec.NodeName)
+		require.Len(t, m.Status.Conditions, 1)
+		assert.Equal(t, scheduler.ReasonExtenderError, m.Status.Conditions[0].Reason)
+		assert.Zero(t, elsewhere.Load())
+	})
+}
