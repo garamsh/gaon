@@ -14,6 +14,7 @@ import (
 var (
 	oidExtKeyUsage = asn1.ObjectIdentifier{2, 5, 29, 37}
 	oidClientAuth  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
+	oidCommonName  = asn1.ObjectIdentifier{2, 5, 4, 3}
 )
 
 // denial is a failed rule: the reason and message of the Denied condition.
@@ -36,6 +37,11 @@ func approve(r *api.CertificateSigningRequest) (*x509.CertificateRequest, *denia
 		return nil, &denial{reasonInvalidRequest, fmt.Sprintf("spec.request signature does not verify: %v", err)}
 	}
 
+	// A certificate's Organization values are its groups, so the subject is
+	// one CN and nothing else.
+	if names := csr.Subject.Names; len(names) != 1 || !names[0].Type.Equal(oidCommonName) {
+		return nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject has %d attributes: it must be exactly one CN", len(names))}
+	}
 	cn := csr.Subject.CommonName
 	if cn == "" || strings.HasPrefix(cn, usernamePrefix) {
 		return nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject CN %q is not a Node name", cn)}

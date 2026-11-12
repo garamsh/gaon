@@ -3,6 +3,7 @@ package csrsigner_test
 import (
 	"context"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/pem"
 	"io"
 	"log/slog"
@@ -200,6 +201,67 @@ func TestRun_DeniesEachFailureOfTheApprovalRuleWithItsOwnReason(t *testing.T) {
 			assert.Equal(t, api.ConditionTrue, c.Status)
 			assert.Equal(t, tt.reason, c.Reason)
 			assert.NotEmpty(t, c.Message)
+			assert.Empty(t, r.Status.Certificate, "a denied request is not signed")
+		})
+	}
+}
+
+func TestRun_DeniesASubjectThatIsNotExactlyOneCN(t *testing.T) {
+	ca := newTestCA(t, now.Add(24*365*time.Hour))
+	f := newFakeAPI(t)
+
+	type subjectCase struct {
+		name           string
+		request        string
+		attrs, cnAttrs int
+	}
+	oneCN, _ := newCSR(t, "node-1")
+	tests := []subjectCase{{"control: one CN", oneCN, 1, 1}}
+	for _, extra := range []struct {
+		name    string
+		typ     asn1.ObjectIdentifier
+		cnAttrs int
+	}{
+		{"Organization", oidOrganization, 1},
+		{"Organizational Unit", oidOrganizationalUnit, 1},
+		{"second CN", oidCommonName, 2},
+		{"Country", oidCountry, 1},
+	} {
+		opt := withSubjectAttribute(extra.typ, "gaon:admins")
+		if extra.typ.Equal(oidCommonName) {
+			opt = withTwoCNs("node-1", "node-2")
+		}
+		request, _ := newCSR(t, "node-1", opt)
+		tests = append(tests, subjectCase{extra.name, request, 2, extra.cnAttrs})
+	}
+	for i, tt := range tests {
+		block, _ := pem.Decode([]byte(tt.request))
+		parsed, err := x509.ParseCertificateRequest(block.Bytes)
+		require.NoError(t, err)
+		cns := 0
+		for _, n := range parsed.Subject.Names {
+			if n.Type.Equal(oidCommonName) {
+				cns++
+			}
+		}
+		require.Len(t, parsed.Subject.Names, tt.attrs, "%s: subject attributes", tt.name)
+		require.Equal(t, tt.cnAttrs, cns, "%s: CN attributes", tt.name)
+		f.add(newRequest(requestName(i), "bootstrap:abcdef", tt.request))
+	}
+	start(t, f, ca.load(t), signingDuration)
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := waitDecided(t, f, requestName(i))
+
+			c := condition(t, r)
+			if i == 0 {
+				assert.Equal(t, api.CSRApproved, c.Type)
+				assert.Equal(t, "CN=node-1", issued(t, r).Subject.String())
+				return
+			}
+			assert.Equal(t, api.CSRDenied, c.Type)
+			assert.Equal(t, "InvalidSubject", c.Reason)
 			assert.Empty(t, r.Status.Certificate, "a denied request is not signed")
 		})
 	}
