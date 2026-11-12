@@ -92,3 +92,41 @@ func TestNewDefault_RefusesAPrefixThatIsNotACIDR(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "300.0.0.0/8")
 }
+
+func TestPolicy_AllowsAPortWithTheProtocolItDeclares(t *testing.T) {
+	m := microvm(nil)
+	m.Spec.Ports = []api.MicroVMPort{
+		{Port: 53, Protocol: api.ProtocolUDP},
+		{Port: 53, Protocol: api.ProtocolTCP},
+		{Port: 5000, Protocol: api.ProtocolUDP},
+	}
+
+	got, err := policy(t, nil, []string{"192.168.0.0/16"}, m)
+
+	require.NoError(t, err)
+	rule := func(protocol plugin.Protocol, port uint32) plugin.NetworkRule {
+		return plugin.NetworkRule{Prefix: "192.168.0.0/16", Protocol: protocol, Ports: []plugin.PortRange{{First: port, Last: port}}}
+	}
+	assert.Equal(t, []plugin.NetworkRule{
+		rule(plugin.UDP, 53),
+		rule(plugin.TCP, 53),
+		rule(plugin.UDP, 5000),
+	}, got.Ingress, "UDP is allowed as UDP and TCP as TCP, each the other's control")
+}
+
+func TestPolicy_RefusesAPortWhoseProtocolIsNeitherTCPNorUDP(t *testing.T) {
+	for _, protocol := range []api.Protocol{"", "SCTP", "tcp"} {
+		m := microvm(nil)
+		m.Spec.Ports = []api.MicroVMPort{{Port: 80, Protocol: protocol}}
+		_, err := policy(t, nil, []string{"10.0.0.0/8"}, m)
+		var r *plugin.Refusal
+		require.True(t, errors.As(err, &r), "protocol %q", protocol)
+		assert.Equal(t, networkdefault.ReasonInvalidSpec, r.Reason)
+	}
+	for _, protocol := range []api.Protocol{api.ProtocolTCP, api.ProtocolUDP} {
+		m := microvm(nil)
+		m.Spec.Ports = []api.MicroVMPort{{Port: 80, Protocol: protocol}}
+		_, err := policy(t, nil, []string{"10.0.0.0/8"}, m)
+		assert.NoError(t, err, "control: protocol %q is served", protocol)
+	}
+}
