@@ -1,7 +1,9 @@
 // Package job serves the workload kinds: the Job, a run-to-completion workload
 // that runs MicroVMs from a template until enough of them succeed, the CronJob,
-// which creates a Job on a schedule, and the Deployment, which keeps a number
-// of MicroVMs running from a template and rolls a change of it out.
+// which creates a Job on a schedule, the Deployment, which keeps a number of
+// MicroVMs running from a template and rolls a change of it out, and the
+// StatefulSet, which keeps MicroVMs with stable names, each with Volumes of its
+// own that outlive it.
 package job
 
 import (

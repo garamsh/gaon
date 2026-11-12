@@ -58,11 +58,14 @@ func newRig(t *testing.T, wrap func(API) API) *rig {
 	}
 	params := Params{
 		RestartBackoff: 10 * time.Second, RestartBackoffMax: 5 * time.Minute, RestartResetAfter: 10 * time.Minute,
-		ReadTimeout: 200 * time.Millisecond,
+		ReadTimeout: 200 * time.Millisecond, TokenAudience: rigAudience,
 	}
 	r.svc = NewService(rigNode, params, client, v1alpha2.NewRuntimeServiceClient(conn), emptyNetwork{}, noStorage{}, clk, slog.New(slog.NewTextHandler(io.Discard, nil))).(*service)
 	return r
 }
+
+// rigAudience is the audience the rig's agent is configured to ask for.
+const rigAudience = "https://issuer.example"
 
 // emptyNetwork and noStorage are plugins that add nothing, so the rig tests
 // restarts alone.

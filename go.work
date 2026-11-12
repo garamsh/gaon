@@ -9,6 +9,7 @@ toolchain go1.26.11
 use (
 	./apiserver
 	./controllers
+	./etcd-snapshot
 	./gaon-cli
 	./lib/api
 	./lib/plugin

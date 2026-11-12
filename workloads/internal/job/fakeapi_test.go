@@ -12,9 +12,9 @@ import (
 	"github.com/garamsh/gaon/workloads/internal/job"
 )
 
-// fakeAPI serves what the Job service uses: the definition, the Job kind and
-// the MicroVMs. A write is stored as sent, as a server stores an object with
-// no admission, and a PUT of a MicroVM that exists answers 409.
+// fakeAPI serves what the Job service uses: the definitions, the kinds, the
+// MicroVMs and the Volumes. A write is stored as sent, as a server stores an
+// object with no admission, and a PUT of a MicroVM that exists answers 409.
 type fakeAPI struct {
 	t      *testing.T
 	server *httptest.Server
@@ -24,6 +24,9 @@ type fakeAPI struct {
 	jobs             map[string]*api.CustomObject
 	cronjobs         map[string]*api.CustomObject
 	deployments      map[string]*api.CustomObject
+	statefulsets     map[string]*api.CustomObject
+	volumes          map[string]*api.Volume
+	volumePuts       int
 	microvms         map[string]*api.MicroVM
 	definitionWrites int
 	statusWrites     int
@@ -36,7 +39,8 @@ type fakeAPI struct {
 func newFakeAPI(t *testing.T) *fakeAPI {
 	f := &fakeAPI{
 		t: t, definitions: map[string]*api.CustomResourceDefinition{}, jobs: map[string]*api.CustomObject{},
-		cronjobs: map[string]*api.CustomObject{}, deployments: map[string]*api.CustomObject{}, microvms: map[string]*api.MicroVM{}, nextRV: 100,
+		cronjobs: map[string]*api.CustomObject{}, deployments: map[string]*api.CustomObject{},
+		statefulsets: map[string]*api.CustomObject{}, volumes: map[string]*api.Volume{}, microvms: map[string]*api.MicroVM{}, nextRV: 100,
 	}
 	mux := http.NewServeMux()
 	ext := "/apis/" + api.APIExtensionsGroupVersion + "/customresourcedefinitions/{name}"
@@ -53,6 +57,12 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 	deployments := "/apis/" + job.APIVersion + "/deployments"
 	mux.HandleFunc("GET "+deployments, f.listDeployments)
 	mux.HandleFunc("PUT "+deployments+"/{name}/status", f.putDeploymentStatus)
+	statefulsets := "/apis/" + job.APIVersion + "/statefulsets"
+	mux.HandleFunc("GET "+statefulsets, f.listStatefulSets)
+	mux.HandleFunc("PUT "+statefulsets+"/{name}/status", f.putStatefulSetStatus)
+	volumes := "/apis/" + api.GroupVersion + "/volumes"
+	mux.HandleFunc("GET "+volumes, f.listVolumes)
+	mux.HandleFunc("PUT "+volumes+"/{name}", f.putVolume)
 	mvms := "/apis/" + api.GroupVersion + "/microvms"
 	mux.HandleFunc("GET "+mvms, f.listMicroVMs)
 	mux.HandleFunc("PUT "+mvms+"/{name}", f.putMicroVM)
