@@ -39,7 +39,7 @@ func TestRun_TakesTheServerFromTheFlagOrTheDefault(t *testing.T) {
 			requests.Store(0)
 			var out, errOut bytes.Buffer
 
-			code := run(context.Background(), tt.args, tt.defaultServer, &out, &errOut)
+			code := run(context.Background(), tt.args, environment{server: tt.defaultServer}, &out, &errOut)
 
 			assert.Equal(t, tt.code, code, errOut.String())
 			assert.Equal(t, tt.requests, requests.Load())
