@@ -56,3 +56,11 @@ Append-only: once merged, the body below is not rewritten. A fact later found wr
 - **Bootstrap writes the unit's role in the API server.** It couples the API server to a unit that may not run and puts a role for a client in the server's code. A manifest follows what `gaon apply` already does.
 - **A built-in `Job` kind in the compute group.** It changes the API server and the reserved groups for a kind that ADR 0009 already lets a unit add.
 - **Counting in `status` and incrementing.** A lost or repeated write changes the count; deriving it from the MicroVMs each sweep cannot drift.
+
+## Errata
+
+### 2026-11-13: resource-api.md and the API server do not disagree about reading definitions
+
+- **What was wrong.** Consequences says that `resource-api.md` §Authorization lets every certificate-authenticated caller read definitions while the API server requires the RBAC verb `get`, and that reconciling the two is not decided.
+- **What falsified it.** At commit `a7bdc57cc75f5ba5df9fcce3175fb41f5498a1f1`, `docs/architecture/resource-api.md` line 246 gives the column "all authenticated by certificate" for the definition reads in §Paths, and that column names who may call a path. §Authorization (line 278) then says that under `RBAC` only what the Node authorizer or a bound role allows is allowed. The server's requirement of the RBAC `get` is what the document states.
+- **What stands.** The decision. A rule with a label selector refuses `get` of an absent object, which has no labels, so the role keeps the `get` of definitions without a selector.

@@ -26,15 +26,21 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 - **A template the API refuses** (`Invalid`) fails the Job with `InvalidTemplate`, whatever the backoff limit.
 - **A finished Job is left alone.** Its MicroVMs are kept until the Job is deleted, then the garbage collector removes them.
 
+### Election
+
+- **It acts only while it holds the coordination Lease `gaon-workloads`**, as `gaon-scheduler` and `gaon-controllers` do ([ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md)): it runs on each control-plane Node and the others poll the Lease and do nothing else, not even registering the kind. Each term, from taking the Lease to losing it, runs a new service that registers and sweeps from the Store's state; a term that ends cancels the sweep.
+- **The flags are `lib/api`'s**, `--leader-elect` and the five `--leader-election-*` flags with the defaults of [deployment.md](./deployment.md); the name defaults to `gaon-workloads`. The Lease is on the server `-server` names. `-leader-elect=false` is for one instance.
+- **No fencing beyond the margin.** A MicroVM the old holder created just before its term ended may reach the Store after the new holder listed. The new holder then creates the same name, which answers `AlreadyExists` and is logged, and its next sweep counts the old holder's MicroVM.
+
 ### Identity and role
 
 - The certificate's common name is `gaon-workloads`. `workloads/deploy/rbac.yaml` holds the ClusterRole and ClusterRoleBinding `gaon:workloads`; an administrator applies it with `gaon apply -f`. Without it the unit is refused.
-- The role: `create` and `update` of definitions labeled `managed-by=gaon-workloads`; `get` of definitions with no selector; `create`, `get` and `list` of MicroVMs labeled `managed-by=gaon-workloads`; `get`, `list`, `watch` of `jobs`; `update` of `jobs/status`.
-- **A `get` of an absent object is judged on no labels**, so a selector rule refuses it. The unselected `get` of definitions is what lets the unit find its definition is missing. `resource-api.md` §Authorization states definitions are readable by every certificate-authenticated caller while the API server requires the RBAC `get`; the two disagree and the role is written for the server.
+- The role: `create` and `update` of definitions labeled `managed-by=gaon-workloads`; `get` of definitions with no selector; `create`, `get` and `list` of MicroVMs labeled `managed-by=gaon-workloads`; `get`, `list`, `watch` of `jobs`; `update` of `jobs/status`; `get`, `create` and `update` of `leases` of the coordination group, which a rule cannot narrow to the Lease `gaon-workloads` because a rule names no object and a `get` of an absent Lease is judged on no labels.
+- **A `get` of an absent object is judged on no labels**, so a selector rule refuses it. The unselected `get` of definitions is what lets the unit find its definition is missing. `resource-api.md` §Authorization allows only what the Node authorizer or a bound role allows under `RBAC`, so the server's requirement of the RBAC `get` is what the document states.
 
 ### Deployment
 
-- [deployment.md](./deployment.md) does not describe this unit yet; that is held for garamsh/gaon#123.
+- [deployment.md](./deployment.md) lists the unit on each control-plane Node, with its flags and its certificate; the manifest is applied once for the cluster.
 
 ## Rationale
 
@@ -49,4 +55,3 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 - **Sweeping, not watching.** A reaction takes up to one interval. The kind serves `watch`.
 - **No `parallelism`**: one MicroVM at a time.
 - **The definition is rewritten at start** when it differs, which overwrites an operator's edit.
-- **The `get` rule on definitions** follows the server and not `resource-api.md`; which is right is open.

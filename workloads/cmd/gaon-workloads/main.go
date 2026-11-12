@@ -25,6 +25,7 @@ type config struct {
 	server     string
 	httpClient *http.Client
 	jobs       job.Config
+	leader     *api.LeaderElectionFlags
 }
 
 // parseFlags reads the flags in args and builds the HTTP client the --tls
@@ -36,6 +37,7 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 	server := fs.String("server", "", "base URL of the API server, such as https://127.0.0.1:8443")
 	interval := fs.Duration("interval", 2*time.Second, "time between the end of one sweep over the Jobs and the start of the next")
 	files := api.RegisterTLSFlags(fs)
+	leader := api.RegisterLeaderElectionFlags(fs, "gaon-workloads")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -46,7 +48,7 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 	if err != nil {
 		return config{}, err
 	}
-	return config{server: strings.TrimSuffix(*server, "/"), httpClient: httpClient, jobs: job.Config{Interval: *interval}}, nil
+	return config{server: strings.TrimSuffix(*server, "/"), httpClient: httpClient, jobs: job.Config{Interval: *interval}, leader: leader}, nil
 }
 
 func main() {
@@ -63,17 +65,30 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	jobs, err := api.NewCustomResourceClient(cfg.server, cfg.httpClient, job.Type)
-	if err != nil {
-		log.Error("start", "error", err)
-		os.Exit(2)
-	}
-	definitions := api.NewClient(cfg.server+"/apis/"+api.APIExtensionsGroupVersion, cfg.httpClient)
-	managed := api.Selector{{Key: job.ManagedByLabel, Operator: api.SelectorIn, Values: []string{job.Manager}}}
-	microvms := api.NewClient(cfg.server+"/apis/"+api.GroupVersion, cfg.httpClient, api.WithLabelSelector(managed))
-	svc := job.NewService(definitions, jobs, microvms, systemclock.Clock{}, cfg.jobs, log)
-	if err := svc.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := run(ctx, cfg, log); err != nil {
 		log.Error("stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+// run runs the Jobs while this process holds the coordination Lease, or at once
+// when leader election is off. Each term builds a service of its own, so that a
+// process that lost the Lease and took it again registers and sweeps from the
+// Store's state.
+func run(ctx context.Context, cfg config, log *slog.Logger) error {
+	computeRoot := cfg.server + "/apis/" + api.GroupVersion
+	elector, err := cfg.leader.Elector(computeRoot, cfg.httpClient)
+	if err != nil {
+		return err
+	}
+	jobs, err := api.NewCustomResourceClient(cfg.server, cfg.httpClient, job.Type)
+	if err != nil {
+		return err
+	}
+	definitions := api.NewClient(cfg.server+"/apis/"+api.APIExtensionsGroupVersion, cfg.httpClient)
+	managed := api.Selector{{Key: job.ManagedByLabel, Operator: api.SelectorIn, Values: []string{job.Manager}}}
+	microvms := api.NewClient(computeRoot, cfg.httpClient, api.WithLabelSelector(managed))
+	return api.RunLeading(ctx, elector, func(ctx context.Context) error {
+		return job.NewService(definitions, jobs, microvms, systemclock.Clock{}, cfg.jobs, log).Run(ctx)
+	})
 }
