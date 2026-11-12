@@ -246,3 +246,27 @@ func TestSocketPath_NamesTheKindAndRefusesANameThatLeavesTheDirectory(t *testing
 	_, err = plugin.SocketPath("", plugin.KindNetwork, "a")
 	assert.Error(t, err)
 }
+
+func TestServe_RestrictsTheSocketToItsUserAndMakesTheDirectoryItCreatesPrivate(t *testing.T) {
+	dir := filepath.Join(shortDir(t), "plugins")
+	start(t, func(ctx context.Context) error {
+		return plugin.ServeNetwork(ctx, dir, "test", &network{policy: &plugin.NetworkPolicy{}})
+	})
+	c, err := plugin.DialNetwork(dir, "test")
+	require.NoError(t, err)
+	defer c.Close()
+	// A call that is answered was made after the socket was restricted.
+	require.Eventually(t, func() bool {
+		_, err := c.Policy(t.Context(), microvm("a"))
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond)
+
+	path, err := plugin.SocketPath(dir, plugin.KindNetwork, "test")
+	require.NoError(t, err)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "only the plugin's user may connect")
+	dirInfo, err := os.Stat(dir)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o700), dirInfo.Mode().Perm(), "a directory the plugin makes is its user's alone")
+}

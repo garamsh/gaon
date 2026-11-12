@@ -10,9 +10,17 @@ import (
 	"github.com/garamsh/gaon/node-agent/internal/microvms"
 )
 
-// pluginTimeout bounds each call to a plugin, so one that hangs delays a
-// MicroVM's round and no more.
-const pluginTimeout = 10 * time.Second
+// defaultPluginTimeout bounds each call to a plugin when Config.PluginTimeout
+// is not set, so one that hangs delays a MicroVM's round and no more.
+const defaultPluginTimeout = 10 * time.Second
+
+// pluginTimeout is the bound on each call to a plugin.
+func (c Config) pluginTimeout() time.Duration {
+	if c.PluginTimeout > 0 {
+		return c.PluginTimeout
+	}
+	return defaultPluginTimeout
+}
 
 // pluginClients are the plugins the agent calls and what releases them.
 type pluginClients struct {
@@ -37,7 +45,7 @@ func dialPlugins(cfg Config) (*pluginClients, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.network = timedNetwork{c}
+		p.network = timedNetwork{c, cfg.pluginTimeout()}
 		p.closers = append(p.closers, c.Close)
 	}
 	if cfg.StoragePlugin != "" {
@@ -46,30 +54,36 @@ func dialPlugins(cfg Config) (*pluginClients, error) {
 			p.close()
 			return nil, err
 		}
-		p.storage = timedStorage{c}
+		p.storage = timedStorage{c, cfg.pluginTimeout()}
 		p.closers = append(p.closers, c.Close)
 	}
 	return p, nil
 }
 
-type timedNetwork struct{ plugin.Network }
+type timedNetwork struct {
+	plugin.Network
+	timeout time.Duration
+}
 
 func (n timedNetwork) Policy(ctx context.Context, m *api.MicroVM) (*plugin.NetworkPolicy, error) {
-	ctx, cancel := context.WithTimeout(ctx, pluginTimeout)
+	ctx, cancel := context.WithTimeout(ctx, n.timeout)
 	defer cancel()
 	return n.Network.Policy(ctx, m)
 }
 
-type timedStorage struct{ plugin.Storage }
+type timedStorage struct {
+	plugin.Storage
+	timeout time.Duration
+}
 
 func (s timedStorage) Attach(ctx context.Context, m *api.MicroVM) ([]plugin.DiskAttachment, error) {
-	ctx, cancel := context.WithTimeout(ctx, pluginTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	return s.Storage.Attach(ctx, m)
 }
 
 func (s timedStorage) Release(ctx context.Context, id string) error {
-	ctx, cancel := context.WithTimeout(ctx, pluginTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	return s.Storage.Release(ctx, id)
 }

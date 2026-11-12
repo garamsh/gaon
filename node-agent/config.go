@@ -60,6 +60,8 @@ type Config struct {
 	MvmdSocket string
 	// Liveness holds δ and the Lease and deadline durations.
 	Liveness liveness.Params
+	// PluginTimeout bounds each call to a plugin; zero is 10 seconds.
+	PluginTimeout time.Duration
 	// ResyncPeriod is the time between two reconciliations of the MicroVMs
 	// and two reports of the Node's status.
 	ResyncPeriod time.Duration

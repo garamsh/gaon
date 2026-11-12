@@ -41,7 +41,7 @@ func serve(ctx context.Context, dir string, kind Kind, name string, register fun
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("make plugin directory: %w", err)
 	}
 	if err := clearStale(path); err != nil {

@@ -8,6 +8,7 @@ package nodeagent_test
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
+	"github.com/garamsh/gaon/node-agent/internal/microvms"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
@@ -365,4 +367,31 @@ func TestPlugins_TheLocalStorageBinaryRefusesAMicroVMNamingAVolumeThatIsNotThere
 	assert.Equal(t, "VolumeNotFound", w.ready("lost").Reason)
 	eventually(t, "control: a MicroVM whose Volume exists runs", w.running("found-e1"))
 	assert.NotContains(t, w.mvmd.Calls(), "CreateMachine lost-e1")
+}
+
+func TestPlugins_ANetworkPluginThatNeverAnswersLeavesTheMicroVMPendingWithTheReasonWithinTheTimeout(t *testing.T) {
+	w := newWorld(t)
+	lis, err := net.Listen("unix", w.socket("network", "hung"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lis.Close() })
+	go func() {
+		for {
+			c, err := lis.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { _ = c.Close() })
+		}
+	}()
+	runAgentWith(t, w.gaon, w.mvmd, nodeagent.Config{PluginDir: w.dir, NetworkPlugin: "hung", PluginTimeout: 200 * time.Millisecond})
+	w.gaon.SetMicroVM(bound("web"))
+
+	require.Eventually(t, func() bool {
+		s := w.gaon.MicroVM("web").Status
+		return len(s.Conditions) == 1 && s.Conditions[0].Reason == microvms.ReasonNetworkPluginUnavailable
+	}, 5*time.Second, 20*time.Millisecond, "web is Pending with the plugin-unavailable reason")
+	s := w.gaon.MicroVM("web").Status
+	assert.Equal(t, api.MicroVMPending, s.Phase)
+	assert.Equal(t, api.ConditionFalse, s.Conditions[0].Status)
+	assert.NotContains(t, w.mvmd.Calls(), "CreateMachine web-e1")
 }

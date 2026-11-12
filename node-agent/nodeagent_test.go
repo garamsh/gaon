@@ -199,7 +199,7 @@ func runAgentWith(t *testing.T, gaon *fakegaon.Server, mvmd *fakemvmd.Server, pl
 	t.Helper()
 	clk := clock.System{}
 	cfg := nodeagent.Config{
-		PluginDir: plugins.PluginDir, NetworkPlugin: plugins.NetworkPlugin, StoragePlugin: plugins.StoragePlugin,
+		PluginDir: plugins.PluginDir, PluginTimeout: plugins.PluginTimeout, NetworkPlugin: plugins.NetworkPlugin, StoragePlugin: plugins.StoragePlugin,
 		APIServer: gaon.URL, NodeName: "n1", MvmdSocket: mvmd.Socket, ResyncPeriod: 20 * time.Millisecond,
 		RestartBackoff: time.Hour, RestartBackoffMax: time.Hour, RestartResetAfter: time.Hour,
 		Liveness: liveness.Params{LeaseDuration: 30 * time.Second, RenewPeriod: 20 * time.Millisecond, DeadlineLength: 5 * time.Second, Delta: time.Second, RPCTimeout: time.Second},
