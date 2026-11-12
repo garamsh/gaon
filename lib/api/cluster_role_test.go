@@ -55,6 +55,8 @@ func TestClusterRoleValidateRefusesARuleThatMatchesNothing(t *testing.T) {
 }
 
 func TestClusterRoleValidateChecksIdentity(t *testing.T) {
+	require.NoError(t, newClusterRole("reader").Validate(), "control: the rbac group, the right kind and a name")
+
 	role := newClusterRole("reader")
 	role.APIVersion = api.GroupVersion
 	assert.ErrorIs(t, role.Validate(), api.ErrInvalid, "a ClusterRole is in the rbac group, not the compute group")

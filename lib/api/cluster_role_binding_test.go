@@ -48,12 +48,20 @@ func TestClusterRoleBindingValidateRefusesAnUnknownSubjectKind(t *testing.T) {
 }
 
 func TestClusterRoleBindingValidateRefusesASubjectWithNoName(t *testing.T) {
-	b := newClusterRoleBinding("b")
-	b.Subjects = []api.Subject{{Kind: api.SubjectUser}}
-	assert.ErrorIs(t, b.Validate(), api.ErrInvalid)
+	for _, kind := range []string{api.SubjectUser, api.SubjectGroup} {
+		named := newClusterRoleBinding("b")
+		named.Subjects = []api.Subject{{Kind: kind, Name: "x"}}
+		assert.NoError(t, named.Validate(), "control: a named "+kind)
+
+		nameless := newClusterRoleBinding("b")
+		nameless.Subjects = []api.Subject{{Kind: kind}}
+		assert.ErrorIs(t, nameless.Validate(), api.ErrInvalid, "a nameless "+kind)
+	}
 }
 
 func TestClusterRoleBindingValidateChecksIdentity(t *testing.T) {
+	require.NoError(t, newClusterRoleBinding("b").Validate(), "control: the rbac group, the right kind and a name")
+
 	b := newClusterRoleBinding("b")
 	b.APIVersion = api.GroupVersion
 	assert.ErrorIs(t, b.Validate(), api.ErrInvalid, "a binding is in the rbac group, not the compute group")
