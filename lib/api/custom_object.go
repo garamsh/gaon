@@ -103,7 +103,7 @@ func (r *CustomResourceClient) Get(ctx context.Context, name string) (*CustomObj
 // List returns every object of the kind and the version to watch from
 // (GET /<plural>).
 func (r *CustomResourceClient) List(ctx context.Context) (*CustomObjectList, error) {
-	return call[CustomObjectList](ctx, r.c, http.MethodGet, "/"+url.PathEscape(r.t.Plural), nil, nil)
+	return call[CustomObjectList](ctx, r.c, http.MethodGet, "/"+url.PathEscape(r.t.Plural), r.c.listQuery(), nil)
 }
 
 // Watch streams the changes made after version rv (GET /<plural>?watch=true),

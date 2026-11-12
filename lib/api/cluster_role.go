@@ -39,15 +39,42 @@ type ClusterRoleList struct {
 // PolicyRule grants the verbs on the resources of the API groups. A request
 // matches it when each of its group, resource and verb is listed or the list
 // holds the wildcard. A resource is a name such as "microvms", and a
-// subresource is written "microvms/status".
+// subresource is written "microvms/status". A LabelSelector, in the syntax of
+// ParseSelector, narrows the rule to the objects whose labels it selects;
+// empty, the rule has no such limit.
 type PolicyRule struct {
-	APIGroups []string `json:"apiGroups"`
-	Resources []string `json:"resources"`
-	Verbs     []Verb   `json:"verbs"`
+	APIGroups     []string `json:"apiGroups"`
+	Resources     []string `json:"resources"`
+	Verbs         []Verb   `json:"verbs"`
+	LabelSelector string   `json:"labelSelector,omitempty"`
+}
+
+// Selector returns the parsed LabelSelector of p.
+func (p PolicyRule) Selector() (Selector, error) {
+	return ParseSelector(p.LabelSelector)
+}
+
+// AllowsLabels reports whether p's label selector lets a request on an object
+// with these labels through: always without a selector, otherwise only when the
+// labels satisfy it. It judges get, update, delete, and create, which is
+// judged on the labels of the object in the request body.
+func (p PolicyRule) AllowsLabels(labels map[string]string) bool {
+	sel, err := p.Selector()
+	return err == nil && sel.Matches(labels)
+}
+
+// AllowsSelector reports whether p's label selector lets a list or a watch by
+// asked through: always without a selector, otherwise only when asked selects
+// nothing outside it. A request without a selector is refused by a rule with
+// one.
+func (p PolicyRule) AllowsSelector(asked Selector) bool {
+	sel, err := p.Selector()
+	return err == nil && asked.Within(sel)
 }
 
 // Validate checks the identity of r and that each rule lists at least one
-// API group, resource and verb, and only known verbs.
+// API group, resource and verb, only known verbs, and a label selector that
+// parses.
 func (r *ClusterRole) Validate() error {
 	if err := validateIdentity(r.TypeMeta, RBACGroupVersion, KindClusterRole, r.Metadata); err != nil {
 		return err
@@ -82,5 +109,6 @@ func (p PolicyRule) validate() error {
 			return invalid("verb %q is not one of *, get, list, watch, create, update, delete", v)
 		}
 	}
-	return nil
+	_, err := p.Selector()
+	return err
 }

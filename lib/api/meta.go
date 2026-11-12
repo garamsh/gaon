@@ -30,6 +30,13 @@ const (
 	AdmissionRegistrationGroupVersion = AdmissionRegistrationGroup + "/" + Version
 )
 
+// The API group and version of the generic Lease, served under its own root
+// beside the compute group's.
+const (
+	CoordinationGroup        = "coordination.gaon.garam.sh"
+	CoordinationGroupVersion = CoordinationGroup + "/" + Version
+)
+
 // The API group and version of AdmissionReview, the body of a call to an
 // admission webhook. No path serves it.
 const (
@@ -47,9 +54,14 @@ const (
 	KindNodeList    = "NodeList"
 	KindLease       = "Lease"
 	KindLeaseList   = "LeaseList"
+	KindEvent       = "Event"
+	KindEventList   = "EventList"
 
 	KindCertificateSigningRequest     = "CertificateSigningRequest"
 	KindCertificateSigningRequestList = "CertificateSigningRequestList"
+
+	KindCoordinationLease     = "Lease"
+	KindCoordinationLeaseList = "LeaseList"
 
 	KindClusterRole            = "ClusterRole"
 	KindClusterRoleList        = "ClusterRoleList"
@@ -79,21 +91,35 @@ type TypeMeta struct {
 	Kind       string `json:"kind"`
 }
 
+// UID identifies one incarnation of an object: the server sets it at create
+// and it never changes, so a deleted and recreated object of the same name has
+// another.
+type UID string
+
 // ObjectMeta is the metadata every resource carries.
 type ObjectMeta struct {
-	Name              string           `json:"name"`
-	ResourceVersion   ResourceVersion  `json:"resourceVersion,omitempty"`
-	Generation        int64            `json:"generation,omitempty"`
-	DeletionTimestamp *time.Time       `json:"deletionTimestamp,omitempty"`
-	Finalizers        []string         `json:"finalizers,omitempty"`
-	OwnerReferences   []OwnerReference `json:"ownerReferences,omitempty"`
+	Name              string            `json:"name"`
+	UID               UID               `json:"uid,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
+	ResourceVersion   ResourceVersion   `json:"resourceVersion,omitempty"`
+	Generation        int64             `json:"generation,omitempty"`
+	DeletionTimestamp *time.Time        `json:"deletionTimestamp,omitempty"`
+	Finalizers        []string          `json:"finalizers,omitempty"`
+	OwnerReferences   []OwnerReference  `json:"ownerReferences,omitempty"`
 }
 
 // OwnerReference names the object that owns another, for garbage collection.
+// UID is the owner's, so a reference does not follow a recreated owner of the
+// same name. Controller marks the one owner that manages the dependent, and
+// BlockOwnerDeletion that the dependent holds up the deletion of its owner.
 type OwnerReference struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
-	Name       string `json:"name"`
+	APIVersion         string `json:"apiVersion"`
+	Kind               string `json:"kind"`
+	Name               string `json:"name"`
+	UID                UID    `json:"uid,omitempty"`
+	Controller         bool   `json:"controller,omitempty"`
+	BlockOwnerDeletion bool   `json:"blockOwnerDeletion,omitempty"`
 }
 
 // ListMeta is the metadata of a list: the version to watch from afterwards.
