@@ -2,12 +2,14 @@ package apiserver_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -61,25 +63,34 @@ func newEnv(t *testing.T) *env {
 	return &env{api: api.NewClient(base+apiRoot, nil), base: base, etcd: etcd, stop: stop}
 }
 
+// startEtcd starts an embedded etcd on ports it picks. A port is free when
+// freeURL looks and may be taken by another process before etcd binds it, so
+// a start that fails on a taken address is made again on new ports.
 func startEtcd(t *testing.T) string {
 	t.Helper()
-	cfg := embed.NewConfig()
-	cfg.Dir = t.TempDir()
-	cfg.LogLevel = "panic"
-	cfg.TickMs, cfg.ElectionMs = 10, 100
-	client, peer := freeURL(t), freeURL(t)
-	cfg.ListenClientUrls, cfg.AdvertiseClientUrls = []url.URL{client}, []url.URL{client}
-	cfg.ListenPeerUrls, cfg.AdvertisePeerUrls = []url.URL{peer}, []url.URL{peer}
-	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
-	e, err := embed.StartEtcd(cfg)
-	require.NoError(t, err)
-	t.Cleanup(e.Close)
-	select {
-	case <-e.Server.ReadyNotify():
-	case <-time.After(30 * time.Second):
-		t.Fatal("etcd did not become ready")
+	const attempts = 10
+	for attempt := 1; ; attempt++ {
+		cfg := embed.NewConfig()
+		cfg.Dir = t.TempDir()
+		cfg.LogLevel = "panic"
+		cfg.TickMs, cfg.ElectionMs = 10, 100
+		client, peer := freeURL(t), freeURL(t)
+		cfg.ListenClientUrls, cfg.AdvertiseClientUrls = []url.URL{client}, []url.URL{client}
+		cfg.ListenPeerUrls, cfg.AdvertisePeerUrls = []url.URL{peer}, []url.URL{peer}
+		cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
+		e, err := embed.StartEtcd(cfg)
+		if err != nil && attempt < attempts && errors.Is(err, syscall.EADDRINUSE) {
+			continue
+		}
+		require.NoError(t, err)
+		t.Cleanup(e.Close)
+		select {
+		case <-e.Server.ReadyNotify():
+		case <-time.After(30 * time.Second):
+			t.Fatal("etcd did not become ready")
+		}
+		return client.String()
 	}
-	return client.String()
 }
 
 func freeURL(t *testing.T) url.URL {
