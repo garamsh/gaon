@@ -75,56 +75,56 @@ func condition(n *api.Node, t string) api.ConditionStatus {
 	return ""
 }
 
-// ledger holds the free capacity of every eligible Node.
+// nodeView is a Node as the plugins see it. capacity and free are set only
+// for an eligible Node.
+type nodeView struct {
+	node           *api.Node
+	capacity, free resources
+}
+
+// ledger holds the Nodes of a pass and the free capacity of each eligible one.
 type ledger struct {
-	nodes int
-	names []string
-	free  map[string]resources
+	names    []string // every Node, sorted
+	eligible int
+	views    map[string]*nodeView
 }
 
 // newLedger takes the capacity of each eligible Node less the requests of the
 // Machines bound to it, whatever their phase.
 func newLedger(nodes []api.Node, machines []api.Machine) (*ledger, error) {
-	l := &ledger{nodes: len(nodes), free: map[string]resources{}}
+	l := &ledger{views: map[string]*nodeView{}}
 	for i := range nodes {
 		n := &nodes[i]
-		if !eligible(n) {
-			continue
-		}
-		c, err := capacity(n)
-		if err != nil {
-			return nil, err
+		v := &nodeView{node: n}
+		if eligible(n) {
+			c, err := capacity(n)
+			if err != nil {
+				return nil, err
+			}
+			v.capacity, v.free = c, c
+			l.eligible++
 		}
 		l.names = append(l.names, n.Metadata.Name)
-		l.free[n.Metadata.Name] = c
+		l.views[n.Metadata.Name] = v
 	}
 	slices.Sort(l.names)
 	for i := range machines {
 		m := &machines[i]
-		free, ok := l.free[m.Spec.NodeName]
-		if !ok {
+		v, ok := l.views[m.Spec.NodeName]
+		if !ok || !eligible(v.node) {
 			continue
 		}
 		r, err := requests(m)
 		if err != nil {
 			return nil, err
 		}
-		l.free[m.Spec.NodeName] = free.minus(r)
+		v.free = v.free.minus(r)
 	}
 	return l, nil
 }
 
-// choose returns the first eligible Node, by name, whose free capacity covers r.
-func (l *ledger) choose(r resources) (string, bool) {
-	for _, name := range l.names {
-		if l.free[name].covers(r) {
-			return name, true
-		}
-	}
-	return "", false
-}
-
 // take charges r to the named Node.
 func (l *ledger) take(name string, r resources) {
-	l.free[name] = l.free[name].minus(r)
+	v := l.views[name]
+	v.free = v.free.minus(r)
 }
