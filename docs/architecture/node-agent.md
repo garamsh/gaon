@@ -16,8 +16,8 @@ Every value is a flag with an environment variable as its fallback. A flag given
 | `--tls-ca` | `GAON_TLS_CA` | none | file of the CA certificates the API server's certificate must chain to |
 | `--tls-cert` | `GAON_TLS_CERT` | none | file of the client certificate the agent presents to the API server |
 | `--tls-key` | `GAON_TLS_KEY` | none | file of the key of the client certificate |
-| `--bootstrap-token-file` | `GAON_BOOTSTRAP_TOKEN_FILE` | none | decided in [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), not yet implemented: file of the bootstrap token with which the agent asks for its client certificate |
-| `--cert-dir` | `GAON_CERT_DIR` | none | decided in ADR 0007, not yet implemented: writable directory where the agent keeps its key and issued certificate |
+| `--bootstrap-token-file` | `GAON_BOOTSTRAP_TOKEN_FILE` | none | file holding one bootstrap token, `<id>.<secret>`, with which the agent asks for its client certificate ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md)); needs `--cert-dir` and `--tls-ca` |
+| `--cert-dir` | `GAON_CERT_DIR` | none | directory where the agent keeps its key, `node-agent.key`, and its issued certificate, `node-agent.crt`; needs `--tls-ca` |
 | `--node-name` | `GAON_NODE_NAME` | none, required | name of this node's Node and Lease |
 | `--mvmd-socket` | `GAON_MVMD_SOCKET` | none, required | path of mvmd's runtime API socket |
 | `--delta` | `GAON_DELTA` | 1s, provisional | δ, how long a Machine can run past mvmd's recorded deadline expiry |
@@ -32,12 +32,17 @@ Every value is a flag with an environment variable as its fallback. A flag given
 
 The three TLS values are given together or not at all. All three give a mutual TLS 1.3 client built by `lib/api` that trusts only the CA file; none gives plain HTTP, for a loopback API server; one or two refuse the start, naming the ones missing, as does a file that cannot be read or does not fit. The agent builds its client once at start, so a replaced file is read at the next start.
 
-[ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) decides how the agent gets its certificate without operator-supplied files; none of this is implemented yet:
+[ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) decides how the agent gets its certificate without operator-supplied files. The agent keeps its own pair when `--cert-dir` is given, with or without `--bootstrap-token-file`, and does this:
 
-- `--bootstrap-token-file` and `--cert-dir` are mutually exclusive with `--tls-cert` and `--tls-key`. `--tls-ca` still verifies the server.
-- The agent creates `--cert-dir` with mode 0700 if it is missing and writes the key with mode 0600.
-- At start it uses the pair in `--cert-dir` if the pair is valid, and otherwise generates a key and bootstraps with the token.
-- It renews at two thirds of the certificate's validity, over its own certificate, and swaps the pair without a restart. The files given as `--tls-cert` and `--tls-key` are still read once at start.
+- **Flags.** `--bootstrap-token-file` and `--cert-dir` exclude `--tls-cert` and `--tls-key`: the agent takes its certificate from one set or the other, and giving both stops the start naming both sets. `--bootstrap-token-file` without `--cert-dir`, and either without `--tls-ca`, stop the start. The token file holds one token matching `[a-z0-9]{6}\.[a-z0-9]{16}` once surrounding whitespace is trimmed; any other content stops the start, and no message, log line or error carries the token. `--cert-dir` alone is accepted and, with no valid pair in the directory, stops the start.
+- **Files.** The agent creates `--cert-dir` with mode 0700 if it is missing. It writes the key to `node-agent.key` with mode 0600 and the certificate to `node-agent.crt` with mode 0644. Each file is written to a temporary file in the directory and renamed into place, so a file is never rewritten in place. A crash between the two renames leaves a key and a certificate that do not match, which the next start finds invalid.
+- **Valid pair.** Both files parse, the key matches the certificate, the certificate's common name is `--node-name`, and its `NotAfter` is in the future. At start the agent uses a valid pair, without a token, and renews it as below. Without a valid pair it bootstraps with the token, and without a token the start stops.
+- **A request.** The bootstrap and every renewal generate a new ECDSA P-256 key and a `CertificateSigningRequest` named `<node-name>-<16 random hex digits>` whose request carries the node name as common name and no subject alternative name. The agent reads the request every second until it is Approved with a certificate or Denied. The bootstrap calls carry the token and no client certificate; renewal calls present the current certificate and no token.
+- **Outcomes.** A Denied request at bootstrap stops the start with the reason, and so does any other error of the bootstrap. A renewal that is Denied or fails is logged, the pair in use stays in the directory and in memory, and the agent asks again after one minute. The pair is replaced only by a certificate received.
+- **Renewal.** It is due at `NotBefore` plus two thirds of the validity, and at once when that time has passed at start. The new pair replaces the old one in the TLS client's `GetClientCertificate` callback under a lock, so no restart is needed. A connection already open keeps the pair it was made with; each connection made after the swap presents the new one.
+
+The files given as `--tls-cert` and `--tls-key` are still read once at start and are not renewed.
+
 
 δ's default of 1s is provisional: it is not measured, in mvmd either, and it is far above a real-time thread's wake-up and a SIGKILL (mvmd ADR 0003). The durations must satisfy two inequalities, checked at start: the deadline length exceeds the renew period plus two call timeouts, so the deadline never lapses between rounds, and the Lease duration is at least the deadline length plus δ plus two call timeouts, so a round can always renew the deadline.
 
