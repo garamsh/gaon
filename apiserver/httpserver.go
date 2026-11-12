@@ -74,6 +74,20 @@ func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tok
 	mux.HandleFunc("DELETE "+root+"/events/{name}", h.guard(api.Group, "events", fixed(api.VerbDelete), deleteObject(h, svc.DeleteClusterEvent)))
 	mux.HandleFunc("GET "+root+"/events/{name}", h.guard(api.Group, "events", fixed(api.VerbGet), get(h, svc.GetClusterEvent)))
 	mux.HandleFunc("GET "+root+"/events", h.guard(api.Group, "events", readVerb, listOrWatch(h, svc.ListClusterEvents, svc.WatchClusterEvents)))
+	mux.HandleFunc("PUT "+root+"/secrets/{name}", h.guard(api.Group, "secrets", putVerb, put(h, svc.PutSecret)))
+	mux.HandleFunc("DELETE "+root+"/secrets/{name}", h.guard(api.Group, "secrets", fixed(api.VerbDelete), deleteObject(h, svc.DeleteSecret)))
+	mux.HandleFunc("GET "+root+"/secrets/{name}", h.guard(api.Group, "secrets", fixed(api.VerbGet), get(h, svc.GetSecret)))
+	mux.HandleFunc("GET "+root+"/secrets", h.guard(api.Group, "secrets", readVerb, listOrWatch(h, svc.ListSecrets, svc.WatchSecrets)))
+	mux.HandleFunc("PUT "+root+"/configmaps/{name}", h.guard(api.Group, "configmaps", putVerb, put(h, svc.PutConfigMap)))
+	mux.HandleFunc("DELETE "+root+"/configmaps/{name}", h.guard(api.Group, "configmaps", fixed(api.VerbDelete), deleteObject(h, svc.DeleteConfigMap)))
+	mux.HandleFunc("GET "+root+"/configmaps/{name}", h.guard(api.Group, "configmaps", fixed(api.VerbGet), get(h, svc.GetConfigMap)))
+	mux.HandleFunc("GET "+root+"/configmaps", h.guard(api.Group, "configmaps", readVerb, listOrWatch(h, svc.ListConfigMaps, svc.WatchConfigMaps)))
+	mux.HandleFunc("PUT "+root+"/serviceaccounts/{name}", h.guard(api.Group, "serviceaccounts", putVerb, put(h, svc.PutServiceAccount)))
+	mux.HandleFunc("DELETE "+root+"/serviceaccounts/{name}", h.guard(api.Group, "serviceaccounts", fixed(api.VerbDelete), deleteObject(h, svc.DeleteServiceAccount)))
+	mux.HandleFunc("GET "+root+"/serviceaccounts/{name}", h.guard(api.Group, "serviceaccounts", fixed(api.VerbGet), get(h, svc.GetServiceAccount)))
+	mux.HandleFunc("GET "+root+"/serviceaccounts", h.guard(api.Group, "serviceaccounts", readVerb, listOrWatch(h, svc.ListServiceAccounts, svc.WatchServiceAccounts)))
+	mux.HandleFunc("POST "+root+"/serviceaccounts/{name}/token", h.guard(api.Group, "serviceaccounts/token", fixed(api.VerbCreate), put(h, svc.CreateServiceAccountToken)))
+
 	mux.HandleFunc("PUT "+coordinationRoot+"/leases/{name}", h.guard(api.CoordinationGroup, "leases", putVerb, put(h, svc.PutCoordinationLease)))
 	mux.HandleFunc("DELETE "+coordinationRoot+"/leases/{name}", h.guard(api.CoordinationGroup, "leases", fixed(api.VerbDelete), deleteObject(h, svc.DeleteCoordinationLease)))
 	mux.HandleFunc("GET "+coordinationRoot+"/leases/{name}", h.guard(api.CoordinationGroup, "leases", fixed(api.VerbGet), get(h, svc.GetCoordinationLease)))
@@ -168,6 +182,25 @@ func peekMetadata(r *http.Request) (bodyMetadata, error) {
 	return peek.Metadata, nil
 }
 
+// peekBound reads the MicroVM a token request binds from the body without
+// consuming it. A body that does not parse binds none: the handler refuses it.
+func peekBound(r *http.Request) (api.BoundObject, error) {
+	body, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxBody))
+	if err != nil {
+		return api.BoundObject{}, api.NewAPIError(api.ReasonInvalid, "read body: %v", err)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var peek struct {
+		Spec struct {
+			BoundMicroVM api.BoundObject `json:"boundMicroVM"`
+		} `json:"spec"`
+	}
+	if json.Unmarshal(body, &peek) != nil {
+		return api.BoundObject{}, nil
+	}
+	return peek.Spec.BoundMicroVM, nil
+}
+
 // putVerb is update for a body that carries a resourceVersion and create for
 // one that does not. It leaves the body to be read again.
 func putVerb(r *http.Request) (api.Verb, error) {
@@ -240,6 +273,10 @@ func (h *handler) scope(r *http.Request, req *authorization.Request) error {
 	switch {
 	case req.Verb == api.VerbList || req.Verb == api.VerbWatch:
 		req.Selector, _ = selectorOf(r)
+	case req.Resource == "serviceaccounts" && req.Subresource == "token":
+		bound, err := peekBound(r)
+		req.BoundMicroVM = bound
+		return err
 	case (req.Verb == api.VerbCreate || req.Verb == api.VerbUpdate) && req.Subresource == "":
 		meta, err := peekMetadata(r)
 		req.Labels = meta.Labels

@@ -27,6 +27,11 @@ type Config struct {
 	// AuthorizationMode is AlwaysAllow, the default where it is empty, or
 	// RBAC. RBAC needs the TLS files.
 	AuthorizationMode string
+	// ServiceAccountIssuer is the "iss" of the service account tokens, and
+	// ServiceAccountSigningKeyFile the PEM file of the EC P-256 key that signs
+	// them. Both are set or neither is; with neither, the token request is
+	// refused.
+	ServiceAccountIssuer, ServiceAccountSigningKeyFile string
 }
 
 // The authorization modes of ADR 0008, Decision 2.
@@ -66,6 +71,8 @@ func ParseConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.TLSKey, "tls-key", "", "PEM file of the server certificate's key")
 	fs.StringVar(&cfg.BootstrapTokenFile, "bootstrap-token-file", "", "file of valid bootstrap tokens, one per line; needs the tls flags")
 	fs.StringVar(&cfg.AuthorizationMode, "authorization-mode", ModeAlwaysAllow, "AlwaysAllow, or RBAC: the Node authorizer, then cluster roles and bindings; RBAC needs the tls flags")
+	fs.StringVar(&cfg.ServiceAccountIssuer, "service-account-issuer", "", "the iss of service account tokens; given with service-account-signing-key-file")
+	fs.StringVar(&cfg.ServiceAccountSigningKeyFile, "service-account-signing-key-file", "", "PEM file of the EC P-256 key that signs service account tokens, the same on every API server; given with service-account-issuer")
 	fs.DurationVar(&cfg.DialTimeout, "etcd-dial-timeout", 5*time.Second, "time allowed to reach etcd at start")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -87,5 +94,17 @@ func ParseConfig(args []string) (Config, error) {
 	if err := cfg.validateAuthorization(); err != nil {
 		return Config{}, err
 	}
+	if err := cfg.validateTokenSigning(); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// validateTokenSigning refuses an issuer without a key and a key without an
+// issuer, because a token needs both.
+func (c Config) validateTokenSigning() error {
+	if (c.ServiceAccountIssuer == "") != (c.ServiceAccountSigningKeyFile == "") {
+		return errors.New("service-account-issuer and service-account-signing-key-file are given together or not at all")
+	}
+	return nil
 }
