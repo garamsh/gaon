@@ -18,6 +18,15 @@ import (
 const (
 	ReasonInvalidSpec = "InvalidSpec"
 	ReasonRejected    = "Rejected"
+	// ReasonPreconditionFailed is the reason of a create mvmd refuses as a
+	// failed precondition, with mvmd's message.
+	ReasonPreconditionFailed = "PreconditionFailed"
+	// ReasonReferenceNotFound is the reason of a MicroVM whose env or files
+	// name a Secret or ConfigMap, or a key of one, that does not exist.
+	ReasonReferenceNotFound = "ReferenceNotFound"
+	// ReasonFilesOverBound is the reason of a MicroVM whose files, once
+	// resolved, are over mvmd's bound.
+	ReasonFilesOverBound = "FilesOverBound"
 	// ReasonNetworkPluginUnavailable and ReasonStoragePluginUnavailable are
 	// the Ready reasons of a MicroVM not created because the plugin did not
 	// answer. The MicroVM stays Pending and the call is retried.

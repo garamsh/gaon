@@ -46,7 +46,7 @@ type traceKey struct{}
 // extensionsRoot, admissionRoot, coordinationRoot and customRoot over svc, and answers NotFound to any other path. az authorizes
 // each request a certificate holder makes. It is the one place that maps a
 // failure to an HTTP status.
-func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tokenSet, log *slog.Logger) http.Handler {
+func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tokenSet, accounts *accountTokens, log *slog.Logger) http.Handler {
 	h := &handler{log: log, az: az}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +128,10 @@ func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tok
 	mux.HandleFunc("DELETE "+customRoot+"/{name}", h.guardBy(custom(""), fixed(api.VerbDelete), h.deleteCustomObject(svc)))
 	mux.HandleFunc("GET "+customRoot+"/{name}", h.guardBy(custom(""), fixed(api.VerbGet), h.getCustomObject(svc)))
 	mux.HandleFunc("GET "+customRoot, h.guardBy(custom(""), readVerb, h.listOrWatchCustomObjects(svc)))
-	return h.recoverPanics(h.authenticate(mux, tokens))
+	if accounts != nil {
+		serveDiscovery(mux, accounts.verifier)
+	}
+	return h.recoverPanics(h.authenticate(mux, tokens, accounts))
 }
 
 // The routes a bearer-token holder may reach.

@@ -66,3 +66,11 @@ Append-only: once merged, the body below is not rewritten. A fact later found wr
 - **`$(VAR)` expansion.** It puts a second syntax in the contract for what a shell or the program already does.
 - **A Secret with `spec` and `status`.** Neither has content here, and the payload at the top is the form of the existing `ClusterRole`.
 - **A TokenRequest bound to any object.** Only a MicroVM holds an identity in gaon, and a general reference needs a rule per kind.
+
+## Errata
+
+### 2026-11-13: mvmd takes no working directory at create
+
+- **What was wrong.** Decision says mvmd takes `process` with `command`, `args`, `env`, `working_dir` and `user` at create (garamsh/mvmd#437).
+- **What falsified it.** At mvmd commit `223e3eca764c`, the runtime API in `lib/runtimeapi` has no `working_dir` in the create request, only on exec. The first decision of garamsh/mvmd#437 listed it and the shipped API dropped it.
+- **What stands.** The decision: a MicroVM takes a `workingDir`. garamsh/mvmd#519 asks mvmd for it, and until it lands the Node Agent fails a MicroVM that sets it, with the reason `InvalidSpec`.
