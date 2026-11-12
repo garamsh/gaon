@@ -3,6 +3,7 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,13 +22,15 @@ const (
 	ExitUsage   = 2
 )
 
-const usage = `usage:
+// usage is the help text. KIND is any name of a kind, so the text lists them.
+var usage = `usage:
   gaon [--server URL] apply -f FILE
-  gaon [--server URL] get [-o yaml|table] KIND NAME
-  gaon [--server URL] list [-o yaml|table] KIND
+  gaon [--server URL] get [-o table|yaml|json] KIND [NAME]
+  gaon [--server URL] describe KIND NAME
   gaon [--server URL] delete KIND NAME
 
-URL is the API root, http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1`
+URL is the API root, http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1
+KIND is one of ` + strings.Join(kindSpellings(), ", ")
 
 // usageError is a mistake in the command line, as against a failed request.
 type usageError struct{ msg string }
@@ -68,8 +71,8 @@ func run(ctx context.Context, c *api.Client, args []string, out io.Writer) error
 		return runApply(ctx, c, rest, out)
 	case "get":
 		return runGet(ctx, c, rest, out)
-	case "list":
-		return runList(ctx, c, rest, out)
+	case "describe":
+		return runDescribe(ctx, c, rest, out)
 	case "delete":
 		return runDelete(ctx, c, rest, out)
 	case "-h", "-help", "--help", "help":
@@ -79,25 +82,38 @@ func run(ctx context.Context, c *api.Client, args []string, out io.Writer) error
 	}
 }
 
-// parseFlags parses args for a command whose flags precede its operands.
+// parseFlags parses args for a command whose flags may stand anywhere among
+// its operands, and returns the operands in order. A "--" ends the flags.
 func parseFlags(name string, args []string, define func(*flag.FlagSet)) ([]string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	define(fs)
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil, err
+	var operands []string
+	for len(args) > 0 {
+		if err := fs.Parse(args); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil, err
+			}
+			return nil, usagef("%s: %v", name, err)
 		}
-		return nil, usagef("%s: %v", name, err)
+		consumed := len(args) - fs.NArg()
+		if consumed > 0 && args[consumed-1] == "--" {
+			return append(operands, fs.Args()...), nil
+		}
+		if fs.NArg() == 0 {
+			break
+		}
+		operands = append(operands, fs.Arg(0))
+		args = fs.Args()[1:]
 	}
-	return fs.Args(), nil
+	return operands, nil
 }
 
 // lookupKind resolves the operand naming a kind.
 func lookupKind(operand string) (kind, error) {
 	k, ok := kindByName(strings.ToLower(operand))
 	if !ok {
-		return kind{}, usagef("unknown kind %q, want one of %s", operand, strings.Join(kindNames(), ", "))
+		return kind{}, usagef("unknown kind %q, want one of %s", operand, strings.Join(kindSpellings(), ", "))
 	}
 	return k, nil
 }
@@ -181,13 +197,13 @@ func applyOne(ctx context.Context, c *api.Client, ch change) (string, error) {
 }
 
 func runGet(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
-	format := "yaml"
-	operands, err := parseFlags("get", args, func(fs *flag.FlagSet) { fs.StringVar(&format, "o", format, "yaml or table") })
+	format := "table"
+	operands, err := parseFlags("get", args, func(fs *flag.FlagSet) { fs.StringVar(&format, "o", format, "table, yaml or json") })
 	if err != nil {
 		return err
 	}
-	if len(operands) != 2 {
-		return usagef("get: want KIND NAME")
+	if len(operands) < 1 || len(operands) > 2 {
+		return usagef("get: want KIND [NAME]")
 	}
 	k, err := lookupKind(operands[0])
 	if err != nil {
@@ -195,6 +211,16 @@ func runGet(ctx context.Context, c *api.Client, args []string, out io.Writer) er
 	}
 	if err := checkFormat(format); err != nil {
 		return err
+	}
+	if len(operands) == 1 {
+		if k.list == nil {
+			return refusal("get", k, "GET", "")
+		}
+		res, err := k.list(ctx, c)
+		if err != nil {
+			return fmt.Errorf("get %s: %w", k.name, err)
+		}
+		return render(out, format, res)
 	}
 	if k.get == nil {
 		return refusal("get", k, "GET", "/{name}")
@@ -206,30 +232,26 @@ func runGet(ctx context.Context, c *api.Client, args []string, out io.Writer) er
 	return render(out, format, res)
 }
 
-func runList(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
-	format := "table"
-	operands, err := parseFlags("list", args, func(fs *flag.FlagSet) { fs.StringVar(&format, "o", format, "yaml or table") })
+func runDescribe(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
+	operands, err := parseFlags("describe", args, func(*flag.FlagSet) {})
 	if err != nil {
 		return err
 	}
-	if len(operands) != 1 {
-		return usagef("list: want KIND")
+	if len(operands) != 2 {
+		return usagef("describe: want KIND NAME")
 	}
 	k, err := lookupKind(operands[0])
 	if err != nil {
 		return err
 	}
-	if err := checkFormat(format); err != nil {
-		return err
+	if k.get == nil {
+		return refusal("describe", k, "GET", "/{name}")
 	}
-	if k.list == nil {
-		return refusal("list", k, "GET", "")
-	}
-	res, err := k.list(ctx, c)
+	res, err := k.get(ctx, c, operands[1])
 	if err != nil {
-		return fmt.Errorf("list %s: %w", k.name, err)
+		return fmt.Errorf("describe %s/%s: %w", k.name, operands[1], err)
 	}
-	return render(out, format, res)
+	return describe(out, k, res)
 }
 
 func runDelete(ctx context.Context, c *api.Client, args []string, out io.Writer) error {
@@ -247,27 +269,41 @@ func runDelete(ctx context.Context, c *api.Client, args []string, out io.Writer)
 	if k.del == nil {
 		return refusal("delete", k, "DELETE", "/{name}")
 	}
-	if err := k.del(ctx, c, operands[1]); err != nil {
+	marked, err := k.del(ctx, c, operands[1])
+	if err != nil {
 		return fmt.Errorf("delete %s/%s: %w", k.name, operands[1], err)
 	}
-	fmt.Fprintf(out, "%s/%s marked for deletion\n", k.name, operands[1])
+	if marked {
+		fmt.Fprintf(out, "%s/%s marked for deletion\n", k.name, operands[1])
+		return nil
+	}
+	fmt.Fprintf(out, "%s/%s deleted\n", k.name, operands[1])
 	return nil
 }
 
 func checkFormat(format string) error {
-	if format != "yaml" && format != "table" {
-		return usagef("unknown output format %q, want yaml or table", format)
+	switch format {
+	case "table", "yaml", "json":
+		return nil
 	}
-	return nil
+	return usagef("unknown output format %q, want table, yaml or json", format)
 }
 
 func render(out io.Writer, format string, res result) error {
-	if format == "yaml" {
+	switch format {
+	case "yaml":
 		b, err := encodeYAML(res.object)
 		if err != nil {
 			return err
 		}
 		_, err = out.Write(b)
+		return err
+	case "json":
+		b, err := json.MarshalIndent(res.object, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(out, "%s\n", b)
 		return err
 	}
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)

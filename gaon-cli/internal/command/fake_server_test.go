@@ -176,6 +176,12 @@ func (f *fakeServer) remove(w http.ResponseWriter, path, rv string) {
 		return
 	}
 	meta["deletionTimestamp"] = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	if fin, _ := meta["finalizers"].([]any); len(fin) == 0 {
+		// Nothing holds the object, so the server removes it at once.
+		delete(f.objects, path)
+		reply(w, stored)
+		return
+	}
 	f.store(path, stored)
 	reply(w, f.objects[path])
 }
