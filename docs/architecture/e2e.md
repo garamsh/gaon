@@ -55,11 +55,10 @@ Basis: [node-lifecycle.md](./node-lifecycle.md), [resource-api.md](./resource-ap
 
 - **For `make e2e-extensions`:** Go, `make`, loopback networking and about 1 GiB of memory. The module `tooling/e2e` requires etcd's server library and mvmd's runtime API, so the first run needs them in the module cache.
 - **For `make e2e`:**
-
-- `/dev/kvm`, with nested virtualization when the host is itself a VM, and `qemu-system-x86_64`, `qemu-img`, the OVMF files and `e2fsprogs`, as `naru-cluster` requires ([harness.md](https://github.com/garamsh/naru/blob/5b42b429c6b41447f2ea267fe606c2b5d44ea63e/docs/architecture/harness.md) §What the command needs).
-- About 3 GiB of memory per Node, so 6 GiB for the two Nodes.
-- Go, `make`, and an authenticated `gh` that can read garamsh/naru releases.
-- Network access to download the naru module and release; the Nodes need none beyond loopback.
+  - `/dev/kvm`, with nested virtualization when the host is itself a VM, and `qemu-system-x86_64`, `qemu-img`, the OVMF files and `e2fsprogs`, as `naru-cluster` requires ([harness.md](https://github.com/garamsh/naru/blob/5b42b429c6b41447f2ea267fe606c2b5d44ea63e/docs/architecture/harness.md) §What the command needs).
+  - About 3 GiB of memory per Node, so 6 GiB for the two Nodes.
+  - Go, `make`, and an authenticated `gh` that can read garamsh/naru releases.
+  - Network access to download the naru module and release; the Nodes need none beyond loopback.
 
 ## Rationale
 
