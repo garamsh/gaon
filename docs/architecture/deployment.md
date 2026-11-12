@@ -32,9 +32,9 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 - **A Node Agent gets its certificate by a CertificateSigningRequest.**
   - Its config carries a bootstrap token as a file and a writable directory for the agent's key and certificate: `--bootstrap-token-file` and `--cert-dir`. garamsh/naru#37 wires them as `/run/gaon/bootstrap-token` and `/var/lib/naru/gaon-node-agent`.
   - The API server learns the valid tokens from a file, `--bootstrap-token-file`, and accepts a token only to create a request and read one it created.
-  - The signer in `gaon-controllers` approves a request whose CN is a Node name and whose requester is a token or that Node's own certificate, and signs it for `--signing-duration`, 8760h by default.
+  - The signer in `gaon-controllers` approves a request whose subject is a CN that is a Node name and the Organization `gaon:nodes`, and whose requester is a token or that Node's own certificate, and signs it for `--signing-duration`, 8760h by default.
   - The agent renews at two thirds of the validity, over its own certificate, and swaps the pair without a restart.
-  - The flow is in [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) and the resource in [resource-api.md](./resource-api.md) §CertificateSigningRequest.
+  - The flow is in [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), the subject in [ADR 0022](./adr/0022-a-nodes-certificate-carries-the-organization-gaon-nodes-and-the-signer-signs-no-other-organization.md) and the resource in [resource-api.md](./resource-api.md) §CertificateSigningRequest.
 - **A token can obtain a certificate for any Node name.** A token is revoked by removing it from the file and restarting the API server; certificates already issued stay valid until they expire.
 - **Operator-supplied files still work.** A Node Agent given `--tls-cert` and `--tls-key` uses them and does not bootstrap, and the two sets of flags are mutually exclusive. The scheduler, the controllers and the CLI keep operator-issued certificates signed by the same CA.
 - **Authorization is a flag of the API server.** `--authorization-mode` is `AlwaysAllow`, the default and today's behaviour, or `RBAC`, which needs the TLS flags ([resource-api.md](./resource-api.md) §Authorization, [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md)). A deployment that sets `RBAC` issues the operator-supplied certificates with these subjects:
@@ -42,7 +42,8 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
   - the controllers: Organization `gaon:controllers`;
   - an administrator, including the CLI's: Organization `gaon:admins`; with none, no one can bind another role.
 
-  Each CN is a name that is not a Node's name. A Node Agent's certificate has no Organization, and the signer must refuse a request whose subject has one.
+  Each CN is a name that is not a Node's name.
+- **A Node Agent's certificate has the subject `CN=<node name>`, `O=gaon:nodes`.** The Organization lets a verifier outside gaon tell a Node from the other identities the CA signs. The signer refuses a request whose Organization is another, missing or repeated, and `gaon:nodes` is bound to no role ([ADR 0022](./adr/0022-a-nodes-certificate-carries-the-organization-gaon-nodes-and-the-signer-signs-no-other-organization.md)). A certificate issued before that decision has no Organization until the agent renews it. A Node Agent and a signer from before it cannot be mixed: the signer denies the old agent's request.
 - **Renewal of an operator-supplied certificate is the operator's.** Each service reads its files at start, so a replaced file takes effect at the next start of that service.
 
 ### Config shape

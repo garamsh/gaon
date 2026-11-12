@@ -206,6 +206,37 @@ func TestNodeAuthorizer_ANodeReadsMicroVMsAndAStrangerDoesNot(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestNodeAuthorizer_TheNodesOrganizationGivesACertificateWhoseCNIsNoNodeNothing(t *testing.T) {
+	f := newNodeFixture(t)
+	ghost, _ := f.c.clients(t, f.addr, nodeID("ghost"))
+
+	_, err := ghost.ListNodes(ctx(t))
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = ghost.GetNode(ctx(t), "node-1")
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = ghost.ListVolumes(ctx(t))
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = ghost.GetVolume(ctx(t), "v1")
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = ghost.ListMicroVMs(ctx(t))
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = ghost.GetLease(ctx(t), "node-1")
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	_, err = ghost.PutCertificateSigningRequest(ctx(t), csr(t, "ghost"))
+	assert.ErrorIs(t, err, api.ErrForbidden)
+	m, err := f.admin.GetMicroVM(ctx(t), "m1")
+	require.NoError(t, err)
+	_, err = ghost.PutMicroVMStatus(ctx(t), m)
+	assert.ErrorIs(t, err, api.ErrForbidden)
+
+	_, err = f.node1.ListVolumes(ctx(t))
+	assert.NoError(t, err, "control: the same read from a certificate whose CN is a Node")
+	_, err = f.node1.ListMicroVMs(ctx(t))
+	assert.NoError(t, err)
+	_, err = f.node1.PutCertificateSigningRequest(ctx(t), csr(t, "node-1"))
+	assert.NoError(t, err)
+}
+
 func TestNodeAuthorizer_ANodeCreatesACertificateSigningRequestAndReadsItsOwn(t *testing.T) {
 	f := newNodeFixture(t)
 	ghost, _ := f.c.clients(t, f.addr, nodeID("ghost"))

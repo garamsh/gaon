@@ -158,6 +158,8 @@ func TestStart_BootstrapsWithTheTokenAndKeepsTheIssuedPairOnDisk(t *testing.T) {
 	assert.Regexp(t, `^n1-[0-9a-f]{16}$`, creates[0].Name)
 	assert.Equal(t, "bootstrap:abcdef", creates[0].Username)
 	assert.Equal(t, "n1", creates[0].Request.Subject.CommonName)
+	assert.Equal(t, []string{api.NodeGroup}, creates[0].Request.Subject.Organization, "the request names a Node by its Organization")
+	assert.Len(t, creates[0].Request.Subject.Names, 2, "and by nothing else but the CN")
 	req := creates[0].Request
 	assert.Empty(t, req.DNSNames)
 	assert.Empty(t, req.IPAddresses)
@@ -173,6 +175,7 @@ func TestStart_BootstrapsWithTheTokenAndKeepsTheIssuedPairOnDisk(t *testing.T) {
 
 	leaf := readLeaf(t, r.dir)
 	assert.Equal(t, "n1", leaf.Subject.CommonName)
+	assert.Equal(t, []string{api.NodeGroup}, leaf.Subject.Organization)
 	assert.Equal(t, leaf.SerialNumber, r.presented(t).SerialNumber, "the pair on disk is the pair presented")
 }
 
@@ -340,6 +343,32 @@ func TestRun_RenewsAtOnceWhenThePairIsPastTwoThirdsAtStart(t *testing.T) {
 	// nothing here receives a Sleep, so a request proves it did not sleep.
 	require.Eventually(t, func() bool { return len(r.gaon.CSRCreates()) == 1 }, 5*time.Second, 5*time.Millisecond)
 	assert.Equal(t, "n1", r.gaon.CSRCreates()[0].Username)
+}
+
+func TestRun_ACertificateIssuedBeforeTheOrganizationRenewsIntoItWithoutARestart(t *testing.T) {
+	r := newRig(t)
+	r.gaon.SetSigning(9 * time.Hour)
+	certPEM, keyPEM := r.gaon.Issue(t, "n1", r.now.Add(-7*time.Hour), r.now.Add(2*time.Hour))
+	r.seed(t, certPEM, keyPEM)
+	svc := r.service(t, false)
+	require.NoError(t, svc.Start(context.Background()))
+	before := r.presented(t)
+	require.NotNil(t, before)
+	require.Empty(t, before.Subject.Organization, "setup: the pair in use predates the Organization")
+	run(t, svc)
+
+	require.Eventually(t, func() bool {
+		cert := r.presented(t)
+		return cert.SerialNumber.Cmp(before.SerialNumber) != 0
+	}, 5*time.Second, 5*time.Millisecond, "the renewed pair is presented by the same service")
+	after := r.presented(t)
+	assert.Equal(t, "n1", after.Subject.CommonName)
+	assert.Equal(t, []string{api.NodeGroup}, after.Subject.Organization)
+	assert.Equal(t, []string{api.NodeGroup}, readLeaf(t, r.dir).Subject.Organization, "and kept on disk")
+	creates := r.gaon.CSRCreates()
+	require.Len(t, creates, 1)
+	assert.Equal(t, "n1", creates[0].Username, "the renewal is made as the old certificate's CN")
+	assert.Equal(t, []string{api.NodeGroup}, creates[0].Request.Subject.Organization)
 }
 
 func TestRun_DoesNotRenewBeforeTwoThirds(t *testing.T) {

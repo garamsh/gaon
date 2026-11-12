@@ -2,6 +2,7 @@ package csrsigner
 
 import (
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/pem"
 	"fmt"
@@ -15,6 +16,7 @@ var (
 	oidExtKeyUsage = asn1.ObjectIdentifier{2, 5, 29, 37}
 	oidClientAuth  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
 	oidCommonName  = asn1.ObjectIdentifier{2, 5, 4, 3}
+	oidOrg         = asn1.ObjectIdentifier{2, 5, 4, 10}
 )
 
 // denial is a failed rule: the reason and message of the Denied condition.
@@ -38,11 +40,14 @@ func approve(r *api.CertificateSigningRequest) (*x509.CertificateRequest, *denia
 	}
 
 	// A certificate's Organization values are its groups, so the subject is
-	// one CN and nothing else.
-	if names := csr.Subject.Names; len(names) != 1 || !names[0].Type.Equal(oidCommonName) {
-		return nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject has %d attributes: it must be exactly one CN", len(names))}
+	// one CN and the one Organization that marks a Node.
+	cn, org, ok := nodeSubject(csr.Subject.Names)
+	if !ok {
+		return nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject has %d attributes: it must be exactly one CN and one O=%s", len(csr.Subject.Names), api.NodeGroup)}
 	}
-	cn := csr.Subject.CommonName
+	if org != api.NodeGroup {
+		return nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject O %q is not %s", org, api.NodeGroup)}
+	}
 	if cn == "" || strings.HasPrefix(cn, usernamePrefix) {
 		return nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject CN %q is not a Node name", cn)}
 	}
@@ -68,4 +73,24 @@ func clientAuthOnly(id asn1.ObjectIdentifier, value []byte) bool {
 	var usages []asn1.ObjectIdentifier
 	rest, err := asn1.Unmarshal(value, &usages)
 	return err == nil && len(rest) == 0 && slices.EqualFunc(usages, []asn1.ObjectIdentifier{oidClientAuth}, asn1.ObjectIdentifier.Equal)
+}
+
+// nodeSubject returns the CN and the Organization of a subject made of exactly
+// one of each and nothing else, in either order.
+func nodeSubject(names []pkix.AttributeTypeAndValue) (cn, org string, ok bool) {
+	var haveCN, haveOrg bool
+	for _, n := range names {
+		v, isString := n.Value.(string)
+		switch {
+		case !isString:
+			return "", "", false
+		case n.Type.Equal(oidCommonName) && !haveCN:
+			cn, haveCN = v, true
+		case n.Type.Equal(oidOrg) && !haveOrg:
+			org, haveOrg = v, true
+		default:
+			return "", "", false
+		}
+	}
+	return cn, org, haveCN && haveOrg
 }
