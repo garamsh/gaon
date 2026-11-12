@@ -53,17 +53,33 @@ func TestParseConfig_ReadsEveryValueFromItsEnvironmentVariable(t *testing.T) {
 	assert.Equal(t, nodeagent.Config{
 		APIServer: "http://api", HTTPClient: &http.Client{}, NodeName: "node-a", MvmdSocket: "/s.sock", ResyncPeriod: 7 * time.Second,
 		RestartBackoff: 3 * time.Second, RestartBackoffMax: 2 * time.Minute, RestartResetAfter: 8 * time.Minute,
-		Liveness: liveness.Params{LeaseDuration: 40 * time.Second, RenewPeriod: 6 * time.Second, DeadlineLength: 20 * time.Second, Delta: 4 * time.Second, RPCTimeout: 3 * time.Second},
+		StoragePlugin: storage.LocalName,
+		Liveness:      liveness.Params{LeaseDuration: 40 * time.Second, RenewPeriod: 6 * time.Second, DeadlineLength: 20 * time.Second, Delta: 4 * time.Second, RPCTimeout: 3 * time.Second},
 	}, withoutPlugins(t, cfg))
 }
 
-// withoutPlugins returns cfg with its plugins nil after checking it has them,
+func TestParseConfig_SelectsTheStoragePluginByFlagOrEnvironmentAndDefaultsToLocal(t *testing.T) {
+	required := map[string]string{nodeagent.EnvAPIServer: "http://api", nodeagent.EnvNodeName: "n1", nodeagent.EnvMvmdSocket: "/s.sock"}
+	byDefault, err := nodeagent.ParseConfig(nil, env(required), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, storage.LocalName, byDefault.StoragePlugin)
+
+	byFlag, err := nodeagent.ParseConfig([]string{"--storage-plugin=none"}, env(required), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, storage.NoneName, byFlag.StoragePlugin)
+
+	required[nodeagent.EnvStoragePlugin] = "none"
+	byEnv, err := nodeagent.ParseConfig(nil, env(required), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, storage.NoneName, byEnv.StoragePlugin)
+}
+
+// withoutPlugins returns cfg with its network plugin nil after checking it has one,
 // since a plugin is compared by what it does and not by its address.
 func withoutPlugins(t *testing.T, cfg nodeagent.Config) nodeagent.Config {
 	t.Helper()
 	assert.NotNil(t, cfg.Network)
-	assert.NotNil(t, cfg.Storage)
-	cfg.Network, cfg.Storage = nil, nil
+	cfg.Network = nil
 	return cfg
 }
 
@@ -159,7 +175,7 @@ func TestRun_RegistersTheNodeRenewsItsLeaseAndRunsABoundMachine(t *testing.T) {
 	defaultNetwork, err := network.NewDefault(nil, nil)
 	require.NoError(t, err)
 	cfg := nodeagent.Config{
-		Network: defaultNetwork, Storage: storage.None{},
+		Network: defaultNetwork, StoragePlugin: storage.NoneName,
 		APIServer: gaon.URL, NodeName: "n1", MvmdSocket: mvmd.Socket, ResyncPeriod: 20 * time.Millisecond,
 		Liveness: liveness.Params{LeaseDuration: 30 * time.Second, RenewPeriod: 20 * time.Millisecond, DeadlineLength: 5 * time.Second, Delta: time.Second, RPCTimeout: time.Second},
 	}
@@ -236,9 +252,15 @@ func TestRun_CreatesAMachineWithThePolicyOfTheFlags(t *testing.T) {
 // test ends.
 func runAgent(t *testing.T, gaon *fakegaon.Server, mvmd *fakemvmd.Server) {
 	t.Helper()
+	runAgentWithStorage(t, gaon, mvmd, storage.NoneName)
+}
+
+// runAgentWithStorage is runAgent with the storage plugin called plugin.
+func runAgentWithStorage(t *testing.T, gaon *fakegaon.Server, mvmd *fakemvmd.Server, plugin string) {
+	t.Helper()
 	clk := clock.System{}
 	cfg := nodeagent.Config{
-		Network: mustNetwork(t), Storage: storage.None{},
+		Network: mustNetwork(t), StoragePlugin: plugin,
 		APIServer: gaon.URL, NodeName: "n1", MvmdSocket: mvmd.Socket, ResyncPeriod: 20 * time.Millisecond,
 		Liveness: liveness.Params{LeaseDuration: 30 * time.Second, RenewPeriod: 20 * time.Millisecond, DeadlineLength: 5 * time.Second, Delta: time.Second, RPCTimeout: time.Second},
 	}
@@ -330,4 +352,28 @@ func mustMachine(t *testing.T, m *fakemvmd.Server, id string) *v1alpha2.Machine 
 	got, ok := m.Machine(id)
 	require.True(t, ok)
 	return got
+}
+
+func TestRun_RunsTheLocalStoragePluginForTheVolumesOfItsNode(t *testing.T) {
+	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clock.System{})
+	pinned := api.Volume{
+		Metadata: api.ObjectMeta{Name: "data", Generation: 1, Finalizers: []string{api.NodeAgentFinalizer}},
+		Spec:     api.VolumeSpec{StorageClass: api.StorageClassLocal, AccessModes: []string{api.AccessReadWriteOnce}, Storage: "10Mi", NodeName: "n1"},
+	}
+	elsewhere := pinned
+	elsewhere.Metadata.Name, elsewhere.Spec.NodeName = "elsewhere", "n2"
+	gaon.SetVolume(pinned)
+	gaon.SetVolume(elsewhere)
+	runAgentWithStorage(t, gaon, mvmd, storage.LocalName)
+
+	require.Eventually(t, func() bool {
+		v, _ := gaon.Volume("data")
+		return v.Status.Phase == api.VolumeAvailable
+	}, 5*time.Second, 10*time.Millisecond, "data is Available")
+
+	disk, ok := mvmd.Disk("volume-data")
+	require.True(t, ok)
+	assert.EqualValues(t, 10<<20, disk.GetSizeBytes())
+	_, ok = mvmd.Disk("volume-elsewhere")
+	assert.False(t, ok, "control: a Volume pinned to another Node gets no disk")
 }
