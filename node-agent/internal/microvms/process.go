@@ -28,9 +28,13 @@ func (e specFailure) Unwrap() error { return e.err }
 // It reads each Secret and ConfigMap the spec references once, with a get
 // under the Node's own identity. A missing object or key, a file that is over
 // the bound once resolved, and a file whose owner cannot be decided are
-// returned as a specFailure; any other error is retried.
+// returned as a specFailure, as is a spec that sets workingDir, which mvmd has
+// no field for; any other error is retried.
 func (s *service) withProcess(ctx context.Context, m *api.MicroVM, req *v1alpha2.CreateMachineRequest) error {
 	spec := &m.Spec
+	if spec.WorkingDir != "" {
+		return specFailure{ReasonInvalidSpec, errors.New("spec.workingDir is set, and mvmd takes no working directory at create (garamsh/mvmd#519)")}
+	}
 	req.Command, req.Args, req.User = slices.Clone(spec.Command), slices.Clone(spec.Args), spec.User
 	refs := references{api: s.api, secrets: map[string]*api.Secret{}, configMaps: map[string]*api.ConfigMap{}}
 	for _, e := range spec.Env {

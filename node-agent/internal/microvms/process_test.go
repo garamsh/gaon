@@ -1,6 +1,7 @@
 package microvms_test
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/lib/plugin"
 	"github.com/garamsh/gaon/node-agent/internal/microvms"
 )
 
@@ -294,4 +296,41 @@ func TestRun_ReportsMvmdsPreconditionFailureOnArgsAloneOfAnOldImage(t *testing.T
 	assert.Equal(t, microvms.ReasonPreconditionFailed, cond.Reason)
 	assert.Contains(t, cond.Message, "pull it again", "mvmd's message is on the status")
 	eventually(t, "control: command with args on the same image runs", e.running("both-e1"))
+}
+
+// askedNetwork records the MicroVMs it is asked a policy for.
+type askedNetwork struct {
+	emptyNetwork
+	mu    sync.Mutex
+	asked []string
+}
+
+func (n *askedNetwork) Policy(ctx context.Context, m *api.MicroVM) (*plugin.NetworkPolicy, error) {
+	n.mu.Lock()
+	n.asked = append(n.asked, m.Metadata.Name)
+	n.mu.Unlock()
+	return n.emptyNetwork.Policy(ctx, m)
+}
+
+func (n *askedNetwork) names() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.asked...)
+}
+
+func TestRun_FailsAMicroVMThatSetsAWorkingDirectoryBeforeThePolicyAndTheCreate(t *testing.T) {
+	network := &askedNetwork{}
+	e := start(t, true, nil, func(e *env) { e.network = network })
+	dir := microvm("wd", 1, node, api.RunAlways)
+	dir.Spec.WorkingDir = "/srv"
+	e.gaon.SetMicroVM(dir)
+	e.gaon.SetMicroVM(microvm("wd-ok", 1, node, api.RunAlways))
+
+	cond := e.failed(t, "wd")
+	assert.Equal(t, microvms.ReasonInvalidSpec, cond.Reason)
+	assert.Contains(t, cond.Message, "spec.workingDir")
+	assert.Contains(t, cond.Message, "mvmd#519")
+	eventually(t, "control: the same MicroVM without workingDir runs", e.running("wd-ok-e1"))
+	assert.Equal(t, []string{"wd-ok"}, network.names(), "the network plugin is asked for the control only")
+	assert.NotContains(t, e.mvmd.Calls(), "CreateMachine wd-e1")
 }
