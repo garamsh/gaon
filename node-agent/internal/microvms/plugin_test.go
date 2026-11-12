@@ -163,7 +163,7 @@ func TestNetwork_ARefusalFailsTheMicroVMWithThePluginsReasonAndAnotherErrorIsRet
 	c := failedWith(t, e, "no", "Quota")
 	assert.Equal(t, "refused by the test plugin", c.Message)
 	eventually(t, "a plugin error that is not a refusal is retried until it clears", e.running("later-e1"))
-	assert.Equal(t, api.MicroVMRunning, e.gaon.MicroVM("later").Status.Phase)
+	eventually(t, "the status follows mvmd", e.phase("later", 1, api.MicroVMRunning))
 }
 
 // ledgerStorage is a storage plugin that records what it was asked, and
