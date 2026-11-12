@@ -164,6 +164,14 @@ func (s *service) create(ctx context.Context, m *api.MicroVM) (outcome, error) {
 	if err != nil {
 		return outcome{failure: err, failReason: ReasonInvalidSpec}, nil
 	}
+	if err := s.withProcess(ctx, m, req); err != nil {
+		var f specFailure
+		if !errors.As(err, &f) {
+			return outcome{}, fmt.Errorf("microvm %s: %w", m.Metadata.Name, err)
+		}
+		s.log.Warn("microvm cannot be created", "microvm", m.Metadata.Name, "reason", f.reason, "error", err)
+		return outcome{failure: err, failReason: f.reason}, nil
+	}
 	policy, err := s.network.Policy(ctx, m)
 	if err != nil {
 		return refused("network", ReasonNetworkPluginUnavailable, err)
@@ -180,14 +188,18 @@ func (s *service) create(ctx context.Context, m *api.MicroVM) (outcome, error) {
 	created, err := s.runtime.CreateMachine(ctx, req)
 	switch {
 	case err == nil:
-	case v1alpha2.KindOf(err) == v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED:
+	case v1alpha2.KindOf(err) == v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED, v1alpha2.KindOf(err) == v1alpha2.OutcomeKind_OUTCOME_KIND_PRECONDITION_FAILED:
 		if err := s.storage.Release(ctx, req.GetMachineId()); err != nil {
-			s.log.Warn("release after a rejected create", "id", req.GetMachineId(), "error", err)
+			s.log.Warn("release after a refused create", "id", req.GetMachineId(), "error", err)
+		}
+		if v1alpha2.KindOf(err) == v1alpha2.OutcomeKind_OUTCOME_KIND_PRECONDITION_FAILED {
+			return outcome{failure: preconditionFailure{err}, failReason: ReasonPreconditionFailed}, nil
 		}
 		return outcome{failure: rejection{err}, failReason: ReasonRejected}, nil
 	default:
 		return outcome{}, fmt.Errorf("create %s: %w", req.GetMachineId(), err)
 	}
+	s.log.Info("created microvm", "id", req.GetMachineId(), "env", len(req.GetEnv()), "files", len(req.GetFiles()))
 	started, err := s.start(ctx, req.GetMachineId())
 	if err != nil {
 		return outcome{runtime: created.GetMachine()}, err
@@ -212,6 +224,16 @@ type rejection struct{ err error }
 
 func (e rejection) Error() string { return "mvmd rejected the MicroVM: " + reasonOf(e.err) }
 func (e rejection) Unwrap() error { return e.err }
+
+// preconditionFailure is mvmd's refusal of a create as a failed precondition,
+// such as args alone on an image pulled before mvmd kept its entrypoint and
+// command apart, reported as the MicroVM's failure with mvmd's message.
+type preconditionFailure struct{ err error }
+
+func (e preconditionFailure) Error() string {
+	return "mvmd could not create the MicroVM: " + reasonOf(e.err)
+}
+func (e preconditionFailure) Unwrap() error { return e.err }
 
 func (s *service) start(ctx context.Context, id string) (*v1alpha2.Machine, error) {
 	started, err := s.runtime.StartMachine(ctx, &v1alpha2.StartMachineRequest{MachineId: id})

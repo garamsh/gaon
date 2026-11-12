@@ -36,6 +36,9 @@ type env struct {
 	// MicroVM with the empty policy and no disk.
 	network microvms.Network
 	storage microvms.Storage
+	// log receives the service's log; a setup function may replace it, and it
+	// defaults to a writer that discards.
+	log io.Writer
 }
 
 // start runs the service against fakes, with the fencing deadline armed
@@ -53,6 +56,9 @@ func start(t *testing.T, armed bool, wrap func(microvms.API) microvms.API, setup
 	if e.storage == nil {
 		e.storage = noDisks{}
 	}
+	if e.log == nil {
+		e.log = io.Discard
+	}
 	conn, err := runtimeapi.Dial(context.Background(), e.mvmd.Socket)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
@@ -68,7 +74,7 @@ func start(t *testing.T, armed bool, wrap func(microvms.API) microvms.API, setup
 		Resync: 20 * time.Millisecond, Retry: 20 * time.Millisecond, ReadTimeout: time.Second,
 		RestartBackoff: time.Hour, RestartBackoffMax: time.Hour, RestartResetAfter: time.Hour,
 	},
-		client, e.rt, e.network, e.storage, clk, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		client, e.rt, e.network, e.storage, clk, slog.New(slog.NewTextHandler(e.log, nil)))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { svc.Run(ctx); close(done) }()

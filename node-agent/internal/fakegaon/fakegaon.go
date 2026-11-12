@@ -28,6 +28,9 @@ type Server struct {
 	rev      int64
 	microvms map[string]api.MicroVM
 	volumes  map[string]api.Volume
+	secrets  map[string]api.Secret
+	configs  map[string]api.ConfigMap
+	reads    []string
 	nodes    map[string]api.Node
 	leases   map[string]api.Lease
 	log      []logged
@@ -56,6 +59,8 @@ func newServer() (*Server, *http.ServeMux) {
 	s := &Server{
 		microvms: map[string]api.MicroVM{},
 		volumes:  map[string]api.Volume{},
+		secrets:  map[string]api.Secret{},
+		configs:  map[string]api.ConfigMap{},
 		nodes:    map[string]api.Node{},
 		leases:   map[string]api.Lease{},
 		csrs:     map[string]api.CertificateSigningRequest{},
@@ -71,6 +76,8 @@ func newServer() (*Server, *http.ServeMux) {
 	mux.HandleFunc("GET /volumes/{name}", s.getVolume)
 	mux.HandleFunc("PUT /volumes/{name}", s.putVolume)
 	mux.HandleFunc("PUT /volumes/{name}/status", s.putVolumeStatus)
+	mux.HandleFunc("GET /secrets/{name}", s.getSecret)
+	mux.HandleFunc("GET /configmaps/{name}", s.getConfigMap)
 	mux.HandleFunc("GET /nodes/{name}", s.getNode)
 	mux.HandleFunc("PUT /nodes/{name}", s.putNode)
 	mux.HandleFunc("PUT /nodes/{name}/status", s.putNodeStatus)
