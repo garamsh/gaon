@@ -10,7 +10,7 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 
 - **`Machine` is the microVM.** A physical machine is the core resource `Node`. A machine naru has discovered but gaon has not admitted is a `Node` whose state is `Discovered`. There is no Host resource. The `Node` schema is in §Node.
 - **API group suffix `gaon.garam.sh`:** `compute.gaon.garam.sh/v1alpha1` holds the core resources named here, `rbac.gaon.garam.sh/v1alpha1` the roles and bindings, `apps.gaon.garam.sh` the default extensions, `apiextensions.gaon.garam.sh` the resource definitions.
-- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Machine, Volume, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions, the Driver interface. MachineSet, MachineDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no Machine runs before its network policy is applied, and the default network blocks all outside traffic.
+- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Machine, Volume, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions (`CustomResourceDefinition`, in `apiextensions.gaon.garam.sh`, §CustomResourceDefinition), the Driver interface. MachineSet, MachineDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no Machine runs before its network policy is applied, and the default network blocks all outside traffic.
 
 ### Transport
 
@@ -96,7 +96,7 @@ A request for a client certificate from the cluster CA, used by a Node Agent to 
   - `conditions`: the types are `Approved` and `Denied`, and any other type is refused. Each has a `status` of `True`, `False` or `Unknown`, and any other value is refused.
   - `certificate`: the issued certificate, PEM, written with the `Approved` condition.
 - **Writers.** The requester writes `spec`, once, by creating the request. The signer, which is `gaon-controllers`, writes `status` and nothing else, by compare-and-swap on the whole object.
-- **The signer's approval rule:** the request is client-auth only with a CN equal to a Node name, and `spec.username` is a bootstrap token or equals that CN. A request that fails it is `Denied` ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md)).
+- **The signer's approval rule:** the request's subject is exactly one attribute, a non-empty CN that does not start with `bootstrap:` and is the requesting Node's name (the Node need not exist yet), the request is client-auth only, and `spec.username` is a bootstrap token or equals that CN. A request that fails it is `Denied` ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md)).
 - **A token holder reads only a request it created,** by `GET /certificatesigningrequests/{name}`. List and watch need a client certificate.
 - **There is no delete path.** Requests stay in the Store.
 
@@ -169,6 +169,23 @@ The RBAC paths are relative to their own root, `/apis/rbac.gaon.garam.sh/v1alpha
 | `DELETE /clusterrolebindings/{name}` | users | delete it |
 | `GET /clusterrolebindings`, `GET /clusterrolebindings/{name}`, `GET /clusterrolebindings?watch=true` | all authenticated by certificate | list, read one, subscribe |
 
+The resource-definition paths are relative to their own root, `/apis/apiextensions.gaon.garam.sh/v1alpha1` (§CustomResourceDefinition).
+
+| Path | Writer | Use |
+|---|---|---|
+| `PUT /customresourcedefinitions/{name}` | users | create a definition, without a version, named `<plural>.<group>`; change its `versions`, with one |
+| `DELETE /customresourcedefinitions/{name}` | users | delete it and its objects (§CustomResourceDefinition) |
+| `GET /customresourcedefinitions`, `GET /customresourcedefinitions/{name}`, `GET /customresourcedefinitions?watch=true` | all authenticated by certificate | list, read one, subscribe |
+
+The objects of a registered kind have their own root per definition, `/apis/<group>/<version>`, and the forms of the compute kinds.
+
+| Path | Writer | Use |
+|---|---|---|
+| `PUT /<plural>/{name}` | users, controllers | create an object, without a version; change it, with one |
+| `PUT /<plural>/{name}/status` | controllers | write `status`; present only when the definition enables the status subresource |
+| `DELETE /<plural>/{name}` | users | set `deletionTimestamp`; the object is removed when its last finalizer is |
+| `GET /<plural>`, `GET /<plural>/{name}`, `GET /<plural>?watch=true` | all authenticated by certificate | list, read one, subscribe |
+
 ### Authorization
 
 The API server's `--authorization-mode` is `AlwaysAllow`, the default, which allows every authenticated request, or `RBAC`, which allows only what the Node authorizer or a bound role allows ([ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md)). `RBAC` requires the TLS flags.
@@ -176,7 +193,8 @@ The API server's `--authorization-mode` is `AlwaysAllow`, the default, which all
 - **Identity.** The user is the certificate's CN and the groups are its subject's Organization values. A bearer token keeps `bootstrap:<id>` and the rule of §Transport; neither authorizer is consulted for it.
 - **A request is** a verb on a resource of an API group:
   - `PUT` without `resourceVersion` is `create`, with one `update`; `DELETE` is `delete`; `GET` of one object is `get`, of a collection `list`, and with `watch=true` `watch`;
-  - a subresource is named `resource/sub`: `PUT /machines/{name}/status` is `update` on `machines/status`, and `POST /machines/{name}/binding` is `create` on `machines/binding`.
+  - a subresource is named `resource/sub`: `PUT /machines/{name}/status` is `update` on `machines/status`, and `POST /machines/{name}/binding` is `create` on `machines/binding`;
+  - the group and resource of a custom resource are the definition's `group` and `plural` (`PUT /widgets/{name}/status` is `update` on `widgets/status` in `apps.gaon.garam.sh`), and the definitions themselves are `customresourcedefinitions` in `apiextensions.gaon.garam.sh`. `gaon:admin`'s `*` covers both.
 - **Order.** The Node authorizer first, then the roles bound to the caller. Permissions only add; there is no deny. A request neither allows is `Forbidden`.
 - **The Node authorizer** applies to a caller whose CN equals a Node's name, or the name of the Node it creates. It allows:
   - create its own Node, read it and write its `status`;
@@ -204,6 +222,26 @@ The group `rbac.gaon.garam.sh/v1alpha1` has the root `/apis/rbac.gaon.garam.sh/v
 
 - The types are in `lib/api/`: `ClusterRole`, `PolicyRule`, `ClusterRoleBinding`, `RoleRef` and `Subject`.
 
+### CustomResourceDefinition
+
+A user registers a resource kind with a `CustomResourceDefinition` in `apiextensions.gaon.garam.sh/v1alpha1`, root `/apis/apiextensions.gaon.garam.sh/v1alpha1`. It is cluster-scoped and has `apiVersion`, `kind`, `metadata`, `spec` and `status`. Its semantics follow Kubernetes' and the rules below are gaon's own ([ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md)).
+
+- **Name.** `<plural>.<group>`; any other name is `Invalid`. The whole name is at most 253 characters.
+- **`spec`:**
+  - `group`: a domain of at least two lowercase DNS labels. It may not be `compute.gaon.garam.sh`, `rbac.gaon.garam.sh` or `apiextensions.gaon.garam.sh`, or any later group the core serves. `apps.gaon.garam.sh` is allowed.
+  - `names`: `kind` and `listKind`, each starting with an uppercase letter and holding letters and digits, and different from each other; `plural` and `singular`, each a lowercase DNS label.
+  - `scope`: `Cluster`. `Namespaced` and any other value are `Invalid` until namespaces exist.
+  - `versions`: exactly one entry, which is served and stored. Its `name` has the form `v1`, `v1alpha1` or `v2beta3`. It has a `schema.openAPIV3Schema`, and optionally `subresources.status: {}`. More than one version needs conversion and is `Invalid`.
+- **Immutable after creation:** `group`, `names` and the version `name`. The schema and the subresources may change.
+- **The schema** is a structural subset of OpenAPI v3. A node has a `type` of `object`, `array`, `string`, `integer`, `number` or `boolean`, except a node with `x-kubernetes-preserve-unknown-fields: true`, which may omit it. The keywords are `type`, `description`, `properties`, `required`, `items`, `enum`, `minimum`, `maximum`, `pattern` and `x-kubernetes-preserve-unknown-fields`; a definition using any other keyword is `Invalid`.
+  - The root is an object that names only `spec` and `status` as properties and does not preserve unknown fields. `apiVersion`, `kind` and `metadata` are the same for every kind and are not in the schema.
+  - `properties` and `required` belong to an object; every name in `required` is in `properties`, unless the node preserves unknown fields. `items` belongs to an array, and an array has it. `enum` belongs to a scalar type, and each value has that type. `minimum` and `maximum` belong to `integer` and `number`, and `minimum` is not above `maximum`. `pattern` belongs to a `string` and compiles as a Go regular expression.
+  - **Pruning.** A write drops the fields its schema does not name, except under a node that preserves unknown fields. A write that fails the schema is `Invalid`.
+- **`status`,** written by the API server: `conditions`. `NamesAccepted` is true when no other definition of the same group has any of the same `kind`, `listKind`, `plural` or `singular`; the older definition keeps its names, and the later one is `NamesAccepted` false with a reason, is not `Established` and serves no path. `Established` is true once the paths are served. Any other condition type is refused.
+- **Objects.** An object has `apiVersion` (`<group>/<version>`), `kind`, `metadata`, `spec` and `status`, the last two JSON objects its schema describes. The paths are in §Paths. Compare-and-swap, `generation`, finalizers, `deletionTimestamp` and the watch follow §Common rules and §Watch. With the status subresource enabled, a `PUT` to the object ignores changes to `status`, and a `PUT` to `/status` ignores changes to anything but `status`.
+- **Deletion.** `DELETE` of a definition, by compare-and-swap, sets its `deletionTimestamp` and sets `Established` false. The API server then refuses a create of an object of the kind as `Conflict`, deletes each object of the kind as a `DELETE` by a user would, and removes the definition when none is left. A watcher of the objects sees a `Modified` for each object with its `deletionTimestamp` set, a `Deleted` once its finalizers are gone, and then its stream ends; a watcher of definitions sees `Modified` and then `Deleted`. A definition created again starts empty.
+- **Types and client.** In `lib/api/`: `CustomResourceDefinition` and its parts, `JSONSchemaProps`, `CustomObject` and `CustomResourceType`. `CustomResourceClient` reads and writes the objects of one kind, and holds `spec` and `status` as JSON, so no Go type is needed per kind.
+
 Wake, exec, file API and console are data-plane features and are not recorded in the Store.
 
 ### Watch
@@ -211,7 +249,7 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 - A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required.
 - Each line of the stream is one JSON event with a `type` and an `object`.
 - Event types, PascalCase as every enum is:
-  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Node, a Lease, a CertificateSigningRequest, a ClusterRole or a ClusterRoleBinding) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
+  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Node, a Lease, a CertificateSigningRequest, a ClusterRole, a ClusterRoleBinding, a CustomResourceDefinition or an object of a registered kind) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
   - `Error` carries the error object, and is the last event of its stream.
 - The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422, `Expired` 410, `Unauthorized` 401 and `Forbidden` 403. `Unauthorized` is a request with no client certificate and a missing or invalid bearer token; `Forbidden` is a valid token on any request other than creating a CertificateSigningRequest or reading one it created, and, in the `RBAC` mode, a request by certificate that neither the Node authorizer nor a bound role allows (§Authorization).
 - An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
@@ -222,6 +260,7 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 - Boundary, one-way dependencies and the fencing obligation: [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md).
 - Writers, Lease, watch, OnDemand, group, transport, naming: [ADR 0003](./adr/0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md).
 - Authorization, the `rbac` group, the Node authorizer and the bootstrap roles: [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md), which amends ADR 0005, Decision 4.
+- Resource definitions, custom resources, their schema, the deletion order and the client: [ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md), which uses ADR 0008's rules for authorization.
 - Bearer-token access and the CertificateSigningRequest: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), which amends ADR 0005.
 - How `resourceVersion`, compare-and-swap and watch map onto the Store: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
 - The Lease validity is measured by the observer because a renew time written by one machine cannot be compared with another machine's clock, which can be stepped.
@@ -234,6 +273,8 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 - **Data-plane route:** how exec, file and console traffic reaches a node.
 - **Numbers:** measuring the provisional values in §Lease and fencing, the restart backoff and the `lastActiveTime` minimum interval (Discussion #2 section 6 item 13).
 - **Store growth and compaction interval:** [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
-- **Placement of other core resources** (Namespace, resource definitions) in an API group, and the extension resources' schemas.
+- **Placement of Namespace** in an API group.
+- **The schemas of the default extensions** (MachineSet, MachineDeployment, Job, Service, Gateway, Autoscaler) in `apps.gaon.garam.sh`: none is written yet.
+- **More than one version of a custom resource,** which needs conversion, and the `scale` subresource and the schema keywords outside §CustomResourceDefinition's list.
 - **Namespaced roles:** `Role` and `RoleBinding` wait for the namespace decision above; only the cluster-scoped kinds exist.
 - **Out of the contract by decision:** Discussion #2 section 6 items 5, 6 and 12 (tenancy, the immediate-bind default, deployment features).

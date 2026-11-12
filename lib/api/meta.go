@@ -16,6 +16,13 @@ const (
 	RBACGroupVersion = RBACGroup + "/" + Version
 )
 
+// The API group and version of the resource definitions, served under their
+// own root beside the compute group's.
+const (
+	APIExtensionsGroup        = "apiextensions.gaon.garam.sh"
+	APIExtensionsGroupVersion = APIExtensionsGroup + "/" + Version
+)
+
 // The kinds of the resources in this package.
 const (
 	KindMachine     = "Machine"
@@ -33,6 +40,9 @@ const (
 	KindClusterRoleList        = "ClusterRoleList"
 	KindClusterRoleBinding     = "ClusterRoleBinding"
 	KindClusterRoleBindingList = "ClusterRoleBindingList"
+
+	KindCustomResourceDefinition     = "CustomResourceDefinition"
+	KindCustomResourceDefinitionList = "CustomResourceDefinitionList"
 )
 
 // ResourceVersion is the version of an object in the Store. Clients treat it
