@@ -9,8 +9,8 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 ### Naming and groups
 
 - **`Machine` is the microVM.** A physical machine is the core resource `Node`. A machine naru has discovered but gaon has not admitted is a `Node` whose state is `Discovered`. There is no Host resource. The `Node` schema is in §Node.
-- **API group suffix `gaon.garam.sh`:** `compute.gaon.garam.sh/v1alpha1` holds the core resources named here, `apps.gaon.garam.sh` the default extensions, `apiextensions.gaon.garam.sh` the resource definitions.
-- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Machine, Volume, roles and bindings, resource definitions, the Driver interface. MachineSet, MachineDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no Machine runs before its network policy is applied, and the default network blocks all outside traffic.
+- **API group suffix `gaon.garam.sh`:** `compute.gaon.garam.sh/v1alpha1` holds the core resources named here, `rbac.gaon.garam.sh/v1alpha1` the roles and bindings, `apps.gaon.garam.sh` the default extensions, `apiextensions.gaon.garam.sh` the resource definitions.
+- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Machine, Volume, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions, the Driver interface. MachineSet, MachineDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no Machine runs before its network policy is applied, and the default network blocks all outside traffic.
 
 ### Transport
 
@@ -158,6 +158,52 @@ Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where
 | `GET /certificatesigningrequests/{name}` | all; a token holder only a request it created | read one request |
 | `GET /certificatesigningrequests?watch=true` | all authenticated by certificate | subscribe to changes |
 
+The RBAC paths are relative to their own root, `/apis/rbac.gaon.garam.sh/v1alpha1` (§RBAC), and follow the same forms: `PUT`, `DELETE` and `GET` of one, a list and a watch.
+
+| Path | Writer | Use |
+|---|---|---|
+| `PUT /clusterroles/{name}` | users | create a ClusterRole, without a version; change its `rules`, with one |
+| `DELETE /clusterroles/{name}` | users | delete it |
+| `GET /clusterroles`, `GET /clusterroles/{name}`, `GET /clusterroles?watch=true` | all authenticated by certificate | list, read one, subscribe |
+| `PUT /clusterrolebindings/{name}` | users | create a ClusterRoleBinding, without a version; change its `subjects`, with one; `roleRef` cannot change |
+| `DELETE /clusterrolebindings/{name}` | users | delete it |
+| `GET /clusterrolebindings`, `GET /clusterrolebindings/{name}`, `GET /clusterrolebindings?watch=true` | all authenticated by certificate | list, read one, subscribe |
+
+### Authorization
+
+The API server's `--authorization-mode` is `AlwaysAllow`, the default, which allows every authenticated request, or `RBAC`, which allows only what the Node authorizer or a bound role allows ([ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md)). `RBAC` requires the TLS flags.
+
+- **Identity.** The user is the certificate's CN and the groups are its subject's Organization values. A bearer token keeps `bootstrap:<id>` and the rule of §Transport; neither authorizer is consulted for it.
+- **A request is** a verb on a resource of an API group:
+  - `PUT` without `resourceVersion` is `create`, with one `update`; `DELETE` is `delete`; `GET` of one object is `get`, of a collection `list`, and with `watch=true` `watch`;
+  - a subresource is named `resource/sub`: `PUT /machines/{name}/status` is `update` on `machines/status`, and `POST /machines/{name}/binding` is `create` on `machines/binding`.
+- **Order.** The Node authorizer first, then the roles bound to the caller. Permissions only add; there is no deny. A request neither allows is `Forbidden`.
+- **The Node authorizer** applies to a caller whose CN equals a Node's name, or the name of the Node it creates. It allows:
+  - create its own Node, read it and write its `status`;
+  - read and write its own Lease;
+  - read Machines; write the `status` of a Machine whose `spec.nodeName` is that Node, and its own finalizer through `PUT /machines/{name}` on such a Machine (the API server checks that only the finalizer entry changed, invariant 3);
+  - write `status.attachment` of a Volume a Machine bound to it uses;
+  - create CertificateSigningRequests and read one it created.
+
+  Reads of Machines are open to a Node because a list cannot be filtered by Node.
+- **Escalation.** A caller creates or updates a ClusterRole only if it holds every permission the role grants, and a ClusterRoleBinding only if it holds every permission of the role it names. The Node authorizer's permissions do not count.
+
+### RBAC
+
+The group `rbac.gaon.garam.sh/v1alpha1` has the root `/apis/rbac.gaon.garam.sh/v1alpha1`. Both kinds have `apiVersion`, `kind` and `metadata`, and no `spec` or `status`; they are cluster-scoped.
+
+- **`ClusterRole`:** `rules`, a list; each rule has non-empty `apiGroups`, `resources` and `verbs`, lists of names. A resource is `machines` or a subresource `machines/status`; `*` as a whole name matches every value, and a name with `*` inside it is not a wildcard. The verbs are `get`, `list`, `watch`, `create`, `update`, `delete` and `*`; any other verb is `Invalid`. A role with no rules is valid and grants nothing.
+- **`ClusterRoleBinding`:** `roleRef` (`kind` `ClusterRole` and `name`) and `subjects`, each with `kind` `User` or `Group` and a `name`. An empty `roleRef`, another kind and an unknown subject kind are `Invalid`.
+- **Bootstrap roles.** In `RBAC` mode the API server creates each of these that is missing at start and never overwrites one, with a binding of each to a group, all in the group `compute.gaon.garam.sh` unless said:
+
+  | Role (group bound) | Rules |
+  |---|---|
+  | `gaon:scheduler` (`gaon:schedulers`) | `machines`, `nodes`: `get`, `list`, `watch`; `machines/binding`: `create`; `machines/status`: `update` |
+  | `gaon:controllers` (`gaon:controllers`) | `machines`, `nodes`, `leases`, `certificatesigningrequests`: `get`, `list`, `watch`; `machines`: `create`, `update`; `machines/status`, `nodes/status`, `volumes/status`, `certificatesigningrequests/status`: `update` |
+  | `gaon:admin` (`gaon:admins`) | `*` on `*` for every API group |
+
+- The types are in `lib/api/`: `ClusterRole`, `PolicyRule`, `ClusterRoleBinding`, `RoleRef` and `Subject`.
+
 Wake, exec, file API and console are data-plane features and are not recorded in the Store.
 
 ### Watch
@@ -165,9 +211,9 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 - A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required.
 - Each line of the stream is one JSON event with a `type` and an `object`.
 - Event types, PascalCase as every enum is:
-  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Node, a Lease or a CertificateSigningRequest) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
+  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Node, a Lease, a CertificateSigningRequest, a ClusterRole or a ClusterRoleBinding) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
   - `Error` carries the error object, and is the last event of its stream.
-- The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422, `Expired` 410, `Unauthorized` 401 and `Forbidden` 403. `Unauthorized` is a request with no client certificate and a missing or invalid bearer token; `Forbidden` is a valid token on any request other than creating a CertificateSigningRequest or reading one it created.
+- The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422, `Expired` 410, `Unauthorized` 401 and `Forbidden` 403. `Unauthorized` is a request with no client certificate and a missing or invalid bearer token; `Forbidden` is a valid token on any request other than creating a CertificateSigningRequest or reading one it created, and, in the `RBAC` mode, a request by certificate that neither the Node authorizer nor a bound role allows (§Authorization).
 - An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
 - The types are in `lib/api/`: `WatchEvent`, `EventType`, `APIError` and `Reason`.
 
@@ -175,18 +221,19 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 
 - Boundary, one-way dependencies and the fencing obligation: [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md).
 - Writers, Lease, watch, OnDemand, group, transport, naming: [ADR 0003](./adr/0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md).
+- Authorization, the `rbac` group, the Node authorizer and the bootstrap roles: [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md), which amends ADR 0005, Decision 4.
 - Bearer-token access and the CertificateSigningRequest: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), which amends ADR 0005.
 - How `resourceVersion`, compare-and-swap and watch map onto the Store: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
 - The Lease validity is measured by the observer because a renew time written by one machine cannot be compared with another machine's clock, which can be stepped.
 
 ## Open questions
 
-- **Authorization:** which identity may write which section. The API server authenticates callers (see Transport) and lets any authenticated caller write any path.
 - **Namespace in the path:** whether the paths carry the namespace and in what form.
 - **Admitting a Node:** whether anyone besides a user may set `spec.admitted`.
 - **Unacknowledged renewals:** how the Node Agent bounds the expiry of an mvmd renewal whose acknowledgement never arrived; left to the Node Agent's document.
 - **Data-plane route:** how exec, file and console traffic reaches a node.
 - **Numbers:** measuring the provisional values in §Lease and fencing, the restart backoff and the `lastActiveTime` minimum interval (Discussion #2 section 6 item 13).
 - **Store growth and compaction interval:** [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
-- **Placement of other core resources** (Namespace, roles, resource definitions) in an API group, and the extension resources' schemas.
+- **Placement of other core resources** (Namespace, resource definitions) in an API group, and the extension resources' schemas.
+- **Namespaced roles:** `Role` and `RoleBinding` wait for the namespace decision above; only the cluster-scoped kinds exist.
 - **Out of the contract by decision:** Discussion #2 section 6 items 5, 6 and 12 (tenancy, the immediate-bind default, deployment features).

@@ -46,7 +46,7 @@ type Attachment struct {
 
 // Validate checks the identity of v.
 func (v *Volume) Validate() error {
-	return validateIdentity(v.TypeMeta, KindVolume, v.Metadata)
+	return validateIdentity(v.TypeMeta, GroupVersion, KindVolume, v.Metadata)
 }
 
 // ValidateStatus checks that the phase of v's status is a known one.

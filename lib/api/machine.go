@@ -111,7 +111,7 @@ type Binding struct {
 // Validate checks the identity and the spec of m, the section a user or a
 // controller writes.
 func (m *Machine) Validate() error {
-	if err := validateIdentity(m.TypeMeta, KindMachine, m.Metadata); err != nil {
+	if err := validateIdentity(m.TypeMeta, GroupVersion, KindMachine, m.Metadata); err != nil {
 		return err
 	}
 	switch m.Spec.RunStrategy {

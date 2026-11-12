@@ -62,6 +62,18 @@ func newMemoryServer(t *testing.T) (*memoryServer, *api.Client) {
 	mux.HandleFunc("GET /certificatesigningrequests", listOrWatch(s, "certificatesigningrequests/", api.KindCertificateSigningRequest, func(items []api.CertificateSigningRequest, rv api.ResourceVersion) any {
 		return &api.CertificateSigningRequestList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindCertificateSigningRequestList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
 	}))
+	mux.HandleFunc("PUT /clusterroles/{name}", putValidated(s, "clusterroles/", api.KindClusterRole, func(r *api.ClusterRole) (*api.ObjectMeta, error) { return &r.Metadata, r.Validate() }))
+	mux.HandleFunc("DELETE /clusterroles/{name}", deleteObject[api.ClusterRole](s, "clusterroles/", api.KindClusterRole, func(r *api.ClusterRole) *api.ObjectMeta { return &r.Metadata }))
+	mux.HandleFunc("GET /clusterroles/{name}", getObject[api.ClusterRole](s, "clusterroles/"))
+	mux.HandleFunc("GET /clusterroles", listOrWatch(s, "clusterroles/", api.KindClusterRole, func(items []api.ClusterRole, rv api.ResourceVersion) any {
+		return &api.ClusterRoleList{TypeMeta: api.TypeMeta{APIVersion: api.RBACGroupVersion, Kind: api.KindClusterRoleList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
+	mux.HandleFunc("PUT /clusterrolebindings/{name}", putValidated(s, "clusterrolebindings/", api.KindClusterRoleBinding, func(b *api.ClusterRoleBinding) (*api.ObjectMeta, error) { return &b.Metadata, b.Validate() }))
+	mux.HandleFunc("DELETE /clusterrolebindings/{name}", deleteObject[api.ClusterRoleBinding](s, "clusterrolebindings/", api.KindClusterRoleBinding, func(b *api.ClusterRoleBinding) *api.ObjectMeta { return &b.Metadata }))
+	mux.HandleFunc("GET /clusterrolebindings/{name}", getObject[api.ClusterRoleBinding](s, "clusterrolebindings/"))
+	mux.HandleFunc("GET /clusterrolebindings", listOrWatch(s, "clusterrolebindings/", api.KindClusterRoleBinding, func(items []api.ClusterRoleBinding, rv api.ResourceVersion) any {
+		return &api.ClusterRoleBindingList{TypeMeta: api.TypeMeta{APIVersion: api.RBACGroupVersion, Kind: api.KindClusterRoleBindingList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return s, api.NewClient(ts.URL, ts.Client())
@@ -226,6 +238,61 @@ func (s *memoryServer) deleteMachine(w http.ResponseWriter, r *http.Request) {
 	m.Metadata.ResourceVersion = api.ResourceVersion(strconv.FormatInt(s.rev, 10))
 	record(s, api.KindMachine, &m, api.EventDeleted)
 	writeJSON(w, http.StatusOK, &m)
+}
+
+// putValidated answers PUT of an object stored under prefix, with the write
+// rule of every PUT: an empty version creates, a version is a compare-and-swap.
+// check returns the object's metadata and its validation error.
+func putValidated[T any](s *memoryServer, prefix, kind string, check func(*T) (*api.ObjectMeta, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var obj T
+		if !decodeBody(w, r, &obj) {
+			return
+		}
+		meta, err := check(&obj)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if !s.nameMatches(w, r, meta.Name) {
+			return
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		key := prefix + meta.Name
+		old, found := load[T](s, key)
+		oldMeta, _ := check(&old)
+		if err := s.checkVersion(found, oldMeta.ResourceVersion, meta.ResourceVersion, meta.Name); err != nil {
+			writeError(w, err)
+			return
+		}
+		t := api.EventAdded
+		if found {
+			t = api.EventModified
+		}
+		store(s, w, key, kind, meta, &obj, t)
+	}
+}
+
+// deleteObject answers DELETE of an object stored under prefix, at the
+// version in the query, and logs a Deleted event with its last state.
+func deleteObject[T any](s *memoryServer, prefix, kind string, meta func(*T) *api.ObjectMeta) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		obj, found := load[T](s, prefix+name)
+		m := meta(&obj)
+		if err := s.requireVersion(found, m.ResourceVersion, api.ResourceVersion(r.URL.Query().Get("resourceVersion")), name); err != nil {
+			writeError(w, err)
+			return
+		}
+		delete(s.objects, prefix+name)
+		s.rev++
+		m.ResourceVersion = api.ResourceVersion(strconv.FormatInt(s.rev, 10))
+		record(s, kind, &obj, api.EventDeleted)
+		writeJSON(w, http.StatusOK, &obj)
+	}
 }
 
 // getObject answers GET of one object stored under prefix.

@@ -54,7 +54,7 @@ type NodeStatus struct {
 
 // Validate checks the identity of n.
 func (n *Node) Validate() error {
-	return validateIdentity(n.TypeMeta, KindNode, n.Metadata)
+	return validateIdentity(n.TypeMeta, GroupVersion, KindNode, n.Metadata)
 }
 
 // ValidateStatus checks that n's status names a known state and that each of

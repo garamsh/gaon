@@ -177,6 +177,72 @@ func (c *Client) WatchCertificateSigningRequests(ctx context.Context, rv Resourc
 	return watch[CertificateSigningRequest](ctx, c, "/certificatesigningrequests", KindCertificateSigningRequest, rv)
 }
 
+// PutClusterRole creates o, or changes it when o carries the ResourceVersion it was
+// read at (PUT /clusterroles/{name}). Call it on a client whose root is the RBAC
+// group's.
+func (c *Client) PutClusterRole(ctx context.Context, o *ClusterRole) (*ClusterRole, error) {
+	return put(ctx, c, "/clusterroles/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteClusterRole removes the named ClusterRole, if it is still at version rv
+// (DELETE /clusterroles/{name}).
+func (c *Client) DeleteClusterRole(ctx context.Context, name string, rv ResourceVersion) (*ClusterRole, error) {
+	if rv == "" {
+		return nil, errors.New("delete clusterroles: resource version is empty")
+	}
+	return call[ClusterRole](ctx, c, http.MethodDelete, "/clusterroles/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetClusterRole returns the named ClusterRole (GET /clusterroles/{name}).
+func (c *Client) GetClusterRole(ctx context.Context, name string) (*ClusterRole, error) {
+	return call[ClusterRole](ctx, c, http.MethodGet, "/clusterroles/"+url.PathEscape(name), nil, nil)
+}
+
+// ListClusterRoles returns every ClusterRole and the version to watch from
+// (GET /clusterroles).
+func (c *Client) ListClusterRoles(ctx context.Context) (*ClusterRoleList, error) {
+	return call[ClusterRoleList](ctx, c, http.MethodGet, "/clusterroles", nil, nil)
+}
+
+// WatchClusterRoles streams the changes made after version rv
+// (GET /clusterroles?watch=true), as WatchMachines does.
+func (c *Client) WatchClusterRoles(ctx context.Context, rv ResourceVersion) (*Watch[ClusterRole], error) {
+	return watch[ClusterRole](ctx, c, "/clusterroles", KindClusterRole, rv)
+}
+
+// PutClusterRoleBinding creates o, or changes it when o carries the ResourceVersion it was
+// read at (PUT /clusterrolebindings/{name}). Call it on a client whose root is the RBAC
+// group's.
+func (c *Client) PutClusterRoleBinding(ctx context.Context, o *ClusterRoleBinding) (*ClusterRoleBinding, error) {
+	return put(ctx, c, "/clusterrolebindings/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteClusterRoleBinding removes the named ClusterRoleBinding, if it is still at version rv
+// (DELETE /clusterrolebindings/{name}).
+func (c *Client) DeleteClusterRoleBinding(ctx context.Context, name string, rv ResourceVersion) (*ClusterRoleBinding, error) {
+	if rv == "" {
+		return nil, errors.New("delete clusterrolebindings: resource version is empty")
+	}
+	return call[ClusterRoleBinding](ctx, c, http.MethodDelete, "/clusterrolebindings/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetClusterRoleBinding returns the named ClusterRoleBinding (GET /clusterrolebindings/{name}).
+func (c *Client) GetClusterRoleBinding(ctx context.Context, name string) (*ClusterRoleBinding, error) {
+	return call[ClusterRoleBinding](ctx, c, http.MethodGet, "/clusterrolebindings/"+url.PathEscape(name), nil, nil)
+}
+
+// ListClusterRoleBindings returns every ClusterRoleBinding and the version to watch from
+// (GET /clusterrolebindings).
+func (c *Client) ListClusterRoleBindings(ctx context.Context) (*ClusterRoleBindingList, error) {
+	return call[ClusterRoleBindingList](ctx, c, http.MethodGet, "/clusterrolebindings", nil, nil)
+}
+
+// WatchClusterRoleBindings streams the changes made after version rv
+// (GET /clusterrolebindings?watch=true), as WatchMachines does.
+func (c *Client) WatchClusterRoleBindings(ctx context.Context, rv ResourceVersion) (*Watch[ClusterRoleBinding], error) {
+	return watch[ClusterRoleBinding](ctx, c, "/clusterrolebindings", KindClusterRoleBinding, rv)
+}
+
 func watch[T any](ctx context.Context, c *Client, path, kind string, rv ResourceVersion) (*Watch[T], error) {
 	if rv == "" {
 		return nil, fmt.Errorf("watch %s: resource version is empty", path)

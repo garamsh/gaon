@@ -33,5 +33,5 @@ type LeaseSpec struct {
 
 // Validate checks the identity of l.
 func (l *Lease) Validate() error {
-	return validateIdentity(l.TypeMeta, KindLease, l.Metadata)
+	return validateIdentity(l.TypeMeta, GroupVersion, KindLease, l.Metadata)
 }

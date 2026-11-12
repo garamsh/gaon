@@ -48,7 +48,7 @@ type CertificateSigningRequestStatus struct {
 // Validate checks the identity of r and that its request is a PEM block of
 // type CERTIFICATE REQUEST.
 func (r *CertificateSigningRequest) Validate() error {
-	if err := validateIdentity(r.TypeMeta, KindCertificateSigningRequest, r.Metadata); err != nil {
+	if err := validateIdentity(r.TypeMeta, GroupVersion, KindCertificateSigningRequest, r.Metadata); err != nil {
 		return err
 	}
 	block, _ := pem.Decode([]byte(r.Spec.Request))

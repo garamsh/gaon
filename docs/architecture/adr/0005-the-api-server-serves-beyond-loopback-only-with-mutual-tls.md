@@ -1,6 +1,6 @@
 # ADR 0005: The API server serves beyond loopback only with mutual TLS
 
-> Status: amended by ADR 0007
+> Status: amended by ADR 0007 and ADR 0008 (Decision 4)
 > Date: 2026-11-11
 
 Drafted for garamsh/gaon#51, under goal garamsh/gaon#49 and #48. The decisions are the project owner's, recorded in #49 §Decisions. The server flags and the TLS floor are the PM's, taken under #49's grant and recorded on #51.
