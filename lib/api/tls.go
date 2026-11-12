@@ -42,6 +42,26 @@ func NewTLSClient(caFile, certFile, keyFile string) (*http.Client, error) {
 	}}, nil
 }
 
+// NewTLSClientFunc returns an http.Client that speaks mutual TLS 1.3 like
+// NewTLSClient, but takes the client certificate from getCert at each
+// handshake, so a certificate that changes is presented by the connections made
+// after the change. A connection already open keeps the certificate it was made
+// with. getCert may return an empty certificate, which presents none.
+func NewTLSClientFunc(caFile string, getCert func(*tls.CertificateRequestInfo) (*tls.Certificate, error)) (*http.Client, error) {
+	roots, err := loadRoots(caFile)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion:           tls.VersionTLS13,
+			RootCAs:              roots,
+			GetClientCertificate: getCert,
+		},
+		ForceAttemptHTTP2: true,
+	}}, nil
+}
+
 // NewServerTLSClient returns an http.Client that speaks TLS 1.3 and presents no
 // certificate: it trusts the certificates in caFile and no other root. It is
 // the client of a caller that holds only a bearer token (WithBearerToken). The

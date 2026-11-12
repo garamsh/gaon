@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -191,6 +192,89 @@ func TestNewTLSClient_TrustsOnlyTheCAFile(t *testing.T) {
 	require.NoError(t, err)
 	_, err = get(c, ts.URL)
 	assert.Error(t, err)
+}
+
+// seenServer is a mutual TLS server answering the CN of the client certificate
+// it was given.
+func seenServer(t *testing.T, ca *testCA) *httptest.Server {
+	t.Helper()
+	certPEM, keyPEM := ca.issue(t, "server")
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+	clients := x509.NewCertPool()
+	clients.AddCert(ca.cert)
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cn := "none"
+		if len(r.TLS.PeerCertificates) > 0 {
+			cn = r.TLS.PeerCertificates[0].Subject.CommonName
+		}
+		_, _ = io.WriteString(w, cn)
+	}))
+	ts.TLS = &tls.Config{Certificates: []tls.Certificate{pair}, ClientAuth: tls.VerifyClientCertIfGiven, ClientCAs: clients}
+	ts.StartTLS()
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestNewTLSClientFunc_PresentsTheCertificateTheCallbackReturnsAtEachHandshake(t *testing.T) {
+	ca := newTestCA(t, "ca")
+	ts := seenServer(t, ca)
+	pairFor := func(cn string) *tls.Certificate {
+		certPEM, keyPEM := ca.issue(t, cn)
+		pair, err := tls.X509KeyPair(certPEM, keyPEM)
+		require.NoError(t, err)
+		return &pair
+	}
+	var mu sync.Mutex
+	current := &tls.Certificate{}
+	f := writeFiles(t, ca.pem, nil, nil)
+	c, err := api.NewTLSClientFunc(f.ca, func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return current, nil
+	})
+	require.NoError(t, err)
+	reconnect := func() { c.Transport.(*http.Transport).CloseIdleConnections() }
+	set := func(p *tls.Certificate) {
+		mu.Lock()
+		defer mu.Unlock()
+		current = p
+		reconnect()
+	}
+
+	body, err := get(c, ts.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "none", body, "an empty certificate presents none")
+
+	set(pairFor("first"))
+	body, err = get(c, ts.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "first", body)
+
+	set(pairFor("second"))
+	body, err = get(c, ts.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "second", body, "a new connection presents the swapped certificate")
+}
+
+func TestNewTLSClientFunc_RefusesTLS12AndACAFileItCannotUse(t *testing.T) {
+	ca := newTestCA(t, "ca")
+	f := writeFiles(t, ca.pem, nil, nil)
+	noCert := writeFiles(t, []byte("not a certificate\n"), nil, nil)
+	certPEM, keyPEM := ca.issue(t, "client")
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	require.NoError(t, err)
+	present := func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return &pair, nil }
+
+	c, err := api.NewTLSClientFunc(f.ca, present)
+	require.NoError(t, err)
+	_, err = get(c, mtlsServer(t, ca, 0).URL)
+	require.NoError(t, err, "control: a current server is reached with the pair")
+	_, err = get(c, mtlsServer(t, ca, tls.VersionTLS12).URL)
+	assert.Error(t, err, "a TLS 1.2 server is refused although the pair is valid")
+
+	_, err = api.NewTLSClientFunc(noCert.ca, present)
+	assert.ErrorContains(t, err, noCert.ca)
 }
 
 func TestNewTLSClient_RefusesTLS12(t *testing.T) {

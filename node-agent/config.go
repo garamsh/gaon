@@ -27,6 +27,9 @@ const (
 	EnvTLSCert        = "GAON_TLS_CERT"
 	EnvTLSKey         = "GAON_TLS_KEY"
 
+	EnvBootstrapTokenFile = "GAON_BOOTSTRAP_TOKEN_FILE"
+	EnvCertDir            = "GAON_CERT_DIR"
+
 	EnvRestartBackoff    = "GAON_RESTART_BACKOFF"
 	EnvRestartBackoffMax = "GAON_RESTART_BACKOFF_MAX"
 	EnvRestartResetAfter = "GAON_RESTART_RESET_AFTER"
@@ -38,8 +41,14 @@ type Config struct {
 	// group and version, for example http://127.0.0.1:8080/apis/compute.gaon.garam.sh/v1alpha1.
 	APIServer string
 	// HTTPClient reaches APIServer: mutual TLS when the three --tls flags
-	// are given, plain HTTP when none is.
+	// are given, plain HTTP when none is. It is nil when CertDir is set.
 	HTTPClient *http.Client
+	// CertDir, when set, is where the agent keeps the key and certificate it
+	// reaches APIServer with, trusting only the CAs in TLSCA. BootstrapToken is
+	// the token it asks for a first certificate with, empty when it has none.
+	CertDir        string
+	TLSCA          string
+	BootstrapToken string
 	// NodeName names the Node and the Lease.
 	NodeName string
 	// MvmdSocket is the path of mvmd's runtime API Unix socket.
@@ -100,6 +109,9 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	str(&tlsFiles.CA, "tls-ca", EnvTLSCA, "file of the CA certificates the API server's certificate must chain to")
 	str(&tlsFiles.Cert, "tls-cert", EnvTLSCert, "file of the client certificate presented to the API server")
 	str(&tlsFiles.Key, "tls-key", EnvTLSKey, "file of the key of --tls-cert")
+	var tokenFile string
+	str(&tokenFile, "bootstrap-token-file", EnvBootstrapTokenFile, "file of the bootstrap token the agent asks for its client certificate with")
+	str(&c.CertDir, "cert-dir", EnvCertDir, "directory where the agent keeps its key and client certificate")
 	str(&c.NodeName, "node-name", EnvNodeName, "name of this node's Node and Lease")
 	str(&c.MvmdSocket, "mvmd-socket", EnvMvmdSocket, "path of mvmd's runtime API Unix socket")
 	dur(&c.Liveness.Delta, "delta", EnvDelta, defaultDelta, "δ, how long a Machine can run past mvmd's recorded deadline expiry")
@@ -135,6 +147,14 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	}
 	if err := c.Liveness.Validate(); err != nil {
 		return Config{}, err
+	}
+	if tokenFile != "" || c.CertDir != "" {
+		token, err := bootstrapToken(tokenFile, c.CertDir, tlsFiles)
+		if err != nil {
+			return Config{}, err
+		}
+		c.TLSCA, c.BootstrapToken = tlsFiles.CA, token
+		return c, nil
 	}
 	var err error
 	if c.HTTPClient, err = tlsFiles.Client(); err != nil {

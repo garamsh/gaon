@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/gaon/node-agent/internal/liveness"
 	"github.com/garamsh/gaon/node-agent/internal/machines"
@@ -18,8 +17,9 @@ import (
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
-// Run connects to mvmd, then runs the agent until ctx ends. It returns an
-// error only when it cannot start.
+// Run connects to mvmd and, when the agent keeps its own client certificate,
+// gets it, then runs the agent until ctx ends. It returns an error only when
+// it cannot start.
 func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) error {
 	conn, err := runtimeapi.Dial(ctx, cfg.MvmdSocket)
 	if err != nil {
@@ -27,7 +27,13 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 	}
 	defer func() { _ = conn.Close() }()
 	runtime := v1alpha2.NewRuntimeServiceClient(conn)
-	client := api.NewClient(cfg.APIServer, cfg.HTTPClient)
+	client, renewCertificate, err := connect(ctx, cfg, clk, log)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
 
 	nodes := node.NewService(cfg.NodeName, client, runtime, clk, log)
 	live := liveness.NewService(cfg.NodeName, cfg.Liveness, client, runtime, clk, log)
@@ -40,12 +46,16 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 		ReadTimeout:       cfg.Liveness.RPCTimeout,
 	}, client, runtime, clk, log)
 
-	var wg sync.WaitGroup
-	for _, run := range []func(context.Context){
+	loops := []func(context.Context){
 		live.Run,
 		func(ctx context.Context) { nodes.Run(ctx, cfg.ResyncPeriod) },
 		runs.Run,
-	} {
+	}
+	if renewCertificate != nil {
+		loops = append(loops, renewCertificate)
+	}
+	var wg sync.WaitGroup
+	for _, run := range loops {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
