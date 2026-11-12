@@ -25,7 +25,7 @@ type traceKey struct{}
 // newHandler serves the paths of resource-api.md §Paths under root over svc,
 // and answers NotFound to any other path. It is the one place that maps a
 // failure to an HTTP status.
-func newHandler(svc resourceapi.Service, log *slog.Logger) http.Handler {
+func newHandler(svc resourceapi.Service, tokens tokenSet, log *slog.Logger) http.Handler {
 	h := &handler{log: log}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -45,8 +45,18 @@ func newHandler(svc resourceapi.Service, log *slog.Logger) http.Handler {
 	mux.HandleFunc("PUT "+root+"/leases/{name}", put(h, svc.PutLease))
 	mux.HandleFunc("GET "+root+"/leases/{name}", get(h, svc.GetLease))
 	mux.HandleFunc("GET "+root+"/leases", listOrWatch(h, svc.ListLeases, svc.WatchLeases))
-	return h.recoverPanics(mux)
+	mux.HandleFunc(createCSRRoute, h.createCertificateSigningRequest(svc))
+	mux.HandleFunc("PUT "+root+"/certificatesigningrequests/{name}/status", put(h, svc.PutCertificateSigningRequestStatus))
+	mux.HandleFunc(getCSRRoute, h.getCertificateSigningRequest(svc))
+	mux.HandleFunc("GET "+root+"/certificatesigningrequests", listOrWatch(h, svc.ListCertificateSigningRequests, svc.WatchCertificateSigningRequests))
+	return h.recoverPanics(h.authenticate(mux, tokens))
 }
+
+// The routes a bearer-token holder may reach.
+const (
+	createCSRRoute = "PUT " + root + "/certificatesigningrequests/{name}"
+	getCSRRoute    = "GET " + root + "/certificatesigningrequests/{name}"
+)
 
 type handler struct {
 	log *slog.Logger
@@ -97,6 +107,31 @@ func (h *handler) bind(svc resourceapi.Service) http.HandlerFunc {
 			return
 		}
 		out, err := svc.BindMachine(r.Context(), r.PathValue("name"), b)
+		h.respond(w, r, out, err)
+	}
+}
+
+// createCertificateSigningRequest creates a request whose spec.username is the
+// caller's identity.
+func (h *handler) createCertificateSigningRequest(svc resourceapi.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in api.CertificateSigningRequest
+		if !h.decode(w, r, &in) {
+			return
+		}
+		out, err := svc.PutCertificateSigningRequest(r.Context(), r.PathValue("name"), callerOf(r).name, &in)
+		h.respond(w, r, out, err)
+	}
+}
+
+// getCertificateSigningRequest answers a token holder only for a request that
+// holder created.
+func (h *handler) getCertificateSigningRequest(svc resourceapi.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		out, err := svc.GetCertificateSigningRequest(r.Context(), r.PathValue("name"))
+		if id := callerOf(r); err == nil && id.token && out.Spec.Username != id.name {
+			out, err = nil, api.NewAPIError(api.ReasonForbidden, "the certificatesigningrequest was created by another identity")
+		}
 		h.respond(w, r, out, err)
 	}
 }

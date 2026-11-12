@@ -17,10 +17,14 @@ import (
 const shutdownTimeout = 5 * time.Second
 
 // Run serves the API on ln over the etcd cell of cfg until ctx ends. It
-// serves mutual TLS where cfg names the TLS files, and without them refuses a
+// serves TLS where cfg names the TLS files, and without them refuses a
 // listener that is not on a loopback address.
 func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) error {
 	tlsCfg, err := cfg.serverTLS()
+	if err != nil {
+		return err
+	}
+	tokens, err := cfg.bootstrapTokens()
 	if err != nil {
 		return err
 	}
@@ -33,7 +37,7 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 	}
 	defer st.Close()
 	srv := &http.Server{
-		Handler:           newHandler(resourceapi.NewService(st, time.Now), log),
+		Handler:           newHandler(resourceapi.NewService(st, time.Now), tokens, log),
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig:         tlsCfg,

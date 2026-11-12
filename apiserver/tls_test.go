@@ -88,18 +88,31 @@ type tlsServer struct {
 	addr     string
 	serverCA *authority
 	clientCA *authority
+	// caFile holds the server CA, for the clients of lib/api.
+	caFile string
 }
 
 func newTLSServer(t *testing.T) *tlsServer {
 	t.Helper()
+	return newTokenServer(t, "")
+}
+
+// newTokenServer is newTLSServer with a bootstrap token file of the given
+// content, or none where it is empty.
+func newTokenServer(t *testing.T, tokenFile string) *tlsServer {
+	t.Helper()
 	s := &tlsServer{serverCA: newAuthority(t, "server ca"), clientCA: newAuthority(t, "client ca")}
 	certPEM, keyPEM := s.serverCA.issue(t, "gaon-apiserver")
+	s.caFile = writeFile(t, "server-ca.pem", s.serverCA.pem)
 	cfg := apiserver.Config{
 		Endpoints:   []string{startEtcd(t)},
 		DialTimeout: 5 * time.Second,
 		TLSClientCA: writeFile(t, "client-ca.pem", s.clientCA.pem),
 		TLSCert:     writeFile(t, "server.pem", certPEM),
 		TLSKey:      writeFile(t, "server-key.pem", keyPEM),
+	}
+	if tokenFile != "" {
+		cfg.BootstrapTokenFile = writeFile(t, "tokens", []byte(tokenFile))
 	}
 	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	require.NoError(t, err)
@@ -155,15 +168,16 @@ func TestRun_ServesACallerWithACertificateTheClientCASigned(t *testing.T) {
 	assert.Equal(t, http.StatusOK, status)
 }
 
-func TestRun_RefusesACallerWithoutACertificate(t *testing.T) {
+func TestRun_AnswersUnauthorizedToACallerWithoutACertificateOrToken(t *testing.T) {
 	s := newTLSServer(t)
 
-	_, err := s.get(t, nil, 0)
-	status, controlErr := s.get(t, clientCert(t, s.clientCA, "node-1"), 0)
+	status, err := s.get(t, nil, 0)
+	controlStatus, controlErr := s.get(t, clientCert(t, s.clientCA, "node-1"), 0)
 
-	assert.Error(t, err)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, status)
 	require.NoError(t, controlErr, "control: the same server serves a caller with a valid certificate")
-	assert.Equal(t, http.StatusOK, status)
+	assert.Equal(t, http.StatusOK, controlStatus)
 }
 
 func TestRun_RefusesACallerWithACertificateFromAnotherCA(t *testing.T) {
