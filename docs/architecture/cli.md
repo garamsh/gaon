@@ -15,14 +15,29 @@ Basis: [resource-api.md](./resource-api.md) §Paths and the types of `lib/api/`.
 | `gaon get [-o table\|yaml\|json] KIND NAME` | Prints one resource. Default `table`. |
 | `gaon describe KIND NAME` | Prints one resource as labelled lines and its status conditions. |
 | `gaon delete KIND NAME` | Sets the `deletionTimestamp` of a resource, which the server removes at once if no finalizer holds it. |
+| `gaon config current-context` | Prints the name of the current context of the config file. |
+| `gaon config use-context NAME` | Sets the current context of the config file and writes the file. |
 
-- **Global flag:** `--server URL` is the group and version root of the compute group, `http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1`, in full; `GAON_SERVER` is its default. It comes before the command. With neither, the CLI exits with a usage error. The roots of the RBAC and apiextensions groups and of a registered kind's group are derived from it by replacing that suffix, [ADR 0015](./adr/0015-the-gaon-cli-derives-the-other-groups-roots-from-server-and-finds-a-registered-kinds-plural-in-the-established-definitions.md) §1. A `--server` without the suffix reaches the compute kinds only; a command that needs another group is a usage error before any request to it.
-- **TLS flags:** `--tls-ca`, `--tls-cert` and `--tls-key` come before the command, like `--server`, and have no environment variable. All three give a mutual TLS 1.3 client built by `lib/api/` that trusts only the CA file; none gives plain HTTP, for a loopback server. One or two, or a file that cannot be read or does not fit, end the CLI with a usage error naming what is missing, before any request.
+- **Global flag:** `--server URL` is the group and version root of the compute group, `http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1`, in full; `GAON_SERVER` is its default, and the current context of the config file is the next default, §Config file. It comes before the command. With none of the three, the CLI exits with a usage error. The roots of the RBAC and apiextensions groups and of a registered kind's group are derived from it by replacing that suffix, [ADR 0015](./adr/0015-the-gaon-cli-derives-the-other-groups-roots-from-server-and-finds-a-registered-kinds-plural-in-the-established-definitions.md) §1. A `--server` without the suffix reaches the compute kinds only; a command that needs another group is a usage error before any request to it.
+- **TLS flags:** `--tls-ca`, `--tls-cert` and `--tls-key` come before the command, like `--server`, and have no environment variable; each beats the same file of the config file's current context. All three give a mutual TLS 1.3 client built by `lib/api/` that trusts only the CA file; none gives plain HTTP, for a loopback server. One or two, or a file that cannot be read or does not fit, end the CLI with a usage error naming what is missing, before any request.
 - **Operands:** a command's flags may stand anywhere among its operands, before, between or after, as `-o` does in `gaon get machine web -o yaml`. A `--` ends the flags, and what follows it is an operand. A flag a command does not have is a usage error wherever it stands.
 - **`KIND`** is any name in §Kind names, matched without regard to case, or a name of a registered kind, §Registered kinds. An unknown kind is a usage error that lists the built-in kinds and the registered ones.
 - **No `list` command.** `get KIND` lists; `list` is an unknown command ([ADR 0014](./adr/0014-the-gaon-cli-reads-like-kubectl-get-lists-and-reads-describe-shows-a-kind-has-a-plural-and-a-short-name-and-list-is-removed.md)).
 - **Exit code:** 0 on success, 1 when a request or a check fails, 2 on a mistake in the command line.
 - **Output formats of `get`:** `table` prints the columns below, and is the default; `yaml` and `json` print the object, or the list object for `get KIND`, as the API returned it, with the API's field names. Any other value is a usage error, before any request. `describe` takes no `-o`.
+
+### Config file
+
+The CLI reads a YAML file of clusters, users and contexts, [ADR 0016](./adr/0016-the-gaon-cli-reads-its-server-and-credentials-from-a-config-file-of-clusters-users-and-contexts.md). The file's field names are `current-context`, `clusters[].cluster.server`, `clusters[].cluster.certificate-authority`, `users[].user.client-certificate`, `users[].user.client-key`, `contexts[].context.cluster` and `contexts[].context.user`, each list entry carrying a `name`.
+
+- **Where:** `--config FILE`, else `GAON_CONFIG`, else `.gaon/config` under the home directory. A file named by the flag or the variable must exist; the default may be absent, and then there is no file.
+- **A cluster's `server` is the compute root, as `--server` is**, so the other groups' roots are derived from it as from the flag. A context names one cluster and at most one user; the CA is the cluster's, the certificate and key the user's.
+- **Credentials are paths**, relative ones taken against the directory of the file. A user names both a certificate and a key or neither. The file holds no embedded data.
+- **Ranking:** `--server`, then `GAON_SERVER`, then the current context's cluster; each TLS flag, then the file's value for that file. The three TLS files together must still be all or none.
+- **The current context is always resolved**, so a `--server` does not hide a broken file.
+- **Refused as a usage error naming the file, before any request:** a named file that is missing, a file that is not YAML or has an unknown field, a repeated or empty name, a current context that names no context, a context that names no cluster or a cluster or user that is not defined, a cluster with no server, a user with one of its two files.
+- **`config use-context NAME`** refuses a name that is not a context and leaves the file as it was; writing the file drops its comments. Neither `config` command needs a server, and both need the file to exist.
+- **Credentials are never printed or logged.**
 
 ### Verbs by kind
 
@@ -102,9 +117,10 @@ An empty value prints as `-`.
 - The verbs follow the paths because the PM reading of issue 8 fixes "every resource kind in `lib/api/`" as every verb with a path in §Paths; a Node cannot be deleted because the contract has no path for it.
 - `get KIND` lists, and `list` is gone, because two verbs for one read is the difference from `kubectl get` the owner met; the reasons are in [ADR 0014](./adr/0014-the-gaon-cli-reads-like-kubectl-get-lists-and-reads-describe-shows-a-kind-has-a-plural-and-a-short-name-and-list-is-removed.md).
 - The other groups' roots are derived from `--server`, and a registered kind is found among the Established definitions, because the CLI has one address and `lib/api/` has no discovery; the alternatives are in [ADR 0015](./adr/0015-the-gaon-cli-derives-the-other-groups-roots-from-server-and-finds-a-registered-kinds-plural-in-the-established-definitions.md).
+- A cluster's `server` is the compute root, not a base address, so the file and `--server` hold one meaning of one word; the alternatives are in [ADR 0016](./adr/0016-the-gaon-cli-reads-its-server-and-credentials-from-a-config-file-of-clusters-users-and-contexts.md).
 - `apply` takes its version from the file first because a version the user read is the only basis on which a change by someone else since can be detected before the write, as `resource-api.md` §Common rules makes every write a compare-and-swap.
 
 ## Open questions
 
 - **Namespace:** the CLI sends no namespace, as the paths have none yet ([resource-api.md](./resource-api.md) §Open questions).
-- **Authentication, several clusters, output formats beyond `table`, `yaml` and `json`:** out of scope.
+- **A `--context` flag, embedded credential data, bearer tokens, output formats beyond `table`, `yaml` and `json`:** out of scope.

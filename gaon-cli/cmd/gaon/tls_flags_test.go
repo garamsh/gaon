@@ -15,7 +15,7 @@ func TestRun_ReachesTheServerOverMutualTLSWhenGivenTheThreeFiles(t *testing.T) {
 	args := append(append([]string{"--server", a.URL}, a.flags()...), "get", "machine")
 	var out, errOut bytes.Buffer
 
-	code := run(context.Background(), args, "", &out, &errOut)
+	code := run(context.Background(), args, environment{}, &out, &errOut)
 
 	assert.Equal(t, command.ExitOK, code, errOut.String())
 	assert.Equal(t, int32(1), a.requests.Load())
@@ -37,7 +37,7 @@ func TestRun_RefusesAPartialTLSSetBeforeAnyRequest(t *testing.T) {
 			args := append(append([]string{"--server", a.URL}, tt.tls...), "get", "machine")
 			var out, errOut bytes.Buffer
 
-			code := run(context.Background(), args, "", &out, &errOut)
+			code := run(context.Background(), args, environment{}, &out, &errOut)
 
 			assert.Equal(t, command.ExitUsage, code)
 			assert.Contains(t, errOut.String(), tt.missing)
@@ -46,6 +46,6 @@ func TestRun_RefusesAPartialTLSSetBeforeAnyRequest(t *testing.T) {
 	}
 	var out, errOut bytes.Buffer
 	args := append(append([]string{"--server", a.URL}, a.flags()...), "get", "machine")
-	code := run(context.Background(), args, "", &out, &errOut)
+	code := run(context.Background(), args, environment{}, &out, &errOut)
 	assert.Equal(t, command.ExitOK, code, "control: the three together are accepted")
 }

@@ -29,6 +29,12 @@ var usage = `usage:
   gaon [--server URL] get [-o table|yaml|json] KIND [NAME]
   gaon [--server URL] describe KIND NAME
   gaon [--server URL] delete KIND NAME
+  gaon config current-context
+  gaon config use-context NAME
+
+Global flags: --server URL, --config FILE, --tls-ca FILE, --tls-cert FILE, --tls-key FILE.
+The server and the TLS files default to those of the current context of the config
+file, which is --config, GAON_CONFIG or ~/.gaon/config; GAON_SERVER sets --server.
 
 URL is the compute group's root, http://<host>:<port>/apis/compute.gaon.garam.sh/v1alpha1.
 The roots of the other groups are derived from it.
@@ -48,7 +54,11 @@ func usagef(format string, args ...any) error {
 // Run executes one gaon command, args being the command line after the
 // global flags, and returns the process exit code.
 func Run(ctx context.Context, server string, httpClient *http.Client, args []string, stdout, stderr io.Writer) int {
-	err := run(ctx, &cluster{server: server, http: httpClient}, args, stdout)
+	return exit(run(ctx, &cluster{server: server, http: httpClient}, args, stdout), stdout, stderr)
+}
+
+// exit prints what err says and returns the exit code it stands for.
+func exit(err error, stdout, stderr io.Writer) int {
 	var u *usageError
 	switch {
 	case err == nil:
