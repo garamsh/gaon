@@ -17,4 +17,5 @@ use (
 	./scheduler
 	./storage-local
 	./tooling/e2e
+	./workloads
 )

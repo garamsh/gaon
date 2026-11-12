@@ -21,6 +21,7 @@ The units of milestone M1, each created by the pull request of the issue that ow
 - **`network-default/`**: the network plugin `default`, binary `gaon-network-default`. Issue 121.
 - **`storage-local/`**: the storage plugin `local`, binary `gaon-storage-local`. Issue 121.
 - **`gaon-cli/`**: the client CLI, binary `gaon`. Issue 8.
+- **`workloads/`**: the controller of the `Job` kind, a client of the public API with its own identity, binary `gaon-workloads`. Issue 146.
 - **`tooling/e2e/`**: the end-to-end test of M1 on QEMU nodes. Issue 9.
 
 The Gateway, the Cell Router and microvm and cluster management are in gaon's scope (Discussion #2 comments `discussioncomment-19466471` and `discussioncomment-19533418`, in garamsh/discussions) and have no unit planned yet.

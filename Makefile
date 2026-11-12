@@ -75,11 +75,13 @@ e2e:
 # run against embedded etcd and a test-served mvmd (docs/architecture/e2e.md).
 # The build tag keeps the test out of lint and test, so vet compiles it here.
 EXT_DIR ?= $(CURDIR)/build/e2e-extensions
+# The extension test also runs the workloads unit and applies its role with the CLI.
+EXT_SERVICES = $(GAON_SERVICES) gaon-workloads:./workloads/cmd/gaon-workloads gaon:./gaon-cli/cmd/gaon
 
 e2e-extensions:
 	rm -rf "$(EXT_DIR)"
 	mkdir -p "$(EXT_DIR)/services"
-	for s in $(GAON_SERVICES); do \
+	for s in $(EXT_SERVICES); do \
 		go build -o "$(EXT_DIR)/services/$${s%%:*}" "$${s#*:}"; \
 	done
 	cd tooling/e2e && go vet -tags extensions ./extensions
