@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -372,4 +373,24 @@ func TestNodeAndLeaseValidate(t *testing.T) {
 	assert.NoError(t, lease.Validate())
 	lease.Metadata.Name = ""
 	assert.ErrorIs(t, lease.Validate(), api.ErrInvalid)
+}
+
+func TestVolume_AttachmentIsWrittenAndReadUnderMicroVMName(t *testing.T) {
+	v := newVolume("data")
+	v.Status.Attachment = &api.Attachment{MicroVMName: "web", BindingEpoch: 3}
+
+	out, err := json.Marshal(v)
+	require.NoError(t, err)
+	var fields struct {
+		Status struct {
+			Attachment map[string]any `json:"attachment"`
+		} `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(out, &fields))
+	assert.Equal(t, map[string]any{"microvmName": "web", "bindingEpoch": float64(3)}, fields.Status.Attachment)
+
+	var back api.Volume
+	require.NoError(t, json.Unmarshal(out, &back))
+	require.NotNil(t, back.Status.Attachment, "control: the key written is the key read")
+	assert.Equal(t, api.Attachment{MicroVMName: "web", BindingEpoch: 3}, *back.Status.Attachment)
 }
