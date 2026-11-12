@@ -34,6 +34,12 @@ type Authorizer interface {
 	// AuthorizeRole allows c to write a ClusterRole with rules, or returns
 	// Forbidden where c does not already hold every permission they grant.
 	AuthorizeRole(ctx context.Context, c Caller, rules []api.PolicyRule) error
+	// AuthorizeMachineUpdate allows c to replace the stored Machine name
+	// with next where a role grants it update on machines, and otherwise,
+	// where the Node authorizer's grant is all it has, only where next
+	// differs from the stored Machine in the Node Agent's finalizer alone.
+	// It returns Forbidden for any other change.
+	AuthorizeMachineUpdate(ctx context.Context, c Caller, name string, next *api.Machine) error
 	// AuthorizeBinding allows c to write a ClusterRoleBinding of ref, or
 	// returns Forbidden where c does not hold every permission of the role,
 	// and Invalid where the role does not exist.
@@ -47,7 +53,10 @@ func AlwaysAllow() Authorizer { return alwaysAllow{} }
 
 func (alwaysAllow) Authorize(context.Context, Caller, Request) error              { return nil }
 func (alwaysAllow) AuthorizeRole(context.Context, Caller, []api.PolicyRule) error { return nil }
-func (alwaysAllow) AuthorizeBinding(context.Context, Caller, api.RoleRef) error   { return nil }
+func (alwaysAllow) AuthorizeMachineUpdate(context.Context, Caller, string, *api.Machine) error {
+	return nil
+}
+func (alwaysAllow) AuthorizeBinding(context.Context, Caller, api.RoleRef) error { return nil }
 
 func (r Request) String() string {
 	return string(r.Verb) + " " + r.qualified()

@@ -38,7 +38,7 @@ func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tok
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, api.NewAPIError(api.ReasonNotFound, "no such path"))
 	})
-	mux.HandleFunc("PUT "+root+"/machines/{name}", h.guard(api.Group, "machines", putVerb, put(h, svc.PutMachine)))
+	mux.HandleFunc("PUT "+root+"/machines/{name}", h.guard(api.Group, "machines", putVerb, h.putMachine(svc)))
 	mux.HandleFunc("POST "+root+"/machines/{name}/binding", h.guard(api.Group, "machines/binding", fixed(api.VerbCreate), h.bind(svc)))
 	mux.HandleFunc("PUT "+root+"/machines/{name}/status", h.guard(api.Group, "machines/status", fixed(api.VerbUpdate), put(h, svc.PutMachineStatus)))
 	mux.HandleFunc("DELETE "+root+"/machines/{name}", h.guard(api.Group, "machines", fixed(api.VerbDelete), deleteObject(h, svc.DeleteMachine)))
@@ -223,6 +223,26 @@ func deleteObject[T any](h *handler, call func(context.Context, string, api.Reso
 	return func(w http.ResponseWriter, r *http.Request) {
 		rv := api.ResourceVersion(r.URL.Query().Get("resourceVersion"))
 		out, err := call(r.Context(), r.PathValue("name"), rv)
+		h.respond(w, r, out, err)
+	}
+}
+
+// putMachine writes a Machine, and an update of one only as far as the
+// caller's grant reaches: a Node's grant is its finalizer.
+func (h *handler) putMachine(svc resourceapi.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in api.Machine
+		if !h.decode(w, r, &in) {
+			return
+		}
+		name := r.PathValue("name")
+		if in.Metadata.ResourceVersion != "" {
+			if err := h.az.AuthorizeMachineUpdate(r.Context(), callerOf(r).caller(), name, &in); err != nil {
+				h.fail(w, r, err)
+				return
+			}
+		}
+		out, err := svc.PutMachine(r.Context(), name, &in)
 		h.respond(w, r, out, err)
 	}
 }

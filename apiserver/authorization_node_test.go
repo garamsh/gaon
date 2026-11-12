@@ -118,7 +118,7 @@ func TestNodeAuthorizer_ANodeUpdatesOnlyAMachineBoundToItAndCreatesNone(t *testi
 	f := newNodeFixture(t)
 	m, err := f.admin.GetMachine(ctx(t), "m1")
 	require.NoError(t, err)
-	m.Metadata.Finalizers = []string{"gaon.garam.sh/node-1"}
+	m.Metadata.Finalizers = []string{nodeAgentFinalizer}
 
 	_, err = f.node2.PutMachine(ctx(t), m)
 	assert.ErrorIs(t, err, api.ErrForbidden)
@@ -137,6 +137,55 @@ func TestNodeAuthorizer_ANodeAttachesOnlyTheVolumesItsMachinesUse(t *testing.T) 
 	assert.ErrorIs(t, err, api.ErrForbidden, "a Volume that none of its Machines uses")
 	_, err = f.node1.PutVolumeStatus(ctx(t), attached(f.v1, "m1", 1))
 	assert.NoError(t, err, "control: the Volume its Machine mounts")
+}
+
+const nodeAgentFinalizer = "compute.gaon.garam.sh/node-agent"
+
+func TestNodeAuthorizer_ANodeChangesOnlyItsFinalizerOfAMachineBoundToIt(t *testing.T) {
+	f := newNodeFixture(t)
+	m, err := f.admin.GetMachine(ctx(t), "m1")
+	require.NoError(t, err)
+
+	retarget := *m
+	retarget.Spec.Image = "other-image"
+	_, err = f.node1.PutMachine(ctx(t), &retarget)
+	assert.ErrorIs(t, err, api.ErrForbidden, "a spec change")
+	other := *m
+	other.Metadata.Finalizers = []string{"example.com/other"}
+	_, err = f.node1.PutMachine(ctx(t), &other)
+	assert.ErrorIs(t, err, api.ErrForbidden, "a finalizer of another owner")
+	both := *m
+	both.Spec.Image = "other-image"
+	both.Metadata.Finalizers = []string{nodeAgentFinalizer}
+	_, err = f.node1.PutMachine(ctx(t), &both)
+	assert.ErrorIs(t, err, api.ErrForbidden, "its finalizer together with a spec change")
+
+	added := *m
+	added.Metadata.Finalizers = []string{nodeAgentFinalizer}
+	added.Status.Phase = api.MachineRunning
+	m, err = f.node1.PutMachine(ctx(t), &added)
+	require.NoError(t, err, "control: adding its finalizer")
+	removed := *m
+	removed.Metadata.Finalizers = nil
+	_, err = f.node1.PutMachine(ctx(t), &removed)
+	assert.NoError(t, err, "control: removing its finalizer")
+}
+
+func TestNodeAuthorizer_ARoleThatGrantsUpdateOnMachinesAllowsASpecChange(t *testing.T) {
+	f := newNodeFixture(t)
+	m, err := f.admin.GetMachine(ctx(t), "m1")
+	require.NoError(t, err)
+	m.Spec.IdleTimeoutSeconds = 30
+	_, err = f.node1.PutMachine(ctx(t), m)
+	require.ErrorIs(t, err, api.ErrForbidden)
+	_, adminRBAC := f.c.clients(t, f.addr, adminID)
+	_, err = adminRBAC.PutClusterRole(ctx(t), clusterRole("machine-writer", rule(api.Group, "machines", api.VerbUpdate)))
+	require.NoError(t, err)
+	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("machine-writer", "machine-writer", userSubject("node-1")))
+	require.NoError(t, err)
+
+	_, err = f.node1.PutMachine(ctx(t), m)
+	assert.NoError(t, err)
 }
 
 func TestNodeAuthorizer_ANodeReadsMachinesAndAStrangerDoesNot(t *testing.T) {
