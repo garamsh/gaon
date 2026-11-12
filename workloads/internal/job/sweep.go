@@ -11,15 +11,20 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// sweep reconciles every Job once. A failure of one Job is logged and does
-// not stop the others.
+// sweep reconciles every Job once, then every CronJob. A failure of one
+// object is logged and does not stop the others.
 func (s *service) sweep(ctx context.Context) {
 	jobs, err := s.jobs.List(ctx)
 	if err != nil {
 		s.log.Warn("list jobs", "error", err)
 		return
 	}
-	if len(jobs.Items) == 0 {
+	s.sweepJobs(ctx, jobs.Items)
+	s.sweepCronJobs(ctx, jobs.Items)
+}
+
+func (s *service) sweepJobs(ctx context.Context, jobs []api.CustomObject) {
+	if len(jobs) == 0 {
 		return
 	}
 	mvms, err := s.microvms.ListMicroVMs(ctx)
@@ -27,9 +32,9 @@ func (s *service) sweep(ctx context.Context) {
 		s.log.Warn("list microvms", "error", err)
 		return
 	}
-	for i := range jobs.Items {
-		if err := s.reconcile(ctx, &jobs.Items[i], mvms.Items); err != nil {
-			s.log.Warn("reconcile", "job", jobs.Items[i].Metadata.Name, "error", err)
+	for i := range jobs {
+		if err := s.reconcile(ctx, &jobs[i], mvms.Items); err != nil {
+			s.log.Warn("reconcile", "job", jobs[i].Metadata.Name, "error", err)
 		}
 	}
 }

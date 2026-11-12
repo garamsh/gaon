@@ -1,5 +1,6 @@
-// Package job serves the Job kind: a run-to-completion workload that runs
-// MicroVMs from a template until enough of them succeed.
+// Package job serves the workload kinds: the Job, a run-to-completion workload
+// that runs MicroVMs from a template until enough of them succeed, and the
+// CronJob, which creates a Job on a schedule.
 package job
 
 import (
@@ -65,24 +66,32 @@ func (s Status) finished() bool {
 	return false
 }
 
-// Definition returns the CustomResourceDefinition of the Job kind.
-func Definition() *api.CustomResourceDefinition {
+// jobSpecSchema is the schema of a Job's spec, which a CronJob's jobTemplate
+// shares.
+func jobSpecSchema() api.JSONSchemaProps {
 	one, zero := 1.0, 0.0
-	integer := func(desc string, min *float64) api.JSONSchemaProps {
-		return api.JSONSchemaProps{Type: api.SchemaInteger, Description: desc, Minimum: min}
-	}
-	spec := api.JSONSchemaProps{
+	return api.JSONSchemaProps{
 		Type:     api.SchemaObject,
 		Required: []string{"completions", "template"},
 		Properties: map[string]api.JSONSchemaProps{
-			"completions":  integer("MicroVMs that must succeed", &one),
-			"backoffLimit": integer("MicroVMs that may fail before the Job fails; zero when absent", &zero),
+			"completions":  integerSchema("MicroVMs that must succeed", &one),
+			"backoffLimit": integerSchema("MicroVMs that may fail before the Job fails; zero when absent", &zero),
 			"template": {
 				Type: api.SchemaObject, Description: "the spec of each MicroVM; runStrategy is forced to Once",
 				PreserveUnknownFields: true,
 			},
 		},
 	}
+}
+
+func integerSchema(desc string, min *float64) api.JSONSchemaProps {
+	return api.JSONSchemaProps{Type: api.SchemaInteger, Description: desc, Minimum: min}
+}
+
+// Definition returns the CustomResourceDefinition of the Job kind.
+func Definition() *api.CustomResourceDefinition {
+	zero := 0.0
+	spec := jobSpecSchema()
 	condition := api.JSONSchemaProps{
 		Type:     api.SchemaObject,
 		Required: []string{"type", "status"},
@@ -97,9 +106,9 @@ func Definition() *api.CustomResourceDefinition {
 	status := api.JSONSchemaProps{
 		Type: api.SchemaObject,
 		Properties: map[string]api.JSONSchemaProps{
-			"active":     integer("owned MicroVMs that have not ended", &zero),
-			"succeeded":  integer("owned MicroVMs that succeeded", &zero),
-			"failed":     integer("owned MicroVMs that failed", &zero),
+			"active":     integerSchema("owned MicroVMs that have not ended", &zero),
+			"succeeded":  integerSchema("owned MicroVMs that succeeded", &zero),
+			"failed":     integerSchema("owned MicroVMs that failed", &zero),
 			"conditions": {Type: api.SchemaArray, Items: &condition},
 		},
 	}

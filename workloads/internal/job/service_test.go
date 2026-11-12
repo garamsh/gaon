@@ -19,8 +19,13 @@ import (
 // first sweep has finished, with the clock that starts the next.
 func start(t *testing.T, f *fakeAPI) *fakeClock {
 	t.Helper()
-	clock := newFakeClock()
-	svc := job.NewService(f.definitionsClient(), f.jobsClient(), f.microvmsClient(), clock, job.Config{Interval: time.Second}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return startWith(t, f, newFakeClock())
+}
+
+// startWith is start with the clock given.
+func startWith(t *testing.T, f *fakeAPI, clock *fakeClock) *fakeClock {
+	t.Helper()
+	svc := job.NewService(f.definitionsClient(), f.jobsClient(), f.cronJobsClient(), f.microvmsClient(), clock, job.Config{Interval: time.Second}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- svc.Run(ctx) }()
@@ -60,12 +65,15 @@ func TestRun_RegistersTheDefinitionOnlyWhenItDiffers(t *testing.T) {
 	require.NotNil(t, d, "the service registers the Job kind")
 	assert.Equal(t, job.Group, d.Spec.Group)
 	assert.Equal(t, job.Kind, d.Spec.Names.Kind)
-	assert.Equal(t, 1, f.definitionWrites)
+	assert.Equal(t, 2, f.definitionWrites, "the Job and the CronJob definitions are written")
 	require.NoError(t, d.Validate(), "the registered definition is one the API server accepts")
+	cron := f.definition("cronjobs." + job.Group)
+	require.NotNil(t, cron, "the service registers the CronJob kind")
+	require.NoError(t, cron.Validate(), "the registered CronJob definition is one the API server accepts")
 
-	// The control: a second start finds the stored definition equal and writes nothing.
+	// The control: a second start finds the stored definitions equal and writes nothing.
 	start(t, f)
-	assert.Equal(t, 1, f.definitionWrites, "a matching definition is not rewritten")
+	assert.Equal(t, 2, f.definitionWrites, "a matching definition is not rewritten")
 }
 
 func TestRun_UpdatesAStoredDefinitionThatDiffers(t *testing.T) {
@@ -78,7 +86,7 @@ func TestRun_UpdatesAStoredDefinitionThatDiffers(t *testing.T) {
 
 	start(t, f)
 
-	assert.Equal(t, 1, f.definitionWrites)
+	assert.Equal(t, 2, f.definitionWrites, "the stale Job definition is updated and the absent CronJob one created")
 	assert.Empty(t, f.definition(stale.Metadata.Name).Spec.Versions[0].Schema.OpenAPIV3Schema.Description)
 }
 

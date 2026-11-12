@@ -1,8 +1,9 @@
 # What gaon-workloads is allowed, applied by an administrator with
 # `gaon apply -f workloads/deploy/rbac.yaml`. The unit's certificate has the
 # common name gaon-workloads, which the binding names. The unit registers the
-# Job kind itself (ADR 0024), so it may create and update the definitions it
-# labels, and write the MicroVMs it labels. It acts only while it holds the
+# Job and CronJob kinds itself (ADR 0024, ADR 0025), so it may create and update
+# the definitions it labels, write the MicroVMs it labels, and create and delete
+# the Jobs it labels, which it makes for a CronJob's scheduled times. It acts only while it holds the
 # coordination Lease gaon-workloads (ADR 0024 Errata, ADR 0023), which it reads,
 # creates and renews.
 apiVersion: rbac.gaon.garam.sh/v1alpha1
@@ -29,6 +30,16 @@ rules:
     verbs: [get, list, watch]
   - apiGroups: [workloads.gaon.garam.sh]
     resources: [jobs/status]
+    verbs: [update]
+  - apiGroups: [workloads.gaon.garam.sh]
+    resources: [jobs]
+    verbs: [create, delete]
+    labelSelector: workloads.gaon.garam.sh/managed-by=gaon-workloads
+  - apiGroups: [workloads.gaon.garam.sh]
+    resources: [cronjobs]
+    verbs: [list]
+  - apiGroups: [workloads.gaon.garam.sh]
+    resources: [cronjobs/status]
     verbs: [update]
 ---
 apiVersion: rbac.gaon.garam.sh/v1alpha1
