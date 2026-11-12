@@ -2,7 +2,9 @@
 # `gaon apply -f workloads/deploy/rbac.yaml`. The unit's certificate has the
 # common name gaon-workloads, which the binding names. The unit registers the
 # Job kind itself (ADR 0024), so it may create and update the definitions it
-# labels, and write the MicroVMs it labels.
+# labels, and write the MicroVMs it labels. It acts only while it holds the
+# coordination Lease gaon-workloads (ADR 0024 Errata, ADR 0023), which it reads,
+# creates and renews.
 apiVersion: rbac.gaon.garam.sh/v1alpha1
 kind: ClusterRole
 metadata:
@@ -19,6 +21,9 @@ rules:
     resources: [microvms]
     verbs: [create, get, list]
     labelSelector: workloads.gaon.garam.sh/managed-by=gaon-workloads
+  - apiGroups: [coordination.gaon.garam.sh]
+    resources: [leases]
+    verbs: [get, create, update]
   - apiGroups: [workloads.gaon.garam.sh]
     resources: [jobs]
     verbs: [get, list, watch]
