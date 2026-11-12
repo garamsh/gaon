@@ -46,7 +46,7 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
   - The agent renews at two thirds of the validity, over its own certificate, and swaps the pair without a restart.
   - The flow is in [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), the subject in [ADR 0022](./adr/0022-a-nodes-certificate-carries-the-organization-gaon-nodes-and-the-signer-signs-no-other-organization.md) and the resource in [resource-api.md](./resource-api.md) §CertificateSigningRequest.
 - **A token can obtain a certificate for any Node name.** A token is revoked by removing it from the file and restarting the API server; certificates already issued stay valid until they expire.
-- **The token signing key is one key on every control-plane Node.** The API server signs service account tokens ([ADR 0020](./adr/0020-a-microvm-takes-a-process-ports-files-and-probes-secret-configmap-and-serviceaccount-are-kinds-and-a-token-request-returns-a-jwt-bound-to-a-microvm.md)) with the ECDSA P-256 private key in `--service-account-signing-key-file` and names `--service-account-issuer` as their `iss`. There are three API servers, so the same key file and issuer are delivered to each; a token signed by one is verified by the key of any. The verification key is the public half of the signing key, and a verifier takes it from the same file. The key is rotated by replacing the file on every Node and restarting each API server; a token already issued stays valid until it expires, for a verifier that still holds the old public key.
+- **The token signing key is one key on every control-plane Node.** The API server signs service account tokens ([ADR 0020](./adr/0020-a-microvm-takes-a-process-ports-files-and-probes-secret-configmap-and-serviceaccount-are-kinds-and-a-token-request-returns-a-jwt-bound-to-a-microvm.md)) with the ECDSA P-256 private key in `--service-account-signing-key-file` and names `--service-account-issuer` as their `iss`. The issuer is an `https` URL, the stable address of the control plane on its virtual IP, with no path, and it is the same on all three API servers. There are three API servers, so the same key file and issuer are delivered to each; a token signed by one is verified by the key of any. Each serves the discovery document and the key set at that address, so a verifier takes the keys from them with the issuer URL and the CA that signed the API server's certificate. The key is rotated by delivering the old public key to every Node as a PEM file named in `--service-account-verify-key-files`, replacing the signing key file with the new private key, and restarting each API server. A token signed by the old key stays valid, and the old key stays in the key set, until the flag drops the file and the servers restart again. `--api-audiences` names the audiences the API server accepts in a token, and is the issuer where it is not given; a token requested for another audience, such as a vault's, is not accepted by it.
 - **Operator-supplied files still work.** A Node Agent given `--tls-cert` and `--tls-key` uses them and does not bootstrap, and the two sets of flags are mutually exclusive. The scheduler, the controllers and the CLI keep operator-issued certificates signed by the same CA.
 - **Authorization is a flag of the API server.** `--authorization-mode` is `AlwaysAllow`, the default and today's behaviour, or `RBAC`, which needs the TLS flags ([resource-api.md](./resource-api.md) §Authorization, [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md)). A deployment that sets `RBAC` issues the operator-supplied certificates with these subjects:
   - the scheduler: Organization `gaon:schedulers`;
@@ -68,6 +68,72 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 - **A deployment pins gaon by commit** until gaon cuts releases; the repository has no tags at the commit above.
 - **No skew promise** between the Node Agent and the API server before `v1beta1`. The API is `v1alpha1` ([resource-api.md](./resource-api.md)).
 
+### Backup and restore
+
+`gaon-etcd-snapshot` ([etcd-snapshot.md](./etcd-snapshot.md)) is run by a CronJob and uploads a snapshot of the Store to S3. The manifest below is applied with `gaon apply -f` once the Secrets exist. The values in angle brackets are the operator's.
+
+```yaml
+apiVersion: workloads.gaon.garam.sh/v1alpha1
+kind: CronJob
+metadata:
+  name: etcd-snapshot
+spec:
+  schedule: "17 */6 * * *"
+  historyLimit: 3
+  jobTemplate:
+    completions: 1
+    backoffLimit: 2
+    template:
+      image: <registry>/gaon-etcd-snapshot:<tag>
+      args:
+        - -etcd-endpoints=https://<node 1 address>:2379,https://<node 2 address>:2379,https://<node 3 address>:2379
+        - -etcd-ca-file=/etc/gaon/etcd/ca.crt
+        - -etcd-cert-file=/etc/gaon/etcd/tls.crt
+        - -etcd-key-file=/etc/gaon/etcd/tls.key
+        - -s3-bucket=<bucket>
+        - -s3-prefix=etcd/
+        - -region=<region>
+        - -rolesanywhere-cert-file=/etc/gaon/aws/tls.crt
+        - -rolesanywhere-key-file=/etc/gaon/aws/tls.key
+        - -rolesanywhere-trust-anchor-arn=<trust anchor ARN>
+        - -rolesanywhere-profile-arn=<profile ARN>
+        - -rolesanywhere-role-arn=<role ARN>
+      files:
+        - {path: /etc/gaon/etcd/ca.crt, mode: 0400, valueFrom: {secretKeyRef: {name: etcd-snapshot-etcd-client, key: ca.crt}}}
+        - {path: /etc/gaon/etcd/tls.crt, mode: 0400, valueFrom: {secretKeyRef: {name: etcd-snapshot-etcd-client, key: tls.crt}}}
+        - {path: /etc/gaon/etcd/tls.key, mode: 0400, valueFrom: {secretKeyRef: {name: etcd-snapshot-etcd-client, key: tls.key}}}
+        - {path: /etc/gaon/aws/tls.crt, mode: 0400, valueFrom: {secretKeyRef: {name: etcd-snapshot-aws, key: tls.crt}}}
+        - {path: /etc/gaon/aws/tls.key, mode: 0400, valueFrom: {secretKeyRef: {name: etcd-snapshot-aws, key: tls.key}}}
+      nodeSelector:
+        gaon.garam.sh/control-plane: "true"
+      resources:
+        requests: {cpu: 250m, memory: 256Mi}
+        limits: {memory: 512Mi}
+```
+
+- **The Secrets** are two, of the kind `Secret` in `compute.gaon.garam.sh/v1alpha1`. `etcd-snapshot-etcd-client` holds `ca.crt`, the CA the etcd members' server certificates are signed by, and `tls.crt` and `tls.key`, a client certificate the members' client CA signs. `etcd-snapshot-aws` holds `tls.crt` and `tls.key`, a certificate of the common name `gaon-etcd-snapshot` signed by gaon's CA, with any intermediate after it. The operator creates both from files produced outside gaon; no AWS access key is stored.
+- **What AWS holds** is the operator's: a Roles Anywhere trust anchor on gaon's CA, a profile and a role whose trust policy names the common name and whose permission is `s3:PutObject` on the bucket's prefix, and the bucket with a lifecycle rule for retention.
+- **`nodeSelector` has no effect today.** The scheduler does not read it ([scheduler.md](./scheduler.md)), and the Node schema has no labels to match. The manifest states the intent, a control-plane Node; the MicroVM runs on whichever Node the scheduler binds.
+- **The network path.** A MicroVM's traffic to a destination outside the cluster is masqueraded, so etcd sees the address of the Node the MicroVM runs on, and the etcd client port is open only to control-plane Nodes. A run therefore works when the MicroVM is bound to a control-plane Node and fails to connect when it is not, and the Job's retries do not change the Node. Which addresses and ports naru opens is naru's ([ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md)).
+- **S3 is reached over the Node's route to the internet,** by the same masquerade; a Node with no such route needs one from naru.
+- **The snapshot holds every Secret's data in clear,** so the bucket's access is as restricted as the Secrets are.
+
+#### Restore
+
+A restore replaces the Store of all three members from one snapshot. It loses every write after the snapshot's revision, and it is done with the control plane stopped. Each step says what it needs from naru.
+
+1. **Choose the object** by its key, `<prefix><time>-rev<revision>.db`. Download it from S3 and compare its SHA-256 with the object's checksum. Needs from naru: a Node with the S3 route and the `etcdutl` of the etcd version in use.
+2. **Check it** with `etcdutl snapshot status <file>`, which verifies the integrity hash and prints the revision. Needs: nothing more.
+3. **Stop everything that writes to etcd:** the API servers, and with them the scheduler, the controllers, `gaon-workloads` and the Node Agents, on all three Nodes; then stop the three etcd members. Needs: a way to stop and keep stopped each service on each Node.
+4. **Copy the file to each of the three Nodes.** Needs: file delivery to a Node.
+5. **On each Node run `etcdutl snapshot restore <file>`** with a new `--data-dir`, that Node's own `--name` and `--initial-advertise-peer-urls`, the same `--initial-cluster` on all three (the three names and peer URLs) and the same new `--initial-cluster-token`, different from the old one. Add `--bump-revision <n> --mark-compacted`, with `n` larger than the number of writes the cluster made since the snapshot: a resourceVersion is an etcd revision, so a client that holds one from after the snapshot would otherwise hold a version above the store's. Needs: the Node's member name, peer URL and the cluster string, which are the ones in its etcd config, and the new data directory.
+6. **Point each etcd member at its restored data directory and the new token, and start all three.** Needs: a config change to the members' data directory and token, delivered by naru ([ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md)), and the members' certificates unchanged.
+7. **Check health** with `etcdctl endpoint health --cluster` against the three, and see one leader.
+8. **Start the API servers, then the scheduler, the controllers, `gaon-workloads` and the Node Agents.** Needs: the same as step 3, in reverse.
+9. **Check** that `gaon get` of Nodes answers, and that the Nodes' Leases renew.
+
+A step that fails is not retried over a half-restored member: the old data directories are kept until step 9 passes, and a failed attempt starts again from step 5 with a new data directory.
+
 ## Rationale
 
 - Services, topology, certificates, config shape and versioning as decided: [ADR 0006](./adr/0006-a-gaon-deployment-is-one-control-plane-node-configured-by-argv-and-files.md).
@@ -75,6 +141,7 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 - The authorization mode, the roles and the certificate subjects: [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md).
 - Plugins as separate processes of a Node, their socket directory and the identity they use: [ADR 0019](./adr/0019-the-node-agent-reaches-its-network-and-storage-plugins-as-separate-processes-through-a-versioned-grpc-api-on-unix-sockets.md).
 - etcd as the Store and what its loss costs: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md). Three Nodes, three members, the election and the VIP: [ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md).
+- The snapshot CronJob, its credentials and the restore: [ADR 0028](./adr/0028-a-cronjob-runs-gaon-etcd-snapshot-which-uploads-a-checked-etcd-snapshot-to-s3-under-iam-roles-anywhere-credentials.md).
 - Mutual TLS, one certificate per caller, and issuance outside gaon: [ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md).
 - The bootstrap token, the signing request and renewal, which narrow ADR 0005 for Node Agents: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md).
 

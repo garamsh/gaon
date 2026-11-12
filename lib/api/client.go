@@ -663,3 +663,102 @@ func decodeError(resp *http.Response) error {
 	}
 	return &e
 }
+
+// PutService creates o, or changes it when o carries the ResourceVersion it was
+// read at (PUT /services/{name}). Call it on a client whose root is the compute
+// group's.
+func (c *Client) PutService(ctx context.Context, o *Service) (*Service, error) {
+	return put(ctx, c, "/services/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteService removes the named Service, if it is still at version rv
+// (DELETE /services/{name}).
+func (c *Client) DeleteService(ctx context.Context, name string, rv ResourceVersion) (*Service, error) {
+	if rv == "" {
+		return nil, errors.New("delete services: resource version is empty")
+	}
+	return call[Service](ctx, c, http.MethodDelete, "/services/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetService returns the named Service (GET /services/{name}).
+func (c *Client) GetService(ctx context.Context, name string) (*Service, error) {
+	return call[Service](ctx, c, http.MethodGet, "/services/"+url.PathEscape(name), nil, nil)
+}
+
+// ListServices returns every Service and the version to watch from
+// (GET /services).
+func (c *Client) ListServices(ctx context.Context) (*ServiceList, error) {
+	return call[ServiceList](ctx, c, http.MethodGet, "/services", c.listQuery(), nil)
+}
+
+// WatchServices streams the changes made after version rv
+// (GET /services?watch=true).
+func (c *Client) WatchServices(ctx context.Context, rv ResourceVersion) (*Watch[Service], error) {
+	return watch[Service](ctx, c, "/services", KindService, rv)
+}
+
+// PutEndpoints creates o, or changes it when o carries the ResourceVersion it was
+// read at (PUT /endpoints/{name}). Call it on a client whose root is the compute
+// group's.
+func (c *Client) PutEndpoints(ctx context.Context, o *Endpoints) (*Endpoints, error) {
+	return put(ctx, c, "/endpoints/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteEndpoints removes the named Endpoints, if it is still at version rv
+// (DELETE /endpoints/{name}).
+func (c *Client) DeleteEndpoints(ctx context.Context, name string, rv ResourceVersion) (*Endpoints, error) {
+	if rv == "" {
+		return nil, errors.New("delete endpoints: resource version is empty")
+	}
+	return call[Endpoints](ctx, c, http.MethodDelete, "/endpoints/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetEndpoints returns the named Endpoints (GET /endpoints/{name}).
+func (c *Client) GetEndpoints(ctx context.Context, name string) (*Endpoints, error) {
+	return call[Endpoints](ctx, c, http.MethodGet, "/endpoints/"+url.PathEscape(name), nil, nil)
+}
+
+// ListEndpoints returns every Endpoints and the version to watch from
+// (GET /endpoints).
+func (c *Client) ListEndpoints(ctx context.Context) (*EndpointsList, error) {
+	return call[EndpointsList](ctx, c, http.MethodGet, "/endpoints", c.listQuery(), nil)
+}
+
+// WatchEndpoints streams the changes made after version rv
+// (GET /endpoints?watch=true).
+func (c *Client) WatchEndpoints(ctx context.Context, rv ResourceVersion) (*Watch[Endpoints], error) {
+	return watch[Endpoints](ctx, c, "/endpoints", KindEndpoints, rv)
+}
+
+// PutNetworkPolicy creates o, or changes it when o carries the ResourceVersion it was
+// read at (PUT /networkpolicies/{name}). Call it on a client whose root is the compute
+// group's.
+func (c *Client) PutNetworkPolicy(ctx context.Context, o *NetworkPolicy) (*NetworkPolicy, error) {
+	return put(ctx, c, "/networkpolicies/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteNetworkPolicy removes the named NetworkPolicy, if it is still at version rv
+// (DELETE /networkpolicies/{name}).
+func (c *Client) DeleteNetworkPolicy(ctx context.Context, name string, rv ResourceVersion) (*NetworkPolicy, error) {
+	if rv == "" {
+		return nil, errors.New("delete networkpolicies: resource version is empty")
+	}
+	return call[NetworkPolicy](ctx, c, http.MethodDelete, "/networkpolicies/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetNetworkPolicy returns the named NetworkPolicy (GET /networkpolicies/{name}).
+func (c *Client) GetNetworkPolicy(ctx context.Context, name string) (*NetworkPolicy, error) {
+	return call[NetworkPolicy](ctx, c, http.MethodGet, "/networkpolicies/"+url.PathEscape(name), nil, nil)
+}
+
+// ListNetworkPolicies returns every NetworkPolicy and the version to watch from
+// (GET /networkpolicies).
+func (c *Client) ListNetworkPolicies(ctx context.Context) (*NetworkPolicyList, error) {
+	return call[NetworkPolicyList](ctx, c, http.MethodGet, "/networkpolicies", c.listQuery(), nil)
+}
+
+// WatchNetworkPolicies streams the changes made after version rv
+// (GET /networkpolicies?watch=true).
+func (c *Client) WatchNetworkPolicies(ctx context.Context, rv ResourceVersion) (*Watch[NetworkPolicy], error) {
+	return watch[NetworkPolicy](ctx, c, "/networkpolicies", KindNetworkPolicy, rv)
+}

@@ -28,6 +28,7 @@ type signingKey struct {
 	issuer string
 	file   string
 	pub    *ecdsa.PublicKey
+	key    *ecdsa.PrivateKey
 }
 
 func newSigningKey(t *testing.T) *signingKey {
@@ -37,7 +38,7 @@ func newSigningKey(t *testing.T) *signingKey {
 	der, err := x509.MarshalECPrivateKey(key)
 	require.NoError(t, err)
 	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
-	return &signingKey{issuer: testIssuer, file: writeFile(t, "token-key.pem", pemBytes), pub: &key.PublicKey}
+	return &signingKey{issuer: testIssuer, file: writeFile(t, "token-key.pem", pemBytes), pub: &key.PublicKey, key: key}
 }
 
 func tokenRequest(m *api.MicroVM, seconds int64, audiences ...string) *api.TokenRequest {
