@@ -43,6 +43,9 @@ type Server struct {
 	refused  []string
 	csrs     map[string]api.CertificateSigningRequest
 	tls      *tlsState
+	accounts map[string]bool
+	requests []api.TokenRequestSpec
+	issued   []string
 }
 
 // New starts a fake and stops it when the test ends.
@@ -66,6 +69,7 @@ func newServer() (*Server, *http.ServeMux) {
 		csrs:     map[string]api.CertificateSigningRequest{},
 		changed:  make(chan struct{}),
 		failures: map[string]bool{},
+		accounts: map[string]bool{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /microvms", s.listMicroVMs)
@@ -78,6 +82,7 @@ func newServer() (*Server, *http.ServeMux) {
 	mux.HandleFunc("PUT /volumes/{name}/status", s.putVolumeStatus)
 	mux.HandleFunc("GET /secrets/{name}", s.getSecret)
 	mux.HandleFunc("GET /configmaps/{name}", s.getConfigMap)
+	mux.HandleFunc("POST /serviceaccounts/{name}/token", s.createToken)
 	mux.HandleFunc("GET /nodes/{name}", s.getNode)
 	mux.HandleFunc("PUT /nodes/{name}", s.putNode)
 	mux.HandleFunc("PUT /nodes/{name}/status", s.putNodeStatus)

@@ -168,8 +168,12 @@ func TestRun_ResolvesValueFromSecretAndConfigMapWithOneGetEach(t *testing.T) {
 	assert.Equal(t, "fast", req.GetEnv()[1].GetValue())
 	assert.Equal(t, []byte(cert), req.GetFiles()[0].GetContent())
 	assert.Equal(t, []byte("k=v"), req.GetFiles()[1].GetContent())
-	assert.ElementsMatch(t, []string{"GET /secrets/creds", "GET /configmaps/cfg"}, e.gaon.Reads(),
-		"each object is read once, by get and never by list or watch")
+	reads := e.gaon.Reads()
+	require.GreaterOrEqual(t, len(reads), 2)
+	assert.ElementsMatch(t, []string{"GET /secrets/creds", "GET /configmaps/cfg"}, reads[:2],
+		"each object is read once to create the MicroVM, by get and never by list or watch")
+	assert.Subset(t, []string{"GET /secrets/creds", "GET /configmaps/cfg"}, reads,
+		"later rounds read the same objects by get, to replace a changed file")
 }
 
 func TestRun_FailsAMicroVMWhoseReferenceIsMissing(t *testing.T) {

@@ -49,6 +49,7 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 		RestartBackoffMax: cfg.RestartBackoffMax,
 		RestartResetAfter: cfg.RestartResetAfter,
 		ReadTimeout:       cfg.Liveness.RPCTimeout,
+		TokenAudience:     cfg.ServiceAccountAudience,
 	}, client, runtime, plugins.network, plugins.storage, clk, log)
 
 	// Everything but the certificate renewal needs the Node, which the API

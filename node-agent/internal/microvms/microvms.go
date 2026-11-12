@@ -38,6 +38,10 @@ const (
 	ReasonFaulted                  = "Faulted"
 	ReasonExitFailed               = "ExitFailed"
 	ReasonSuspended                = "Suspended"
+	// ReasonTokenExpired is the reason of a running MicroVM whose
+	// ServiceAccount token has expired in the guest because the agent could
+	// not renew it.
+	ReasonTokenExpired = "TokenExpired"
 )
 
 // ConditionReady is the type of the condition that names why a MicroVM is in
@@ -134,6 +138,9 @@ type outcome struct {
 	// exitFailure, when set, is how a MicroVM that is not started again
 	// failed.
 	exitFailure string
+	// tokenExpired is set when the MicroVM's ServiceAccount token has
+	// expired in the guest.
+	tokenExpired bool
 }
 
 // microvmStatus maps an outcome to the status the agent writes for m, adding
@@ -168,6 +175,9 @@ func microvmStatus(m *api.MicroVM, o outcome, now time.Time, restarts int32) api
 			next.Phase = api.MicroVMFailed
 			ready.Reason = ReasonExitFailed
 			ready.Message = o.exitFailure
+		case o.tokenExpired && next.Phase == api.MicroVMRunning:
+			ready = api.Condition{Type: ConditionReady, Status: api.ConditionFalse, Reason: ReasonTokenExpired,
+				Message: "the ServiceAccount token in the MicroVM has expired and the agent could not renew it, which is retried"}
 		}
 	}
 	if m.Status.BindingEpoch == m.Spec.BindingEpoch {

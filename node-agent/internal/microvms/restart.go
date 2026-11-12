@@ -2,6 +2,7 @@ package microvms
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -39,6 +40,13 @@ type run struct {
 	// halted is set while the agent holds the MicroVM stopped for Halted, so
 	// resuming it is a start and not a restart.
 	halted bool
+	// delivered is the digest of the content last put in each file of the
+	// guest whose value comes from a Secret or a ConfigMap, by path. It is
+	// nil when the guest holds what mvmd sent at boot, which is not known to
+	// be current.
+	delivered map[string][sha256.Size]byte
+	// token is the state of the ServiceAccount token file in the guest.
+	token tokenState
 }
 
 func (s *service) runOf(id string) *run {

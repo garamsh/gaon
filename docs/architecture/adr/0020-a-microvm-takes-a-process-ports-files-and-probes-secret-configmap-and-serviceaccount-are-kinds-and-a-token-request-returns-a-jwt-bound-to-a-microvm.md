@@ -1,6 +1,6 @@
 # ADR 0020: A MicroVM takes a process, ports, files and probes, Secret, ConfigMap and ServiceAccount are kinds, and a token request returns a JWT bound to a MicroVM
 
-> Status: accepted
+> Status: accepted; decision 2 is superseded for `files` by [ADR 0029](./0029-a-microvms-serviceaccount-token-is-a-file-at-a-fixed-path-and-the-node-agent-replaces-it-and-the-files-that-reference-a-secret-or-configmap-in-place-while-the-microvm-runs.md)
 > Date: 2026-11-13
 
 Drafted for garamsh/gaon#124, steps D5, D13 and D14 of goal garamsh/gaon#117. The decisions are the gaon PM's, taken in the session of 2026-11-12 and recorded on that goal.

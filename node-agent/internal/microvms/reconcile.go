@@ -126,6 +126,7 @@ func (s *service) ensure(ctx context.Context, m *api.MicroVM) (outcome, error) {
 	}
 	r := got.GetMachine()
 	st := s.runOf(id)
+	expired := false
 	switch {
 	case m.Spec.RunStrategy == api.RunHalted:
 		if r.GetState() == v1alpha2.MachineState_MACHINE_STATE_RUNNING || r.GetState() == v1alpha2.MachineState_MACHINE_STATE_PAUSED {
@@ -140,6 +141,7 @@ func (s *service) ensure(ctx context.Context, m *api.MicroVM) (outcome, error) {
 		if st.started.IsZero() {
 			st.started = s.clock.Now()
 		}
+		expired = s.refresh(ctx, m, id)
 	case r.GetState() == v1alpha2.MachineState_MACHINE_STATE_CREATED:
 		r, err = s.start(ctx, id)
 		if err != nil {
@@ -153,7 +155,7 @@ func (s *service) ensure(ctx context.Context, m *api.MicroVM) (outcome, error) {
 		}
 		return s.ended(ctx, id, r)
 	}
-	return outcome{runtime: r}, nil
+	return outcome{runtime: r, tokenExpired: expired}, nil
 }
 
 // create asks the network for the policy, pulls the image, readies the
@@ -164,7 +166,8 @@ func (s *service) create(ctx context.Context, m *api.MicroVM) (outcome, error) {
 	if err != nil {
 		return outcome{failure: err, failReason: ReasonInvalidSpec}, nil
 	}
-	if err := s.withProcess(ctx, m, req); err != nil {
+	token, err := s.withProcess(ctx, m, req)
+	if err != nil {
 		var f specFailure
 		if !errors.As(err, &f) {
 			return outcome{}, fmt.Errorf("microvm %s: %w", m.Metadata.Name, err)
@@ -204,6 +207,8 @@ func (s *service) create(ctx context.Context, m *api.MicroVM) (outcome, error) {
 	if err != nil {
 		return outcome{runtime: created.GetMachine()}, err
 	}
+	st := s.runOf(req.GetMachineId())
+	st.delivered, st.token = deliveredDigests(m, req), token
 	return outcome{runtime: started}, nil
 }
 
@@ -240,7 +245,12 @@ func (s *service) start(ctx context.Context, id string) (*v1alpha2.Machine, erro
 	if err != nil {
 		return nil, fmt.Errorf("start %s: %w", id, err)
 	}
-	s.runOf(id).started = s.clock.Now()
+	st := s.runOf(id)
+	st.started = s.clock.Now()
+	// mvmd sends the files of the create request at every boot, so the guest
+	// holds the token and the referenced values of that request.
+	st.delivered = nil
+	st.token = tokenState{expiresAt: st.token.createdExpiresAt, createdExpiresAt: st.token.createdExpiresAt}
 	return started.GetMachine(), nil
 }
 
