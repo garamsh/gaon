@@ -25,7 +25,7 @@ func start(t *testing.T, f *fakeAPI) *fakeClock {
 // startWith is start with the clock given.
 func startWith(t *testing.T, f *fakeAPI, clock *fakeClock) *fakeClock {
 	t.Helper()
-	svc := job.NewService(f.definitionsClient(), f.jobsClient(), f.cronJobsClient(), f.deploymentsClient(), f.microvmsClient(), clock, job.Config{Interval: time.Second}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := job.NewService(f.definitionsClient(), f.jobsClient(), f.cronJobsClient(), f.deploymentsClient(), f.statefulSetsClient(), f.microvmsClient(), clock, job.Config{Interval: time.Second}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- svc.Run(ctx) }()
@@ -65,7 +65,7 @@ func TestRun_RegistersTheDefinitionOnlyWhenItDiffers(t *testing.T) {
 	require.NotNil(t, d, "the service registers the Job kind")
 	assert.Equal(t, job.Group, d.Spec.Group)
 	assert.Equal(t, job.Kind, d.Spec.Names.Kind)
-	assert.Equal(t, 3, f.definitionWrites, "the Job, CronJob and Deployment definitions are written")
+	assert.Equal(t, 4, f.definitionWrites, "the Job, CronJob, Deployment and StatefulSet definitions are written")
 	require.NoError(t, d.Validate(), "the registered definition is one the API server accepts")
 	cron := f.definition("cronjobs." + job.Group)
 	require.NotNil(t, cron, "the service registers the CronJob kind")
@@ -73,10 +73,13 @@ func TestRun_RegistersTheDefinitionOnlyWhenItDiffers(t *testing.T) {
 	dep := f.definition("deployments." + job.Group)
 	require.NotNil(t, dep, "the service registers the Deployment kind")
 	require.NoError(t, dep.Validate(), "the registered Deployment definition is one the API server accepts")
+	sts := f.definition("statefulsets." + job.Group)
+	require.NotNil(t, sts, "the service registers the StatefulSet kind")
+	require.NoError(t, sts.Validate(), "the registered StatefulSet definition is one the API server accepts")
 
 	// The control: a second start finds the stored definitions equal and writes nothing.
 	start(t, f)
-	assert.Equal(t, 3, f.definitionWrites, "a matching definition is not rewritten")
+	assert.Equal(t, 4, f.definitionWrites, "a matching definition is not rewritten")
 }
 
 func TestRun_UpdatesAStoredDefinitionThatDiffers(t *testing.T) {
@@ -89,7 +92,7 @@ func TestRun_UpdatesAStoredDefinitionThatDiffers(t *testing.T) {
 
 	start(t, f)
 
-	assert.Equal(t, 3, f.definitionWrites, "the stale Job definition is updated and the absent CronJob and Deployment ones created")
+	assert.Equal(t, 4, f.definitionWrites, "the stale Job definition is updated and the absent CronJob, Deployment and StatefulSet ones created")
 	assert.Empty(t, f.definition(stale.Metadata.Name).Spec.Versions[0].Schema.OpenAPIV3Schema.Description)
 }
 
