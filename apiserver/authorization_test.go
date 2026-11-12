@@ -61,7 +61,7 @@ func TestRBAC_EachComponentReachesItsPathsAndAnotherGroupIsRefused(t *testing.T)
 	_, err = ctrl.PutNodeStatus(ctx(t), n)
 	require.NoError(t, err)
 
-	// An administrator writes roles and deletes a MicroVM.
+	// An administrator writes roles, and the controllers delete a MicroVM.
 	_, err = ctrlRBAC.PutClusterRole(ctx(t), clusterRole("viewer", rule(api.Group, "microvms", api.VerbGet)))
 	assert.ErrorIs(t, err, api.ErrForbidden)
 	_, err = strangerRBAC.PutClusterRole(ctx(t), clusterRole("viewer", rule(api.Group, "microvms", api.VerbGet)))
@@ -70,10 +70,10 @@ func TestRBAC_EachComponentReachesItsPathsAndAnotherGroupIsRefused(t *testing.T)
 	require.NoError(t, err)
 	current, err := admin.GetMicroVM(ctx(t), "m1")
 	require.NoError(t, err)
+	_, err = sched.DeleteMicroVM(ctx(t), "m1", current.Metadata.ResourceVersion)
+	assert.ErrorIs(t, err, api.ErrForbidden, "the scheduler holds no delete")
 	_, err = ctrl.DeleteMicroVM(ctx(t), "m1", current.Metadata.ResourceVersion)
-	assert.ErrorIs(t, err, api.ErrForbidden, "the controllers hold no delete")
-	_, err = admin.DeleteMicroVM(ctx(t), "m1", current.Metadata.ResourceVersion)
-	require.NoError(t, err)
+	require.NoError(t, err, "control: the controllers hold delete on every resource (ADR 0021)")
 }
 
 func TestRBAC_ACallerWithNoBindingIsForbiddenEverywhereAndAlwaysAllowServesIt(t *testing.T) {

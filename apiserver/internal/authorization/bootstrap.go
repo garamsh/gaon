@@ -31,10 +31,14 @@ var (
 	readVerbs  = []api.Verb{api.VerbGet, api.VerbList, api.VerbWatch}
 	updateVerb = []api.Verb{api.VerbUpdate}
 	compute    = []string{api.Group}
+	// leaseVerbs are what leader election takes: read the Lease, create it,
+	// and renew or take it over by an update.
+	leaseVerbs   = []api.Verb{api.VerbGet, api.VerbCreate, api.VerbUpdate}
+	coordination = []string{api.CoordinationGroup}
 )
 
-// bootstrapRoles are the rules of ADR 0008, Decision 6, in group
-// compute.gaon.garam.sh except gaon:admin's.
+// bootstrapRoles are the rules of ADR 0008, Decision 6, as ADR 0021 changes
+// them, in group compute.gaon.garam.sh except where a rule names another.
 var bootstrapRoles = []struct {
 	role, group string
 	rules       []api.PolicyRule
@@ -43,11 +47,13 @@ var bootstrapRoles = []struct {
 		{APIGroups: compute, Resources: []string{"microvms", "nodes", "volumes"}, Verbs: readVerbs},
 		{APIGroups: compute, Resources: []string{"microvms/binding"}, Verbs: []api.Verb{api.VerbCreate}},
 		{APIGroups: compute, Resources: []string{"microvms/status"}, Verbs: updateVerb},
+		{APIGroups: coordination, Resources: []string{"leases"}, Verbs: leaseVerbs},
 	}},
 	{RoleControllers, GroupControllers, []api.PolicyRule{
-		{APIGroups: compute, Resources: []string{"microvms", "nodes", "leases", "certificatesigningrequests"}, Verbs: readVerbs},
+		{APIGroups: []string{api.APIGroupAll}, Resources: []string{api.ResourceAll}, Verbs: []api.Verb{api.VerbGet, api.VerbList, api.VerbWatch, api.VerbDelete}},
 		{APIGroups: compute, Resources: []string{"microvms"}, Verbs: []api.Verb{api.VerbCreate, api.VerbUpdate}},
 		{APIGroups: compute, Resources: []string{"microvms/status", "nodes/status", "volumes/status", "certificatesigningrequests/status"}, Verbs: updateVerb},
+		{APIGroups: coordination, Resources: []string{"leases"}, Verbs: leaseVerbs},
 	}},
 	{RoleAdmin, GroupAdmins, []api.PolicyRule{
 		{APIGroups: []string{api.APIGroupAll}, Resources: []string{api.ResourceAll}, Verbs: []api.Verb{api.VerbAll}},

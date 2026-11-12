@@ -146,7 +146,7 @@ func TestNodeAuthorizer_ARoleThatGrantsUpdateOnVolumesLetsAnyChangeThrough(t *te
 	assert.NoError(t, err, "the same write once a role grants update on volumes")
 }
 
-func TestRBAC_TheSchedulerReadsVolumesAndTheControllersDoNot(t *testing.T) {
+func TestRBAC_TheSchedulerAndTheControllersReadVolumesAndOnlyTheControllersDelete(t *testing.T) {
 	c := newCluster(t)
 	addr, _ := c.start(t, apiserver.ModeRBAC)
 	admin, _ := c.clients(t, addr, adminID)
@@ -156,7 +156,7 @@ func TestRBAC_TheSchedulerReadsVolumesAndTheControllersDoNot(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = ctrl.GetVolume(ctx(t), "v1")
-	assert.ErrorIs(t, err, api.ErrForbidden, "the controllers' role does not read volumes")
+	assert.NoError(t, err, "the controllers' role reads every resource (ADR 0021)")
 	_, err = sched.GetVolume(ctx(t), "v1")
 	assert.NoError(t, err, "control: the scheduler gets one")
 	_, err = sched.ListVolumes(ctx(t))
@@ -166,4 +166,10 @@ func TestRBAC_TheSchedulerReadsVolumesAndTheControllersDoNot(t *testing.T) {
 	w.Close()
 	_, err = sched.PutVolume(ctx(t), volume("v2"))
 	assert.ErrorIs(t, err, api.ErrForbidden, "the scheduler does not create one")
+	v1, err := admin.GetVolume(ctx(t), "v1")
+	require.NoError(t, err)
+	_, err = sched.DeleteVolume(ctx(t), "v1", v1.Metadata.ResourceVersion)
+	assert.ErrorIs(t, err, api.ErrForbidden, "the scheduler does not delete one")
+	_, err = ctrl.DeleteVolume(ctx(t), "v1", v1.Metadata.ResourceVersion)
+	assert.NoError(t, err, "control: the controllers do")
 }

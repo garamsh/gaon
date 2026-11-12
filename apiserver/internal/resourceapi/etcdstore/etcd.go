@@ -184,7 +184,11 @@ func event(ev *clientv3.Event) (resourceapi.Event, error) {
 	case ev.IsCreate():
 		return resourceapi.Event{Type: api.EventAdded, Entry: entry(ev.Kv.Key, ev.Kv.Value, ev.Kv.ModRevision)}, nil
 	default:
-		return resourceapi.Event{Type: api.EventModified, Entry: entry(ev.Kv.Key, ev.Kv.Value, ev.Kv.ModRevision)}, nil
+		modified := resourceapi.Event{Type: api.EventModified, Entry: entry(ev.Kv.Key, ev.Kv.Value, ev.Kv.ModRevision)}
+		if ev.PrevKv != nil {
+			modified.Previous = ev.PrevKv.Value
+		}
+		return modified, nil
 	}
 }
 

@@ -238,3 +238,38 @@ func TestNodeAuthorizer_NeverRefusesWhatARoleAllows(t *testing.T) {
 	_, err = f.node2.PutNodeStatus(ctx(t), n)
 	assert.NoError(t, err, "a Node that is not its own Node's owner is allowed by a role bound to it")
 }
+
+func TestNodeAuthorizer_ASelectorRoleLetsANodeUpdateOnlyTheMicroVMsInsideIt(t *testing.T) {
+	f := newNodeFixture(t)
+	_, adminRBAC := f.c.clients(t, f.addr, adminID)
+	selected := rule(api.Group, "microvms", api.VerbUpdate)
+	selected.LabelSelector = "app=web"
+	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("web-writer", selected))
+	require.NoError(t, err)
+	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("web-writer", "web-writer", userSubject("node-1")))
+	require.NoError(t, err)
+	bound := func(name, app string) *api.MicroVM {
+		m, err := f.admin.PutMicroVM(ctx(t), labeled(microvm(name), "app", app))
+		require.NoError(t, err)
+		_, err = f.admin.BindMicroVM(ctx(t), name, api.Binding{ResourceVersion: m.Metadata.ResourceVersion, NodeName: "node-1", BindingEpoch: 1})
+		require.NoError(t, err)
+		m, err = f.admin.GetMicroVM(ctx(t), name)
+		require.NoError(t, err)
+		return m
+	}
+	web, db := bound("w1", "web"), bound("d1", "db")
+
+	outside := *db
+	outside.Spec.IdleTimeoutSeconds = 30
+	_, err = f.node1.PutMicroVM(ctx(t), &outside)
+	assert.ErrorIs(t, err, api.ErrForbidden, "a full update of a bound MicroVM outside the selector")
+	finalizer := *db
+	finalizer.Metadata.Finalizers = []string{nodeAgentFinalizer}
+	_, err = f.node1.PutMicroVM(ctx(t), &finalizer)
+	assert.NoError(t, err, "control: its finalizer on the same MicroVM")
+
+	inside := *web
+	inside.Spec.IdleTimeoutSeconds = 30
+	_, err = f.node1.PutMicroVM(ctx(t), &inside)
+	assert.NoError(t, err, "control: a full update of a bound MicroVM inside the selector")
+}

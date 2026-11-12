@@ -47,14 +47,14 @@ func (s *service) GetClusterRoleBinding(ctx context.Context, name string) (*api.
 	return b, err
 }
 
-func (s *service) ListClusterRoleBindings(ctx context.Context) (*api.ClusterRoleBindingList, error) {
-	items, rv, err := clusterRoleBindings.list(ctx, s.st)
+func (s *service) ListClusterRoleBindings(ctx context.Context, sel api.Selector) (*api.ClusterRoleBindingList, error) {
+	items, rv, err := clusterRoleBindings.list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.ClusterRoleBindingList{TypeMeta: api.TypeMeta{APIVersion: api.RBACGroupVersion, Kind: api.KindClusterRoleBindingList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchClusterRoleBindings(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return clusterRoleBindings.watch(ctx, s.st, rv)
+func (s *service) WatchClusterRoleBindings(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+	return clusterRoleBindings.watch(ctx, s.st, rv, sel)
 }

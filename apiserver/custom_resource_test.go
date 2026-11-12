@@ -31,7 +31,7 @@ func TestPutCustomObject_CreatesThenUpdatesOnTheCurrentVersion(t *testing.T) {
 	assert.NotEqual(t, created.Metadata.ResourceVersion, updated.Metadata.ResourceVersion)
 
 	labelled := *updated
-	labelled.Metadata.OwnerReferences = []api.OwnerReference{{APIVersion: "v1", Kind: "Owner", Name: "o"}}
+	labelled.Metadata.OwnerReferences = []api.OwnerReference{{APIVersion: "v1", Kind: "Owner", Name: "o", UID: "owner-uid"}}
 	relabelled, err := widgets.Put(ctx(t), &labelled)
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, relabelled.Metadata.Generation, "a change of metadata is not")

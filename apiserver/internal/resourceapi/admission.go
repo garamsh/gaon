@@ -28,7 +28,7 @@ func userOf(ctx context.Context) api.UserInfo {
 type webhookSource struct{ st Store }
 
 func (w webhookSource) Mutating(ctx context.Context) ([]admission.Hook, error) {
-	items, _, err := mutatingWebhookConfigurations.list(ctx, w.st)
+	items, _, err := mutatingWebhookConfigurations.list(ctx, w.st, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func (w webhookSource) Mutating(ctx context.Context) ([]admission.Hook, error) {
 }
 
 func (w webhookSource) Validating(ctx context.Context) ([]admission.Hook, error) {
-	items, _, err := validatingWebhookConfigurations.list(ctx, w.st)
+	items, _, err := validatingWebhookConfigurations.list(ctx, w.st, nil)
 	if err != nil {
 		return nil, err
 	}
