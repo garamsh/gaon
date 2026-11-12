@@ -32,6 +32,7 @@ Current architecture of the system and the decisions behind it. This file is the
   - [cli.md](./cli.md): the `gaon` client CLI, its commands and how `apply` treats a concurrent change.
   - [deployment.md](./deployment.md): which gaon services run on which Node, what a Node's config carries for them, how certificates reach them and which gaon commit is run.
   - [workloads.md](./workloads.md): how `gaon-workloads` registers the `Job` and `CronJob` kinds, runs a Job's MicroVMs to completion with retries and creates a Job from a CronJob at each scheduled time, as a client of the public API.
+  - [etcd-snapshot.md](./etcd-snapshot.md): how `gaon-etcd-snapshot` takes an etcd snapshot, checks it and uploads it to S3 under IAM Roles Anywhere credentials.
   - [e2e.md](./e2e.md): how the end-to-end test of M1 runs, what it asserts, and what the host needs.
 - ADRs
   - [0001](./adr/0001-the-repository-is-a-go-workspace-of-executable-units-partitioned-by-responsibility.md): the repository is a Go workspace of executable units, each its own module, partitioned by responsibility.
@@ -61,4 +62,5 @@ Current architecture of the system and the decisions behind it. This file is the
   - [0025](./adr/0025-a-cronjob-is-a-kind-the-workloads-unit-runs-by-creating-a-job-from-its-template-at-each-scheduled-time-only-while-it-leads.md): a CronJob is a kind the workloads unit runs by creating a Job from its template at each scheduled time, only while it leads.
   - [0026](./adr/0026-a-deployment-is-a-kind-the-workloads-unit-keeps-replicas-of-a-microvm-template-for-with-no-replicaset-kind-and-a-rollout-bounded-by-surge-and-unavailability.md): a Deployment is a kind the workloads unit keeps replicas of a MicroVM template for, with no ReplicaSet kind and a rollout bounded by surge and unavailability.
   - [0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md): a Service allocates its addresses from two configured ranges, Endpoints lists its ready MicroVMs and a NetworkPolicy selects MicroVMs by label.
+  - [0028](./adr/0028-a-cronjob-runs-gaon-etcd-snapshot-which-uploads-a-checked-etcd-snapshot-to-s3-under-iam-roles-anywhere-credentials.md): a CronJob runs gaon-etcd-snapshot, which uploads a checked etcd snapshot to S3 under IAM Roles Anywhere credentials.
   - [0029](./adr/0029-a-microvms-serviceaccount-token-is-a-file-at-a-fixed-path-and-the-node-agent-replaces-it-and-the-files-that-reference-a-secret-or-configmap-in-place-while-the-microvm-runs.md): a MicroVM's ServiceAccount token is a file at a fixed path, and the Node Agent replaces it and the files that reference a Secret or ConfigMap in place while the MicroVM runs.
