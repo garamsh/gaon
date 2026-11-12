@@ -17,18 +17,35 @@ const maxBody = 1 << 20
 // Client calls the resource API. Every write is a compare-and-swap on the
 // ResourceVersion the object or request carries; an empty one creates.
 type Client struct {
-	root string
-	http *http.Client
+	root  string
+	http  *http.Client
+	token string
+}
+
+// ClientOption changes how a Client sends its requests.
+type ClientOption func(*Client)
+
+// WithBearerToken sends token as the Authorization: Bearer header of every
+// request. The token is a credential, so the Client refuses to send a request
+// whose URL is not https. The option adds to the http client's own TLS
+// identity and takes none away: a client that presents a certificate keeps
+// presenting it.
+func WithBearerToken(token string) ClientOption {
+	return func(c *Client) { c.token = token }
 }
 
 // NewClient returns a Client for the API whose group and version root is
 // root. A nil httpClient means http.DefaultClient. A watch is one long
 // response, so httpClient must not set a Timeout.
-func NewClient(root string, httpClient *http.Client) *Client {
+func NewClient(root string, httpClient *http.Client, opts ...ClientOption) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	return &Client{root: strings.TrimSuffix(root, "/"), http: httpClient}
+	c := &Client{root: strings.TrimSuffix(root, "/"), http: httpClient}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 // PutMachine creates m, or changes its spec when m carries the ResourceVersion
@@ -129,6 +146,37 @@ func (c *Client) PutLease(ctx context.Context, l *Lease) (*Lease, error) {
 	return put(ctx, c, "/leases/"+url.PathEscape(l.Metadata.Name), l)
 }
 
+// PutCertificateSigningRequest creates r (PUT /certificatesigningrequests/{name}).
+// The spec of a request is immutable, so r carries no ResourceVersion. The API
+// server sets spec.username.
+func (c *Client) PutCertificateSigningRequest(ctx context.Context, r *CertificateSigningRequest) (*CertificateSigningRequest, error) {
+	return put(ctx, c, "/certificatesigningrequests/"+url.PathEscape(r.Metadata.Name), r)
+}
+
+// PutCertificateSigningRequestStatus writes r's status, the signer's answer
+// (PUT /certificatesigningrequests/{name}/status).
+func (c *Client) PutCertificateSigningRequestStatus(ctx context.Context, r *CertificateSigningRequest) (*CertificateSigningRequest, error) {
+	return put(ctx, c, "/certificatesigningrequests/"+url.PathEscape(r.Metadata.Name)+"/status", r)
+}
+
+// GetCertificateSigningRequest returns the named request
+// (GET /certificatesigningrequests/{name}).
+func (c *Client) GetCertificateSigningRequest(ctx context.Context, name string) (*CertificateSigningRequest, error) {
+	return call[CertificateSigningRequest](ctx, c, http.MethodGet, "/certificatesigningrequests/"+url.PathEscape(name), nil, nil)
+}
+
+// ListCertificateSigningRequests returns every request and the version to
+// watch from (GET /certificatesigningrequests).
+func (c *Client) ListCertificateSigningRequests(ctx context.Context) (*CertificateSigningRequestList, error) {
+	return call[CertificateSigningRequestList](ctx, c, http.MethodGet, "/certificatesigningrequests", nil, nil)
+}
+
+// WatchCertificateSigningRequests streams the changes made after version rv
+// (GET /certificatesigningrequests?watch=true), as WatchMachines does.
+func (c *Client) WatchCertificateSigningRequests(ctx context.Context, rv ResourceVersion) (*Watch[CertificateSigningRequest], error) {
+	return watch[CertificateSigningRequest](ctx, c, "/certificatesigningrequests", KindCertificateSigningRequest, rv)
+}
+
 func watch[T any](ctx context.Context, c *Client, path, kind string, rv ResourceVersion) (*Watch[T], error) {
 	if rv == "" {
 		return nil, fmt.Errorf("watch %s: resource version is empty", path)
@@ -191,6 +239,12 @@ func (c *Client) send(ctx context.Context, method, path string, query url.Values
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.token != "" {
+		if req.URL.Scheme != "https" {
+			return nil, fmt.Errorf("%s %s: refusing to send a bearer token over %s", method, path, req.URL.Scheme)
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

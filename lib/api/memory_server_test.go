@@ -56,9 +56,68 @@ func newMemoryServer(t *testing.T) (*memoryServer, *api.Client) {
 	mux.HandleFunc("GET /leases", listOrWatch(s, "leases/", api.KindLease, func(items []api.Lease, rv api.ResourceVersion) any {
 		return &api.LeaseList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindLeaseList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
 	}))
+	mux.HandleFunc("PUT /certificatesigningrequests/{name}", s.putCertificateSigningRequest)
+	mux.HandleFunc("PUT /certificatesigningrequests/{name}/status", s.putCertificateSigningRequestStatus)
+	mux.HandleFunc("GET /certificatesigningrequests/{name}", getObject[api.CertificateSigningRequest](s, "certificatesigningrequests/"))
+	mux.HandleFunc("GET /certificatesigningrequests", listOrWatch(s, "certificatesigningrequests/", api.KindCertificateSigningRequest, func(items []api.CertificateSigningRequest, rv api.ResourceVersion) any {
+		return &api.CertificateSigningRequestList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindCertificateSigningRequestList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return s, api.NewClient(ts.URL, ts.Client())
+}
+
+// memoryRequester is the username the memory server, which authenticates no
+// one, sets on every request it creates.
+const memoryRequester = "memory-requester"
+
+// putCertificateSigningRequest creates a request: its spec is immutable, so a
+// version is refused, and the username is the server's, not the caller's.
+func (s *memoryServer) putCertificateSigningRequest(w http.ResponseWriter, r *http.Request) {
+	var csr api.CertificateSigningRequest
+	if !decodeBody(w, r, &csr) || !s.nameMatches(w, r, csr.Metadata.Name) {
+		return
+	}
+	if err := csr.Validate(); err != nil {
+		writeError(w, err)
+		return
+	}
+	if csr.Metadata.ResourceVersion != "" {
+		writeError(w, api.NewAPIError(api.ReasonInvalid, "spec of %q is immutable", csr.Metadata.Name))
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := "certificatesigningrequests/" + csr.Metadata.Name
+	_, found := load[api.CertificateSigningRequest](s, key)
+	if err := s.checkVersion(found, "", "", csr.Metadata.Name); err != nil {
+		writeError(w, err)
+		return
+	}
+	csr.Spec.Username = memoryRequester
+	csr.Status = api.CertificateSigningRequestStatus{}
+	store(s, w, key, api.KindCertificateSigningRequest, &csr.Metadata, &csr, api.EventAdded)
+}
+
+func (s *memoryServer) putCertificateSigningRequestStatus(w http.ResponseWriter, r *http.Request) {
+	var next api.CertificateSigningRequest
+	if !decodeBody(w, r, &next) || !s.nameMatches(w, r, next.Metadata.Name) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := "certificatesigningrequests/" + next.Metadata.Name
+	csr, found := load[api.CertificateSigningRequest](s, key)
+	if err := s.requireVersion(found, csr.Metadata.ResourceVersion, next.Metadata.ResourceVersion, next.Metadata.Name); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := next.ValidateStatus(); err != nil {
+		writeError(w, err)
+		return
+	}
+	csr.Status = next.Status
+	store(s, w, key, api.KindCertificateSigningRequest, &csr.Metadata, &csr, api.EventModified)
 }
 
 // compact drops the watch log, so a watch from an earlier version expires.

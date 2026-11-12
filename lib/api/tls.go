@@ -16,13 +16,9 @@ import (
 // in certFile with the key in keyFile. The client sets no Timeout, so it is
 // fit for a watch.
 func NewTLSClient(caFile, certFile, keyFile string) (*http.Client, error) {
-	caPEM, err := os.ReadFile(caFile)
+	roots, err := loadRoots(caFile)
 	if err != nil {
-		return nil, fmt.Errorf("tls ca: %w", err)
-	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("tls ca %s: no certificate found", caFile)
+		return nil, err
 	}
 	certPEM, err := os.ReadFile(certFile)
 	if err != nil {
@@ -44,6 +40,33 @@ func NewTLSClient(caFile, certFile, keyFile string) (*http.Client, error) {
 		},
 		ForceAttemptHTTP2: true,
 	}}, nil
+}
+
+// NewServerTLSClient returns an http.Client that speaks TLS 1.3 and presents no
+// certificate: it trusts the certificates in caFile and no other root. It is
+// the client of a caller that holds only a bearer token (WithBearerToken). The
+// client sets no Timeout, so it is fit for a watch.
+func NewServerTLSClient(caFile string) (*http.Client, error) {
+	roots, err := loadRoots(caFile)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{Transport: &http.Transport{
+		TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots},
+		ForceAttemptHTTP2: true,
+	}}, nil
+}
+
+func loadRoots(caFile string) (*x509.CertPool, error) {
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("tls ca: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("tls ca %s: no certificate found", caFile)
+	}
+	return roots, nil
 }
 
 // TLSFiles holds the paths of the three files of a client's mutual TLS
