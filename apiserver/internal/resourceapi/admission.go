@@ -141,13 +141,13 @@ func validate[T any](ctx context.Context, s *service, k kind[T], sub string, op 
 	return s.hooks.Validate(ctx, req)
 }
 
-// bindingRequest describes the creation of the binding b of the machine named
-// name, which is a CREATE of machines/binding that carries the Binding.
+// bindingRequest describes the creation of the binding b of the microvm named
+// name, which is a CREATE of microvms/binding that carries the Binding.
 func bindingRequest(ctx context.Context, name string, b api.Binding) (admission.Request, error) {
 	raw, err := json.Marshal(b)
 	return admission.Request{
 		Kind:        gvk(api.Group, "Binding"),
-		Resource:    api.GroupVersionResource{Group: api.Group, Version: api.Version, Resource: machines.plural},
+		Resource:    api.GroupVersionResource{Group: api.Group, Version: api.Version, Resource: microvms.plural},
 		SubResource: "binding",
 		Operation:   api.OperationCreate,
 		Name:        name,

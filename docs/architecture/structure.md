@@ -14,13 +14,13 @@ The units of milestone M1, each created by the pull request of the issue that ow
 
 - **`lib/api/`**, a library module: the `v1alpha1` resource types and their client. Issue 3.
 - **`apiserver/`**: the resource API server, binary `gaon-apiserver`. Issue 4.
-- **`scheduler/`**: binds unbound Machines to Nodes, binary `gaon-scheduler`. Issue 5.
+- **`scheduler/`**: binds unbound MicroVMs to Nodes, binary `gaon-scheduler`. Issue 5.
 - **`controllers/`**: the controllers, the node lifecycle controller among them. Issue 6.
-- **`node-agent/`**: runs bound Machines on mvmd, binary `gaon-node-agent`. Issue 7.
+- **`node-agent/`**: runs bound MicroVMs on mvmd, binary `gaon-node-agent`. Issue 7.
 - **`gaon-cli/`**: the client CLI, binary `gaon`. Issue 8.
 - **`tooling/e2e/`**: the end-to-end test of M1 on QEMU nodes. Issue 9.
 
-The Gateway, the Cell Router and machine and cluster management are in gaon's scope (Discussion #2 comments `discussioncomment-19466471` and `discussioncomment-19533418`, in garamsh/discussions) and have no unit planned yet.
+The Gateway, the Cell Router and microvm and cluster management are in gaon's scope (Discussion #2 comments `discussioncomment-19466471` and `discussioncomment-19533418`, in garamsh/discussions) and have no unit planned yet.
 
 The rules for units:
 

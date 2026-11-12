@@ -12,7 +12,7 @@ import (
 
 func TestRun_ReachesTheServerOverMutualTLSWhenGivenTheThreeFiles(t *testing.T) {
 	a := newMTLSAPI(t)
-	args := append(append([]string{"--server", a.URL}, a.flags()...), "get", "machine")
+	args := append(append([]string{"--server", a.URL}, a.flags()...), "get", "microvm")
 	var out, errOut bytes.Buffer
 
 	code := run(context.Background(), args, environment{}, &out, &errOut)
@@ -34,7 +34,7 @@ func TestRun_RefusesAPartialTLSSetBeforeAnyRequest(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args := append(append([]string{"--server", a.URL}, tt.tls...), "get", "machine")
+			args := append(append([]string{"--server", a.URL}, tt.tls...), "get", "microvm")
 			var out, errOut bytes.Buffer
 
 			code := run(context.Background(), args, environment{}, &out, &errOut)
@@ -45,7 +45,7 @@ func TestRun_RefusesAPartialTLSSetBeforeAnyRequest(t *testing.T) {
 		})
 	}
 	var out, errOut bytes.Buffer
-	args := append(append([]string{"--server", a.URL}, a.flags()...), "get", "machine")
+	args := append(append([]string{"--server", a.URL}, a.flags()...), "get", "microvm")
 	code := run(context.Background(), args, environment{}, &out, &errOut)
 	assert.Equal(t, command.ExitOK, code, "control: the three together are accepted")
 }

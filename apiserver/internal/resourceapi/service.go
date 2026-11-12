@@ -14,13 +14,13 @@ import (
 // Service is the resource API of resource-api.md §Paths. A failure the
 // caller caused is an *api.APIError; any other error is the server's.
 type Service interface {
-	PutMachine(ctx context.Context, name string, m *api.Machine) (*api.Machine, error)
-	BindMachine(ctx context.Context, name string, b api.Binding) (*api.Machine, error)
-	PutMachineStatus(ctx context.Context, name string, m *api.Machine) (*api.Machine, error)
-	DeleteMachine(ctx context.Context, name string, rv api.ResourceVersion) (*api.Machine, error)
-	GetMachine(ctx context.Context, name string) (*api.Machine, error)
-	ListMachines(ctx context.Context) (*api.MachineList, error)
-	WatchMachines(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	PutMicroVM(ctx context.Context, name string, m *api.MicroVM) (*api.MicroVM, error)
+	BindMicroVM(ctx context.Context, name string, b api.Binding) (*api.MicroVM, error)
+	PutMicroVMStatus(ctx context.Context, name string, m *api.MicroVM) (*api.MicroVM, error)
+	DeleteMicroVM(ctx context.Context, name string, rv api.ResourceVersion) (*api.MicroVM, error)
+	GetMicroVM(ctx context.Context, name string) (*api.MicroVM, error)
+	ListMicroVMs(ctx context.Context) (*api.MicroVMList, error)
+	WatchMicroVMs(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
 
 	PutVolume(ctx context.Context, name string, v *api.Volume) (*api.Volume, error)
 	PutVolumeStatus(ctx context.Context, name string, v *api.Volume) (*api.Volume, error)
@@ -85,7 +85,7 @@ type Service interface {
 }
 
 var (
-	machines = kind[api.Machine]{"machines", func(m *api.Machine) *api.ObjectMeta { return &m.Metadata }, func(m *api.Machine) any { return m.Spec }, gvk(api.Group, api.KindMachine)}
+	microvms = kind[api.MicroVM]{"microvms", func(m *api.MicroVM) *api.ObjectMeta { return &m.Metadata }, func(m *api.MicroVM) any { return m.Spec }, gvk(api.Group, api.KindMicroVM)}
 	volumes  = kind[api.Volume]{"volumes", func(v *api.Volume) *api.ObjectMeta { return &v.Metadata }, func(v *api.Volume) any { return v.Spec }, gvk(api.Group, api.KindVolume)}
 	nodes    = kind[api.Node]{"nodes", func(n *api.Node) *api.ObjectMeta { return &n.Metadata }, func(n *api.Node) any { return n.Spec }, gvk(api.Group, api.KindNode)}
 	leases   = kind[api.Lease]{"leases", func(l *api.Lease) *api.ObjectMeta { return &l.Metadata }, func(l *api.Lease) any { return l.Spec }, gvk(api.Group, api.KindLease)}
@@ -123,21 +123,21 @@ func NewService(st Store, now func() time.Time) Service {
 	return &service{st: st, now: now, hooks: &admission.Caller{Source: webhookSource{st}}}
 }
 
-func (s *service) GetMachine(ctx context.Context, name string) (*api.Machine, error) {
-	m, _, err := machines.get(ctx, s.st, name)
+func (s *service) GetMicroVM(ctx context.Context, name string) (*api.MicroVM, error) {
+	m, _, err := microvms.get(ctx, s.st, name)
 	return m, err
 }
 
-func (s *service) ListMachines(ctx context.Context) (*api.MachineList, error) {
-	items, rv, err := machines.list(ctx, s.st)
+func (s *service) ListMicroVMs(ctx context.Context) (*api.MicroVMList, error) {
+	items, rv, err := microvms.list(ctx, s.st)
 	if err != nil {
 		return nil, err
 	}
-	return &api.MachineList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachineList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
+	return &api.MicroVMList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVMList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchMachines(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return machines.watch(ctx, s.st, rv)
+func (s *service) WatchMicroVMs(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
+	return microvms.watch(ctx, s.st, rv)
 }
 
 func (s *service) GetNode(ctx context.Context, name string) (*api.Node, error) {

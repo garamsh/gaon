@@ -6,19 +6,19 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// volumeNeed is what the Volumes a Machine names ask of its Node.
+// volumeNeed is what the Volumes a MicroVM names ask of its Node.
 type volumeNeed struct {
-	// node is the Node the Machine's pinned local Volumes name, empty when
+	// node is the Node the MicroVM's pinned local Volumes name, empty when
 	// none is pinned.
 	node string
-	// refusal is why no Node can take the Machine, empty when one can.
+	// refusal is why no Node can take the MicroVM, empty when one can.
 	refusal string
 }
 
 // needOf reads the Volumes m names from volumes, by name. A Volume that does
 // not exist, one being deleted, and local Volumes pinned to two Nodes each
-// leave the Machine no Node: the API server would refuse the binding.
-func needOf(m *api.Machine, volumes map[string]*api.Volume) volumeNeed {
+// leave the MicroVM no Node: the API server would refuse the binding.
+func needOf(m *api.MicroVM, volumes map[string]*api.Volume) volumeNeed {
 	var need volumeNeed
 	var pinnedBy string
 	for _, mv := range m.Spec.Volumes {

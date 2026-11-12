@@ -39,8 +39,8 @@ const (
 
 // The kinds of the resources in this package.
 const (
-	KindMachine     = "Machine"
-	KindMachineList = "MachineList"
+	KindMicroVM     = "MicroVM"
+	KindMicroVMList = "MicroVMList"
 	KindVolume      = "Volume"
 	KindVolumeList  = "VolumeList"
 	KindNode        = "Node"
@@ -70,7 +70,7 @@ const (
 // as opaque and compare it only for equality.
 type ResourceVersion string
 
-// Epoch is a Machine's binding epoch: it grows by one at each rebinding.
+// Epoch is a MicroVM's binding epoch: it grows by one at each rebinding.
 type Epoch int64
 
 // TypeMeta names the group, version and kind of an object.

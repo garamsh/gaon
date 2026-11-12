@@ -17,9 +17,9 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-func (s *Server) listMachines(w http.ResponseWriter, r *http.Request) {
+func (s *Server) listMicroVMs(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	if s.refuseWithoutNode(w, r, api.NewAPIError(api.ReasonForbidden, "%q may not list machines", s.node)) {
+	if s.refuseWithoutNode(w, r, api.NewAPIError(api.ReasonForbidden, "%q may not list microvms", s.node)) {
 		s.mu.Unlock()
 		return
 	}
@@ -29,21 +29,21 @@ func (s *Server) listMachines(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.mu.Unlock()
-	list := api.MachineList{
-		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachineList},
+	list := api.MicroVMList{
+		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVMList},
 		Metadata: api.ListMeta{ResourceVersion: version(s.rev)},
-		Items:    []api.Machine{},
+		Items:    []api.MicroVM{},
 	}
-	for _, m := range s.machines {
+	for _, m := range s.microvms {
 		list.Items = append(list.Items, m)
 	}
 	writeJSON(w, http.StatusOK, list)
 }
 
-func (s *Server) getMachine(w http.ResponseWriter, r *http.Request) {
+func (s *Server) getMicroVM(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m, ok := s.machines[r.PathValue("name")]
+	m, ok := s.microvms[r.PathValue("name")]
 	if !ok {
 		notFound(w, r.PathValue("name"))
 		return
@@ -86,17 +86,17 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// putMachine changes the spec and the finalizers of a Machine, checking the
+// putMicroVM changes the spec and the finalizers of a MicroVM, checking the
 // version and, as the API server does, refusing a finalizer added to a
-// Machine being deleted and removing a Machine whose last finalizer goes.
-func (s *Server) putMachine(w http.ResponseWriter, r *http.Request) {
-	var next api.Machine
+// MicroVM being deleted and removing a MicroVM whose last finalizer goes.
+func (s *Server) putMicroVM(w http.ResponseWriter, r *http.Request) {
+	var next api.MicroVM
 	if !decode(w, r, &next) {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m, found := s.machines[next.Metadata.Name]
+	m, found := s.microvms[next.Metadata.Name]
 	if !found {
 		notFound(w, next.Metadata.Name)
 		return
@@ -107,34 +107,34 @@ func (s *Server) putMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	deleting := m.Metadata.DeletionTimestamp != nil
 	if deleting && slices.ContainsFunc(next.Metadata.Finalizers, func(f string) bool { return !slices.Contains(m.Metadata.Finalizers, f) }) {
-		writeError(w, api.NewAPIError(api.ReasonInvalid, "a finalizer cannot be added to a machine being deleted"))
+		writeError(w, api.NewAPIError(api.ReasonInvalid, "a finalizer cannot be added to a microvm being deleted"))
 		return
 	}
 	s.rev++
 	m.Metadata.ResourceVersion = version(s.rev)
 	if deleting && len(next.Metadata.Finalizers) == 0 {
 		m.Metadata.Finalizers = nil
-		delete(s.machines, m.Metadata.Name)
+		delete(s.microvms, m.Metadata.Name)
 		s.record(api.EventDeleted, &m)
 		writeJSON(w, http.StatusOK, m)
 		return
 	}
 	m.Spec, m.Metadata.Finalizers = next.Spec, next.Metadata.Finalizers
-	s.machines[m.Metadata.Name] = m
+	s.microvms[m.Metadata.Name] = m
 	s.record(api.EventModified, &m)
 	writeJSON(w, http.StatusOK, m)
 }
 
-// putMachineStatus replaces the status of a Machine, checking the version
+// putMicroVMStatus replaces the status of a MicroVM, checking the version
 // and, as the API server does, the epoch.
-func (s *Server) putMachineStatus(w http.ResponseWriter, r *http.Request) {
-	var next api.Machine
+func (s *Server) putMicroVMStatus(w http.ResponseWriter, r *http.Request) {
+	var next api.MicroVM
 	if !decode(w, r, &next) {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m, found := s.machines[next.Metadata.Name]
+	m, found := s.microvms[next.Metadata.Name]
 	if !found {
 		notFound(w, next.Metadata.Name)
 		return
@@ -150,7 +150,7 @@ func (s *Server) putMachineStatus(w http.ResponseWriter, r *http.Request) {
 	m.Status = next.Status
 	s.rev++
 	m.Metadata.ResourceVersion = version(s.rev)
-	s.machines[m.Metadata.Name] = m
+	s.microvms[m.Metadata.Name] = m
 	s.record(api.EventModified, &m)
 	writeJSON(w, http.StatusOK, m)
 }

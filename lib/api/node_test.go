@@ -157,7 +157,7 @@ func TestClientNodeGetAndList(t *testing.T) {
 func TestClientWatchNodesDeliversNodeEventsOnly(t *testing.T) {
 	ctx := testContext(t)
 	s, c := newMemoryServer(t)
-	_, err := c.PutMachine(ctx, newMachine("m1"))
+	_, err := c.PutMicroVM(ctx, newMicroVM("m1"))
 	require.NoError(t, err)
 	registered, err := c.PutNode(ctx, newNode("node-a"))
 	require.NoError(t, err)
@@ -167,7 +167,7 @@ func TestClientWatchNodesDeliversNodeEventsOnly(t *testing.T) {
 	t.Cleanup(func() { _ = w.Close() })
 	ev := nextEvent(t, w)
 	assert.Equal(t, api.EventAdded, ev.Type)
-	assert.Equal(t, "node-a", ev.Object.Metadata.Name, "the Machine's event is not delivered to a Node watch")
+	assert.Equal(t, "node-a", ev.Object.Metadata.Name, "the MicroVM's event is not delivered to a Node watch")
 
 	admit := *registered
 	admit.Spec.Admitted = true
@@ -192,9 +192,9 @@ func TestClientWatchNodesDeliversNodeEventsOnly(t *testing.T) {
 }
 
 func TestWatchRefusesAnEventOfAnotherKind(t *testing.T) {
-	machine := `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"Machine","metadata":{"name":"m1"}}`
+	microvm := `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"MicroVM","metadata":{"name":"m1"}}`
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"type":"Added","object":`+machine+"}\n")
+		_, _ = io.WriteString(w, `{"type":"Added","object":`+microvm+"}\n")
 	}))
 	t.Cleanup(ts.Close)
 	c := api.NewClient(ts.URL, ts.Client())
@@ -206,10 +206,10 @@ func TestWatchRefusesAnEventOfAnotherKind(t *testing.T) {
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, io.EOF)
 
-	machines, err := c.WatchMachines(testContext(t), "1")
+	microvms, err := c.WatchMicroVMs(testContext(t), "1")
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = machines.Close() })
-	assert.Equal(t, "m1", nextEvent(t, machines).Object.Metadata.Name, "control: a Machine watch reads the same line")
+	t.Cleanup(func() { _ = microvms.Close() })
+	assert.Equal(t, "m1", nextEvent(t, microvms).Object.Metadata.Name, "control: a MicroVM watch reads the same line")
 }
 
 func TestWatchWithoutAVersionSendsNoRequest(t *testing.T) {
@@ -221,7 +221,7 @@ func TestWatchWithoutAVersionSendsNoRequest(t *testing.T) {
 	c := api.NewClient(ts.URL, ts.Client())
 	ctx := testContext(t)
 
-	_, err := c.WatchMachines(ctx, "")
+	_, err := c.WatchMicroVMs(ctx, "")
 	assert.Error(t, err)
 	_, err = c.WatchNodes(ctx, "")
 	assert.Error(t, err)

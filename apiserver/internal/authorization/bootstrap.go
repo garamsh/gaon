@@ -40,14 +40,14 @@ var bootstrapRoles = []struct {
 	rules       []api.PolicyRule
 }{
 	{RoleScheduler, GroupSchedulers, []api.PolicyRule{
-		{APIGroups: compute, Resources: []string{"machines", "nodes", "volumes"}, Verbs: readVerbs},
-		{APIGroups: compute, Resources: []string{"machines/binding"}, Verbs: []api.Verb{api.VerbCreate}},
-		{APIGroups: compute, Resources: []string{"machines/status"}, Verbs: updateVerb},
+		{APIGroups: compute, Resources: []string{"microvms", "nodes", "volumes"}, Verbs: readVerbs},
+		{APIGroups: compute, Resources: []string{"microvms/binding"}, Verbs: []api.Verb{api.VerbCreate}},
+		{APIGroups: compute, Resources: []string{"microvms/status"}, Verbs: updateVerb},
 	}},
 	{RoleControllers, GroupControllers, []api.PolicyRule{
-		{APIGroups: compute, Resources: []string{"machines", "nodes", "leases", "certificatesigningrequests"}, Verbs: readVerbs},
-		{APIGroups: compute, Resources: []string{"machines"}, Verbs: []api.Verb{api.VerbCreate, api.VerbUpdate}},
-		{APIGroups: compute, Resources: []string{"machines/status", "nodes/status", "volumes/status", "certificatesigningrequests/status"}, Verbs: updateVerb},
+		{APIGroups: compute, Resources: []string{"microvms", "nodes", "leases", "certificatesigningrequests"}, Verbs: readVerbs},
+		{APIGroups: compute, Resources: []string{"microvms"}, Verbs: []api.Verb{api.VerbCreate, api.VerbUpdate}},
+		{APIGroups: compute, Resources: []string{"microvms/status", "nodes/status", "volumes/status", "certificatesigningrequests/status"}, Verbs: updateVerb},
 	}},
 	{RoleAdmin, GroupAdmins, []api.PolicyRule{
 		{APIGroups: []string{api.APIGroupAll}, Resources: []string{api.ResourceAll}, Verbs: []api.Verb{api.VerbAll}},

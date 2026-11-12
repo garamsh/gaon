@@ -1,4 +1,4 @@
-package machines
+package microvms
 
 import (
 	"context"
@@ -13,27 +13,27 @@ import (
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 )
 
-// Params are the periods the Machine loop keeps.
+// Params are the periods the MicroVM loop keeps.
 type Params struct {
-	// Resync is the time between two reconciliations of every Machine, which
+	// Resync is the time between two reconciliations of every MicroVM, which
 	// is also how soon a start mvmd refused or a failed call is tried again.
 	Resync time.Duration
 	// Retry is the wait before listing again after a list or a watch failed.
 	Retry time.Duration
-	// RestartBackoff is the wait before the first restart of a Machine, which
+	// RestartBackoff is the wait before the first restart of a MicroVM, which
 	// doubles with each restart up to RestartBackoffMax.
 	RestartBackoff    time.Duration
 	RestartBackoffMax time.Duration
-	// RestartResetAfter is how long a Machine runs before the wait starts
+	// RestartResetAfter is how long a MicroVM runs before the wait starts
 	// again from RestartBackoff.
 	RestartResetAfter time.Duration
 	// ReadTimeout bounds the read of an entrypoint's record.
 	ReadTimeout time.Duration
 }
 
-// Service runs the Machines bound to the node.
+// Service runs the MicroVMs bound to the node.
 type Service interface {
-	// Run lists the Machines, watches them and reconciles on every change and
+	// Run lists the MicroVMs, watches them and reconciles on every change and
 	// every Params.Resync, until ctx ends.
 	Run(ctx context.Context)
 }
@@ -51,7 +51,7 @@ type service struct {
 	runs    map[string]*run
 }
 
-// NewService returns a Service for the Machines bound to the node named node,
+// NewService returns a Service for the MicroVMs bound to the node named node,
 // which creates each with the policy network gives and the disks storage
 // readies.
 func NewService(node string, params Params, api API, runtime Runtime, network Network, storage Storage, clk clock.Clock, log *slog.Logger) Service {
@@ -61,7 +61,7 @@ func NewService(node string, params Params, api API, runtime Runtime, network Ne
 func (s *service) Run(ctx context.Context) {
 	for {
 		if err := s.session(ctx); err != nil && ctx.Err() == nil {
-			s.log.Warn("machine session ended", "node", s.node, "error", err)
+			s.log.Warn("microvm session ended", "node", s.node, "error", err)
 		}
 		if err := s.clock.Sleep(ctx, s.params.Retry); err != nil {
 			return
@@ -70,24 +70,24 @@ func (s *service) Run(ctx context.Context) {
 }
 
 type event struct {
-	ev  api.Event[api.Machine]
+	ev  api.Event[api.MicroVM]
 	err error
 }
 
-// session lists the Machines, reconciles them all, and then follows the
+// session lists the MicroVMs, reconciles them all, and then follows the
 // watch from the version of the list, until the watch or a list fails.
 func (s *service) session(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	list, err := s.api.ListMachines(ctx)
+	list, err := s.api.ListMicroVMs(ctx)
 	if err != nil {
-		return fmt.Errorf("list machines: %w", err)
+		return fmt.Errorf("list microvms: %w", err)
 	}
 	s.cache.replace(list.Items)
 	s.logErr(s.reconcileAll(ctx))
-	w, err := s.api.WatchMachines(ctx, list.Metadata.ResourceVersion)
+	w, err := s.api.WatchMicroVMs(ctx, list.Metadata.ResourceVersion)
 	if err != nil {
-		return fmt.Errorf("watch machines: %w", err)
+		return fmt.Errorf("watch microvms: %w", err)
 	}
 	defer func() { _ = w.Close() }()
 	events := make(chan event)
@@ -134,7 +134,7 @@ func (s *service) session(ctx context.Context) error {
 }
 
 // observe applies one change to the cache and reports whether it was taken.
-func (s *service) observe(t api.EventType, m api.Machine) bool {
+func (s *service) observe(t api.EventType, m api.MicroVM) bool {
 	if t == api.EventDeleted {
 		return s.cache.forget(m)
 	}

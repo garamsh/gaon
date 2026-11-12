@@ -1,6 +1,6 @@
-package machines
+package microvms
 
-// Refusal is a plugin's refusal of a Machine. The Machine fails with Reason
+// Refusal is a plugin's refusal of a MicroVM. The MicroVM fails with Reason
 // in its Ready condition and Message as the condition's message.
 type Refusal struct {
 	Reason  string

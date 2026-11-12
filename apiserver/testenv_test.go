@@ -130,11 +130,11 @@ func ctx(t *testing.T) context.Context {
 	return c
 }
 
-func machine(name string) *api.Machine {
-	return &api.Machine{
-		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachine},
+func microvm(name string) *api.MicroVM {
+	return &api.MicroVM{
+		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVM},
 		Metadata: api.ObjectMeta{Name: name},
-		Spec:     api.MachineSpec{Image: "alpine", RunStrategy: api.RunAlways},
+		Spec:     api.MicroVMSpec{Image: "alpine", RunStrategy: api.RunAlways},
 	}
 }
 
@@ -153,18 +153,18 @@ func lease(name string) *api.Lease {
 	}
 }
 
-// createMachine creates a Machine and fails the test if that does not work.
-func (e *env) createMachine(t *testing.T, m *api.Machine) *api.Machine {
+// createMicroVM creates a MicroVM and fails the test if that does not work.
+func (e *env) createMicroVM(t *testing.T, m *api.MicroVM) *api.MicroVM {
 	t.Helper()
-	created, err := e.api.PutMachine(ctx(t), m)
+	created, err := e.api.PutMicroVM(ctx(t), m)
 	require.NoError(t, err)
 	return created
 }
 
-// bind binds the Machine at its current version and returns the result.
-func (e *env) bind(t *testing.T, m *api.Machine, nodeName string, epoch api.Epoch) *api.Machine {
+// bind binds the MicroVM at its current version and returns the result.
+func (e *env) bind(t *testing.T, m *api.MicroVM, nodeName string, epoch api.Epoch) *api.MicroVM {
 	t.Helper()
-	bound, err := e.api.BindMachine(ctx(t), m.Metadata.Name, api.Binding{ResourceVersion: m.Metadata.ResourceVersion, NodeName: nodeName, BindingEpoch: epoch})
+	bound, err := e.api.BindMicroVM(ctx(t), m.Metadata.Name, api.Binding{ResourceVersion: m.Metadata.ResourceVersion, NodeName: nodeName, BindingEpoch: epoch})
 	require.NoError(t, err)
 	return bound
 }

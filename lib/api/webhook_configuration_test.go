@@ -24,7 +24,7 @@ func newWebhook(t *testing.T, name string) api.Webhook {
 			Operations:  []api.Operation{api.OperationCreate, api.OperationUpdate},
 			APIGroups:   []string{api.Group},
 			APIVersions: []string{api.Version},
-			Resources:   []string{"machines", "machines/status"},
+			Resources:   []string{"microvms", "microvms/status"},
 		}},
 	}
 }
@@ -196,14 +196,14 @@ func TestWebhookValidateRefusesAnUnknownOperation(t *testing.T) {
 }
 
 func TestWebhookValidateRefusesAResourceThatIsNotAPattern(t *testing.T) {
-	for _, res := range []string{"*", "*/*", "machines", "machines/status", "machines/*", "*/status", "custom-things", "things2/sub-x"} {
+	for _, res := range []string{"*", "*/*", "microvms", "microvms/status", "microvms/*", "*/status", "custom-things", "things2/sub-x"} {
 		w := newWebhook(t, "a.example.com")
 		w.Rules[0].Resources = []string{res}
 		assertValid(t, validateWebhooks(t, w), "control: %q", res)
 	}
-	for _, res := range []string{"", "/", "machines/", "/status", "a/b/c", "Machines", "machines/Status", "ma*", "**", "-machines", "machines status"} {
+	for _, res := range []string{"", "/", "microvms/", "/status", "a/b/c", "MicroVMs", "microvms/Status", "ma*", "**", "-microvms", "microvms status"} {
 		w := newWebhook(t, "a.example.com")
-		w.Rules[0].Resources = []string{"machines", res}
+		w.Rules[0].Resources = []string{"microvms", res}
 		assertInvalid(t, validateWebhooks(t, w), "resource %q", res)
 	}
 }

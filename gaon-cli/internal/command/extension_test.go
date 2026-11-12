@@ -29,7 +29,7 @@ metadata:
   name: reader
 rules:
   - apiGroups: ["compute.gaon.garam.sh"]
-    resources: ["machines"]
+    resources: ["microvms"]
     verbs: ["get", "list"]
 `
 
@@ -129,7 +129,7 @@ func seedExtensions(t *testing.T, f *fakeServer) {
 		TypeMeta: api.TypeMeta{APIVersion: api.RBACGroupVersion, Kind: api.KindClusterRole},
 		Metadata: api.ObjectMeta{Name: "reader"},
 		Rules: []api.PolicyRule{
-			{APIGroups: []string{api.Group}, Resources: []string{"machines"}, Verbs: []api.Verb{"get", "list"}},
+			{APIGroups: []string{api.Group}, Resources: []string{"microvms"}, Verbs: []api.Verb{"get", "list"}},
 			{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []api.Verb{"get"}},
 		},
 	})
@@ -250,7 +250,7 @@ func TestDescribe_PrintsTheExtensionKinds(t *testing.T) {
 	}{
 		{"a cluster role", []string{"describe", "cr", "reader"}, []string{
 			`(?m)^Kind:\s+ClusterRole$`,
-			`(?m)^Rule 1:\s+apiGroups=\[compute\.gaon\.garam\.sh\] resources=\[machines\] verbs=\[get list\]$`,
+			`(?m)^Rule 1:\s+apiGroups=\[compute\.gaon\.garam\.sh\] resources=\[microvms\] verbs=\[get list\]$`,
 			`(?m)^Rule 2:\s+apiGroups=\[\*\] resources=\[\*\] verbs=\[get\]$`,
 		}},
 		{"a cluster role binding", []string{"describe", "crb", "readers"}, []string{
@@ -533,17 +533,17 @@ func TestCustomKind_ANameTwoDefinitionsShareIsAmbiguousUntilItIsQualified(t *tes
 func TestCustomKind_ABuiltInNameIsNotTakenByADefinition(t *testing.T) {
 	f := newFakeServer(t)
 	seedCluster(t, f)
-	seedDefinition(f, newDefinition("other.example.com", "machines", "machine", "Machine", true))
-	f.seed("/apis/other.example.com/v1/machines/m", map[string]any{
-		"apiVersion": "other.example.com/v1", "kind": "Machine", "metadata": map[string]any{"name": "m"},
+	seedDefinition(f, newDefinition("other.example.com", "microvms", "microvm", "MicroVM", true))
+	f.seed("/apis/other.example.com/v1/microvms/m", map[string]any{
+		"apiVersion": "other.example.com/v1", "kind": "MicroVM", "metadata": map[string]any{"name": "m"},
 	})
 
-	stdout, stderr, code := execute(t, f, "get", "machine")
+	stdout, stderr, code := execute(t, f, "get", "microvm")
 	require.Equal(t, command.ExitOK, code, stderr)
-	assert.Equal(t, tableOf["machine"], stdout)
+	assert.Equal(t, tableOf["microvm"], stdout)
 
 	t.Run("control: the definition's own name reaches its objects", func(t *testing.T) {
-		stdout, stderr, code := execute(t, f, "get", "machines.other.example.com")
+		stdout, stderr, code := execute(t, f, "get", "microvms.other.example.com")
 		require.Equal(t, command.ExitOK, code, stderr)
 		assert.Equal(t, "NAME  GENERATION\nm     0\n", stdout)
 	})
@@ -575,7 +575,7 @@ func TestServer_WithoutTheComputeRootCannotReachOtherGroups(t *testing.T) {
 	t.Run("a compute document before a role is not sent either", func(t *testing.T) {
 		before := f.writes()
 
-		_, stderr, code := executeAt(t, f.url(), "apply", "-f", writeFile(t, machineYAML+"---\n"+clusterRoleYAML))
+		_, stderr, code := executeAt(t, f.url(), "apply", "-f", writeFile(t, microvmYAML+"---\n"+clusterRoleYAML))
 
 		assert.Equal(t, command.ExitUsage, code, stderr)
 		assert.Equal(t, before, f.writes(), "writes sent")
@@ -584,10 +584,10 @@ func TestServer_WithoutTheComputeRootCannotReachOtherGroups(t *testing.T) {
 	t.Run("control: the compute kinds are served at a root without the suffix", func(t *testing.T) {
 		before := f.writes()
 
-		stdout, stderr, code := executeAt(t, f.url(), "apply", "-f", writeFile(t, machineYAML))
+		stdout, stderr, code := executeAt(t, f.url(), "apply", "-f", writeFile(t, microvmYAML))
 
 		require.Equal(t, command.ExitOK, code, stderr)
-		assert.Equal(t, "machine/web created\n", stdout)
+		assert.Equal(t, "microvm/web created\n", stdout)
 		assert.Equal(t, before+1, f.writes())
 	})
 

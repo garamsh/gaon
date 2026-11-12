@@ -43,32 +43,32 @@ func TestNodeAuthorizer_ANodeNeitherCreatesNorDeletesAVolume(t *testing.T) {
 	assert.NoError(t, err, "control: an administrator creates one")
 }
 
-func TestNodeAuthorizer_ANodeWritesTheStatusOfAVolumePinnedToItOrUsedByAMachineBoundToIt(t *testing.T) {
+func TestNodeAuthorizer_ANodeWritesTheStatusOfAVolumePinnedToItOrUsedByAMicroVMBoundToIt(t *testing.T) {
 	f := newNodeFixture(t)
 
 	// Used and not pinned: a class the node agent does not serve is never
-	// pinned, and a Machine of node-1 mounts it.
+	// pinned, and a MicroVM of node-1 mounts it.
 	remote := volume("remote")
 	remote.Spec.StorageClass = "ceph"
 	remote.Spec.AccessModes = nil
 	remoteV, err := f.admin.PutVolume(ctx(t), remote)
 	require.NoError(t, err)
-	mc := machine("mc")
-	mc.Spec.Volumes = []api.MachineVolume{{Name: "remote", MountPath: "/remote"}}
-	mc, err = f.admin.PutMachine(ctx(t), mc)
+	mvm := microvm("mvm")
+	mvm.Spec.Volumes = []api.MicroVMVolume{{Name: "remote", MountPath: "/remote"}}
+	mvm, err = f.admin.PutMicroVM(ctx(t), mvm)
 	require.NoError(t, err)
-	_, err = f.admin.BindMachine(ctx(t), "mc", api.Binding{ResourceVersion: mc.Metadata.ResourceVersion, NodeName: "node-1", BindingEpoch: 1})
+	_, err = f.admin.BindMicroVM(ctx(t), "mvm", api.Binding{ResourceVersion: mvm.Metadata.ResourceVersion, NodeName: "node-1", BindingEpoch: 1})
 	require.NoError(t, err)
 	remoteV.Status.Phase = api.VolumeAvailable
 	_, err = f.node2.PutVolumeStatus(ctx(t), remoteV)
-	assert.ErrorIs(t, err, api.ErrForbidden, "used by a Machine of another Node")
+	assert.ErrorIs(t, err, api.ErrForbidden, "used by a MicroVM of another Node")
 	remoteV, err = f.node1.PutVolumeStatus(ctx(t), remoteV)
-	assert.NoError(t, err, "control: used by a Machine bound to node-1, pinned to none")
+	assert.NoError(t, err, "control: used by a MicroVM bound to node-1, pinned to none")
 
-	// Pinned and not used: the Machine that used v1 is gone.
-	m1, err := f.admin.GetMachine(ctx(t), "m1")
+	// Pinned and not used: the MicroVM that used v1 is gone.
+	m1, err := f.admin.GetMicroVM(ctx(t), "m1")
 	require.NoError(t, err)
-	_, err = f.admin.DeleteMachine(ctx(t), "m1", m1.Metadata.ResourceVersion)
+	_, err = f.admin.DeleteMicroVM(ctx(t), "m1", m1.Metadata.ResourceVersion)
 	require.NoError(t, err)
 	v1, err := f.admin.GetVolume(ctx(t), "v1")
 	require.NoError(t, err)
@@ -76,7 +76,7 @@ func TestNodeAuthorizer_ANodeWritesTheStatusOfAVolumePinnedToItOrUsedByAMachineB
 	_, err = f.node2.PutVolumeStatus(ctx(t), v1)
 	assert.ErrorIs(t, err, api.ErrForbidden, "pinned to another Node")
 	_, err = f.node1.PutVolumeStatus(ctx(t), v1)
-	assert.NoError(t, err, "control: pinned to node-1, used by no Machine")
+	assert.NoError(t, err, "control: pinned to node-1, used by no MicroVM")
 
 	v2 := *f.v2
 	v2.Status.Phase = api.VolumeAvailable

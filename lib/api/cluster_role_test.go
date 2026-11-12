@@ -15,7 +15,7 @@ func newClusterRole(name string) *api.ClusterRole {
 		Metadata: api.ObjectMeta{Name: name},
 		Rules: []api.PolicyRule{{
 			APIGroups: []string{api.Group},
-			Resources: []string{"machines", "machines/status"},
+			Resources: []string{"microvms", "microvms/status"},
 			Verbs:     []api.Verb{api.VerbGet, api.VerbList},
 		}},
 	}
@@ -38,7 +38,7 @@ func TestClusterRoleValidateRefusesARuleThatMatchesNothing(t *testing.T) {
 		"no verbs":          func(r *api.PolicyRule) { r.Verbs = nil },
 		"no resources":      func(r *api.PolicyRule) { r.Resources = nil },
 		"no apiGroups":      func(r *api.PolicyRule) { r.APIGroups = nil },
-		"an empty resource": func(r *api.PolicyRule) { r.Resources = []string{"machines", ""} },
+		"an empty resource": func(r *api.PolicyRule) { r.Resources = []string{"microvms", ""} },
 		"an empty apiGroup": func(r *api.PolicyRule) { r.APIGroups = []string{""} },
 	} {
 		role := newClusterRole("reader")

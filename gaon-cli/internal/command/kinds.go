@@ -56,18 +56,18 @@ type kind struct {
 
 // kinds lists a kind for every resource type of lib/api.
 var kinds = []kind{
-	spec[api.Machine, api.MachineList]{
-		name:       "machine",
-		plural:     "machines",
+	spec[api.MicroVM, api.MicroVMList]{
+		name:       "microvm",
+		plural:     "microvms",
 		group:      api.Group,
-		short:      "mc",
-		apiKind:    api.KindMachine,
-		collection: "/machines",
+		short:      "mvm",
+		apiKind:    api.KindMicroVM,
+		collection: "/microvms",
 		header:     []string{"NAME", "PHASE", "NODE", "EPOCH"},
-		row: func(m *api.Machine) []string {
+		row: func(m *api.MicroVM) []string {
 			return []string{m.Metadata.Name, string(m.EffectivePhase()), orDash(m.Spec.NodeName), strconv.FormatInt(int64(m.Spec.BindingEpoch), 10)}
 		},
-		details: func(m *api.Machine) []detail {
+		details: func(m *api.MicroVM) []detail {
 			return []detail{
 				{"Image", orDash(m.Spec.Image)},
 				{"Kernel", orDash(m.Spec.Kernel)},
@@ -85,14 +85,14 @@ var kinds = []kind{
 				{"Last exit", lastExit(m.Status.LastExit)},
 			}
 		},
-		conditions: func(m *api.Machine) []api.Condition { return m.Status.Conditions },
-		items:      func(l *api.MachineList) []api.Machine { return l.Items },
-		meta:       func(m *api.Machine) *api.ObjectMeta { return &m.Metadata },
-		validate:   (*api.Machine).Validate,
-		get:        (*api.Client).GetMachine,
-		list:       (*api.Client).ListMachines,
-		put:        (*api.Client).PutMachine,
-		del:        (*api.Client).DeleteMachine,
+		conditions: func(m *api.MicroVM) []api.Condition { return m.Status.Conditions },
+		items:      func(l *api.MicroVMList) []api.MicroVM { return l.Items },
+		meta:       func(m *api.MicroVM) *api.ObjectMeta { return &m.Metadata },
+		validate:   (*api.MicroVM).Validate,
+		get:        (*api.Client).GetMicroVM,
+		list:       (*api.Client).ListMicroVMs,
+		put:        (*api.Client).PutMicroVM,
+		del:        (*api.Client).DeleteMicroVM,
 	}.kind(),
 	spec[api.Node, api.NodeList]{
 		name:       "node",

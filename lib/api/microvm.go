@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// RunStrategy says when a Machine runs.
+// RunStrategy says when a MicroVM runs.
 type RunStrategy string
 
 // The run strategies.
@@ -18,32 +18,32 @@ const (
 	RunHalted         RunStrategy = "Halted"
 )
 
-// MachinePhase is the phase a Machine's status reports.
-type MachinePhase string
+// MicroVMPhase is the phase a MicroVM's status reports.
+type MicroVMPhase string
 
-// The Machine phases.
+// The MicroVM phases.
 const (
-	MachinePending   MachinePhase = "Pending"
-	MachineRunning   MachinePhase = "Running"
-	MachineSuspended MachinePhase = "Suspended"
-	MachineSucceeded MachinePhase = "Succeeded"
-	MachineFailed    MachinePhase = "Failed"
-	MachineStopped   MachinePhase = "Stopped"
+	MicroVMPending   MicroVMPhase = "Pending"
+	MicroVMRunning   MicroVMPhase = "Running"
+	MicroVMSuspended MicroVMPhase = "Suspended"
+	MicroVMSucceeded MicroVMPhase = "Succeeded"
+	MicroVMFailed    MicroVMPhase = "Failed"
+	MicroVMStopped   MicroVMPhase = "Stopped"
 )
 
-// Machine is a microVM.
-type Machine struct {
+// MicroVM is a microVM.
+type MicroVM struct {
 	TypeMeta
 	Metadata ObjectMeta    `json:"metadata"`
-	Spec     MachineSpec   `json:"spec"`
-	Status   MachineStatus `json:"status"`
+	Spec     MicroVMSpec   `json:"spec"`
+	Status   MicroVMStatus `json:"status"`
 }
 
-// MachineList is the answer to listing Machines.
-type MachineList struct {
+// MicroVMList is the answer to listing MicroVMs.
+type MicroVMList struct {
 	TypeMeta
 	Metadata ListMeta  `json:"metadata"`
-	Items    []Machine `json:"items"`
+	Items    []MicroVM `json:"items"`
 }
 
 // ResourceList holds the quantities of cpu and memory.
@@ -52,26 +52,26 @@ type ResourceList struct {
 	Memory Quantity `json:"memory,omitempty"`
 }
 
-// ResourceRequirements holds a Machine's requests and limits.
+// ResourceRequirements holds a MicroVM's requests and limits.
 type ResourceRequirements struct {
 	Requests ResourceList `json:"requests"`
 	Limits   ResourceList `json:"limits"`
 }
 
-// MachineVolume mounts the Volume named Name at MountPath.
-type MachineVolume struct {
+// MicroVMVolume mounts the Volume named Name at MountPath.
+type MicroVMVolume struct {
 	Name      string `json:"name"`
 	MountPath string `json:"mountPath"`
 }
 
-// MachineSpec is the desired state of a Machine. NodeName and BindingEpoch
+// MicroVMSpec is the desired state of a MicroVM. NodeName and BindingEpoch
 // are set by the binding only.
-type MachineSpec struct {
+type MicroVMSpec struct {
 	Image                string               `json:"image,omitempty"`
 	Kernel               string               `json:"kernel,omitempty"`
 	Resources            ResourceRequirements `json:"resources"`
 	RootDiskSize         Quantity             `json:"rootDiskSize,omitempty"`
-	Volumes              []MachineVolume      `json:"volumes,omitempty"`
+	Volumes              []MicroVMVolume      `json:"volumes,omitempty"`
 	Networks             []string             `json:"networks,omitempty"`
 	Ports                []int32              `json:"ports,omitempty"`
 	RunStrategy          RunStrategy          `json:"runStrategy"`
@@ -82,9 +82,9 @@ type MachineSpec struct {
 	BindingEpoch         Epoch                `json:"bindingEpoch,omitempty"`
 }
 
-// MachineStatus is the observed state of a Machine.
-type MachineStatus struct {
-	Phase              MachinePhase `json:"phase,omitempty"`
+// MicroVMStatus is the observed state of a MicroVM.
+type MicroVMStatus struct {
+	Phase              MicroVMPhase `json:"phase,omitempty"`
 	BindingEpoch       Epoch        `json:"bindingEpoch,omitempty"`
 	ObservedGeneration int64        `json:"observedGeneration,omitempty"`
 	Conditions         []Condition  `json:"conditions,omitempty"`
@@ -94,13 +94,13 @@ type MachineStatus struct {
 	LastExit           *ExitRecord  `json:"lastExit,omitempty"`
 }
 
-// ExitRecord is the exit code and time of a Machine's last exit.
+// ExitRecord is the exit code and time of a MicroVM's last exit.
 type ExitRecord struct {
 	Code int32     `json:"code"`
 	Time time.Time `json:"time"`
 }
 
-// Binding is the body of POST /machines/{name}/binding: the Node to bind to
+// Binding is the body of POST /microvms/{name}/binding: the Node to bind to
 // and the new epoch, conditioned on ResourceVersion.
 type Binding struct {
 	ResourceVersion ResourceVersion `json:"resourceVersion"`
@@ -110,8 +110,8 @@ type Binding struct {
 
 // Validate checks the identity and the spec of m, the section a user or a
 // controller writes.
-func (m *Machine) Validate() error {
-	if err := validateIdentity(m.TypeMeta, GroupVersion, KindMachine, m.Metadata); err != nil {
+func (m *MicroVM) Validate() error {
+	if err := validateIdentity(m.TypeMeta, GroupVersion, KindMicroVM, m.Metadata); err != nil {
 		return err
 	}
 	switch m.Spec.RunStrategy {
@@ -125,7 +125,7 @@ func (m *Machine) Validate() error {
 // ValidateUpdate checks that m changes nothing of old's spec but runStrategy,
 // idleTimeoutSeconds, resources and volumes. That includes nodeName and
 // bindingEpoch, which only a binding sets.
-func (m *Machine) ValidateUpdate(old *Machine) error {
+func (m *MicroVM) ValidateUpdate(old *MicroVM) error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
@@ -142,7 +142,7 @@ func (m *Machine) ValidateUpdate(old *Machine) error {
 
 // Bind sets the node and epoch of b on m, if b names a node and its epoch is
 // m's current epoch plus one.
-func (m *Machine) Bind(b Binding) error {
+func (m *MicroVM) Bind(b Binding) error {
 	if b.NodeName == "" {
 		return invalid("binding names no node")
 	}
@@ -156,9 +156,9 @@ func (m *Machine) Bind(b Binding) error {
 
 // ValidateStatusUpdate checks m as a status write to current: a known phase
 // and the epoch of current's spec.
-func (m *Machine) ValidateStatusUpdate(current *Machine) error {
+func (m *MicroVM) ValidateStatusUpdate(current *MicroVM) error {
 	switch m.Status.Phase {
-	case MachinePending, MachineRunning, MachineSuspended, MachineSucceeded, MachineFailed, MachineStopped:
+	case MicroVMPending, MicroVMRunning, MicroVMSuspended, MicroVMSucceeded, MicroVMFailed, MicroVMStopped:
 	default:
 		return invalid("status.phase is %q, want Pending, Running, Suspended, Succeeded, Failed or Stopped", m.Status.Phase)
 	}
@@ -170,9 +170,9 @@ func (m *Machine) ValidateStatusUpdate(current *Machine) error {
 
 // EffectivePhase is the phase a reader acts on: a status whose epoch differs
 // from the spec's is void and reads as Pending.
-func (m *Machine) EffectivePhase() MachinePhase {
+func (m *MicroVM) EffectivePhase() MicroVMPhase {
 	if m.Status.BindingEpoch != m.Spec.BindingEpoch {
-		return MachinePending
+		return MicroVMPending
 	}
 	return m.Status.Phase
 }

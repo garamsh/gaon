@@ -107,7 +107,7 @@ func (r *CustomResourceClient) List(ctx context.Context) (*CustomObjectList, err
 }
 
 // Watch streams the changes made after version rv (GET /<plural>?watch=true),
-// as WatchMachines does.
+// as WatchMicroVMs does.
 func (r *CustomResourceClient) Watch(ctx context.Context, rv ResourceVersion) (*Watch[CustomObject], error) {
 	return watch[CustomObject](ctx, r.c, "/"+url.PathEscape(r.t.Plural), r.t.Kind, rv)
 }

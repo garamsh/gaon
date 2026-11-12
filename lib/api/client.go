@@ -48,48 +48,48 @@ func NewClient(root string, httpClient *http.Client, opts ...ClientOption) *Clie
 	return c
 }
 
-// PutMachine creates m, or changes its spec when m carries the ResourceVersion
-// it was read at (PUT /machines/{name}).
-func (c *Client) PutMachine(ctx context.Context, m *Machine) (*Machine, error) {
-	return put(ctx, c, "/machines/"+url.PathEscape(m.Metadata.Name), m)
+// PutMicroVM creates m, or changes its spec when m carries the ResourceVersion
+// it was read at (PUT /microvms/{name}).
+func (c *Client) PutMicroVM(ctx context.Context, m *MicroVM) (*MicroVM, error) {
+	return put(ctx, c, "/microvms/"+url.PathEscape(m.Metadata.Name), m)
 }
 
-// BindMachine binds a Machine to a node and sets its epoch
-// (POST /machines/{name}/binding).
-func (c *Client) BindMachine(ctx context.Context, name string, b Binding) (*Machine, error) {
-	return call[Machine](ctx, c, http.MethodPost, "/machines/"+url.PathEscape(name)+"/binding", nil, b)
+// BindMicroVM binds a MicroVM to a node and sets its epoch
+// (POST /microvms/{name}/binding).
+func (c *Client) BindMicroVM(ctx context.Context, name string, b Binding) (*MicroVM, error) {
+	return call[MicroVM](ctx, c, http.MethodPost, "/microvms/"+url.PathEscape(name)+"/binding", nil, b)
 }
 
-// PutMachineStatus writes m's status (PUT /machines/{name}/status).
-func (c *Client) PutMachineStatus(ctx context.Context, m *Machine) (*Machine, error) {
-	return put(ctx, c, "/machines/"+url.PathEscape(m.Metadata.Name)+"/status", m)
+// PutMicroVMStatus writes m's status (PUT /microvms/{name}/status).
+func (c *Client) PutMicroVMStatus(ctx context.Context, m *MicroVM) (*MicroVM, error) {
+	return put(ctx, c, "/microvms/"+url.PathEscape(m.Metadata.Name)+"/status", m)
 }
 
-// DeleteMachine sets the deletionTimestamp of a Machine, if it is still at
-// version rv (DELETE /machines/{name}).
-func (c *Client) DeleteMachine(ctx context.Context, name string, rv ResourceVersion) (*Machine, error) {
+// DeleteMicroVM sets the deletionTimestamp of a MicroVM, if it is still at
+// version rv (DELETE /microvms/{name}).
+func (c *Client) DeleteMicroVM(ctx context.Context, name string, rv ResourceVersion) (*MicroVM, error) {
 	if rv == "" {
-		return nil, errors.New("delete machine: resource version is empty")
+		return nil, errors.New("delete microvm: resource version is empty")
 	}
-	return call[Machine](ctx, c, http.MethodDelete, "/machines/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+	return call[MicroVM](ctx, c, http.MethodDelete, "/microvms/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
 }
 
-// GetMachine returns the named Machine (GET /machines/{name}).
-func (c *Client) GetMachine(ctx context.Context, name string) (*Machine, error) {
-	return call[Machine](ctx, c, http.MethodGet, "/machines/"+url.PathEscape(name), nil, nil)
+// GetMicroVM returns the named MicroVM (GET /microvms/{name}).
+func (c *Client) GetMicroVM(ctx context.Context, name string) (*MicroVM, error) {
+	return call[MicroVM](ctx, c, http.MethodGet, "/microvms/"+url.PathEscape(name), nil, nil)
 }
 
-// ListMachines returns every Machine and the version to watch from
-// (GET /machines).
-func (c *Client) ListMachines(ctx context.Context) (*MachineList, error) {
-	return call[MachineList](ctx, c, http.MethodGet, "/machines", nil, nil)
+// ListMicroVMs returns every MicroVM and the version to watch from
+// (GET /microvms).
+func (c *Client) ListMicroVMs(ctx context.Context) (*MicroVMList, error) {
+	return call[MicroVMList](ctx, c, http.MethodGet, "/microvms", nil, nil)
 }
 
-// WatchMachines streams the changes made after version rv
-// (GET /machines?watch=true). When rv has expired, Next returns ErrExpired:
+// WatchMicroVMs streams the changes made after version rv
+// (GET /microvms?watch=true). When rv has expired, Next returns ErrExpired:
 // list again and watch from the list's version.
-func (c *Client) WatchMachines(ctx context.Context, rv ResourceVersion) (*Watch[Machine], error) {
-	return watch[Machine](ctx, c, "/machines", KindMachine, rv)
+func (c *Client) WatchMicroVMs(ctx context.Context, rv ResourceVersion) (*Watch[MicroVM], error) {
+	return watch[MicroVM](ctx, c, "/microvms", KindMicroVM, rv)
 }
 
 // PutNode creates n, or changes its spec when n carries the ResourceVersion
@@ -114,7 +114,7 @@ func (c *Client) ListNodes(ctx context.Context) (*NodeList, error) {
 }
 
 // WatchNodes streams the changes made after version rv
-// (GET /nodes?watch=true), as WatchMachines does.
+// (GET /nodes?watch=true), as WatchMicroVMs does.
 func (c *Client) WatchNodes(ctx context.Context, rv ResourceVersion) (*Watch[Node], error) {
 	return watch[Node](ctx, c, "/nodes", KindNode, rv)
 }
@@ -130,7 +130,7 @@ func (c *Client) ListLeases(ctx context.Context) (*LeaseList, error) {
 }
 
 // WatchLeases streams the changes made after version rv
-// (GET /leases?watch=true), as WatchMachines does.
+// (GET /leases?watch=true), as WatchMicroVMs does.
 func (c *Client) WatchLeases(ctx context.Context, rv ResourceVersion) (*Watch[Lease], error) {
 	return watch[Lease](ctx, c, "/leases", KindLease, rv)
 }
@@ -163,7 +163,7 @@ func (c *Client) ListVolumes(ctx context.Context) (*VolumeList, error) {
 }
 
 // WatchVolumes streams the changes made after version rv
-// (GET /volumes?watch=true), as WatchMachines does.
+// (GET /volumes?watch=true), as WatchMicroVMs does.
 func (c *Client) WatchVolumes(ctx context.Context, rv ResourceVersion) (*Watch[Volume], error) {
 	return watch[Volume](ctx, c, "/volumes", KindVolume, rv)
 }
@@ -205,7 +205,7 @@ func (c *Client) ListCertificateSigningRequests(ctx context.Context) (*Certifica
 }
 
 // WatchCertificateSigningRequests streams the changes made after version rv
-// (GET /certificatesigningrequests?watch=true), as WatchMachines does.
+// (GET /certificatesigningrequests?watch=true), as WatchMicroVMs does.
 func (c *Client) WatchCertificateSigningRequests(ctx context.Context, rv ResourceVersion) (*Watch[CertificateSigningRequest], error) {
 	return watch[CertificateSigningRequest](ctx, c, "/certificatesigningrequests", KindCertificateSigningRequest, rv)
 }
@@ -238,7 +238,7 @@ func (c *Client) ListClusterRoles(ctx context.Context) (*ClusterRoleList, error)
 }
 
 // WatchClusterRoles streams the changes made after version rv
-// (GET /clusterroles?watch=true), as WatchMachines does.
+// (GET /clusterroles?watch=true), as WatchMicroVMs does.
 func (c *Client) WatchClusterRoles(ctx context.Context, rv ResourceVersion) (*Watch[ClusterRole], error) {
 	return watch[ClusterRole](ctx, c, "/clusterroles", KindClusterRole, rv)
 }
@@ -271,7 +271,7 @@ func (c *Client) ListClusterRoleBindings(ctx context.Context) (*ClusterRoleBindi
 }
 
 // WatchClusterRoleBindings streams the changes made after version rv
-// (GET /clusterrolebindings?watch=true), as WatchMachines does.
+// (GET /clusterrolebindings?watch=true), as WatchMicroVMs does.
 func (c *Client) WatchClusterRoleBindings(ctx context.Context, rv ResourceVersion) (*Watch[ClusterRoleBinding], error) {
 	return watch[ClusterRoleBinding](ctx, c, "/clusterrolebindings", KindClusterRoleBinding, rv)
 }
@@ -308,7 +308,7 @@ func (c *Client) ListCustomResourceDefinitions(ctx context.Context) (*CustomReso
 }
 
 // WatchCustomResourceDefinitions streams the changes made after version rv
-// (GET /customresourcedefinitions?watch=true), as WatchMachines does.
+// (GET /customresourcedefinitions?watch=true), as WatchMicroVMs does.
 func (c *Client) WatchCustomResourceDefinitions(ctx context.Context, rv ResourceVersion) (*Watch[CustomResourceDefinition], error) {
 	return watch[CustomResourceDefinition](ctx, c, "/customresourcedefinitions", KindCustomResourceDefinition, rv)
 }
@@ -341,7 +341,7 @@ func (c *Client) ListMutatingWebhookConfigurations(ctx context.Context) (*Mutati
 }
 
 // WatchMutatingWebhookConfigurations streams the changes made after version rv
-// (GET /mutatingwebhookconfigurations?watch=true), as WatchMachines does.
+// (GET /mutatingwebhookconfigurations?watch=true), as WatchMicroVMs does.
 func (c *Client) WatchMutatingWebhookConfigurations(ctx context.Context, rv ResourceVersion) (*Watch[MutatingWebhookConfiguration], error) {
 	return watch[MutatingWebhookConfiguration](ctx, c, "/mutatingwebhookconfigurations", KindMutatingWebhookConfiguration, rv)
 }
@@ -374,7 +374,7 @@ func (c *Client) ListValidatingWebhookConfigurations(ctx context.Context) (*Vali
 }
 
 // WatchValidatingWebhookConfigurations streams the changes made after version rv
-// (GET /validatingwebhookconfigurations?watch=true), as WatchMachines does.
+// (GET /validatingwebhookconfigurations?watch=true), as WatchMicroVMs does.
 func (c *Client) WatchValidatingWebhookConfigurations(ctx context.Context, rv ResourceVersion) (*Watch[ValidatingWebhookConfiguration], error) {
 	return watch[ValidatingWebhookConfiguration](ctx, c, "/validatingwebhookconfigurations", KindValidatingWebhookConfiguration, rv)
 }

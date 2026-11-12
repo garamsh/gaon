@@ -53,7 +53,7 @@ Drafted for garamsh/gaon#75, under goal garamsh/gaon#74. The design is the PM's,
 
    | Role | Rules |
    |---|---|
-   | `gaon:scheduler` | `machines` and `nodes`: `get`, `list`, `watch`; `machines/binding`: `create`; `machines/status`: `update` (it writes the `Scheduled` condition, [scheduler.md](../scheduler.md) §A Machine that fits no Node) |
+   | `gaon:scheduler` | `machines` and `nodes`: `get`, `list`, `watch`; `machines/binding`: `create`; `machines/status`: `update` (it writes the `Scheduled` condition, [scheduler.md](../scheduler.md) §A MicroVM that fits no Node) |
    | `gaon:controllers` | `machines`, `nodes`, `leases` and `certificatesigningrequests`: `get`, `list`, `watch`; `machines`: `create`, `update`; `machines/status`, `nodes/status`, `volumes/status` and `certificatesigningrequests/status`: `update` |
    | `gaon:admin` | every API group, resource and verb |
 

@@ -12,28 +12,28 @@ import (
 
 	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/node-agent/internal/clock"
-	"github.com/garamsh/gaon/node-agent/internal/machines"
+	"github.com/garamsh/gaon/node-agent/internal/microvms"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
 // LocalName is the name that selects the Local plugin.
 const LocalName = "local"
 
-// The reasons a Machine fails with when Local refuses it.
+// The reasons a MicroVM fails with when Local refuses it.
 const (
-	// ReasonVolumeNotFound is the reason of a Machine that names a Volume
+	// ReasonVolumeNotFound is the reason of a MicroVM that names a Volume
 	// that does not exist.
 	ReasonVolumeNotFound = "VolumeNotFound"
-	// ReasonUnsupportedStorageClass is the reason of a Machine that names a
+	// ReasonUnsupportedStorageClass is the reason of a MicroVM that names a
 	// Volume of a class other than local.
 	ReasonUnsupportedStorageClass = "UnsupportedStorageClass"
-	// ReasonVolumeNotUsable is the reason of a Machine that names a Volume
+	// ReasonVolumeNotUsable is the reason of a MicroVM that names a Volume
 	// that is being deleted or is pinned to another Node.
 	ReasonVolumeNotUsable = "VolumeNotUsable"
-	// ReasonVolumeInUse is the reason of a Machine that names a Volume
-	// attached to another Machine.
+	// ReasonVolumeInUse is the reason of a MicroVM that names a Volume
+	// attached to another MicroVM.
 	ReasonVolumeInUse = "VolumeInUse"
-	// ReasonVolumeFailed is the reason of a Machine that names a Volume
+	// ReasonVolumeFailed is the reason of a MicroVM that names a Volume
 	// whose disk mvmd cannot make.
 	ReasonVolumeFailed = "VolumeFailed"
 )
@@ -52,20 +52,20 @@ type Volumes interface {
 
 // Local serves the Volumes of class local pinned to its Node as disks on
 // mvmd, named after the Volume. Attach makes the disk of each Volume a
-// Machine names and writes the Volume's attachment; Run keeps each Volume's
+// MicroVM names and writes the Volume's attachment; Run keeps each Volume's
 // phase and capacity, and deletes the disk of a Volume being deleted that no
-// Machine holds.
+// MicroVM holds.
 type Local struct {
 	node    string
 	resync  time.Duration
 	volumes Volumes
-	runtime machines.Runtime
+	runtime microvms.Runtime
 	clk     clock.Clock
 	log     *slog.Logger
 }
 
 // NewLocal returns a Local for the Node node, reconciling every resync.
-func NewLocal(node string, resync time.Duration, volumes Volumes, runtime machines.Runtime, clk clock.Clock, log *slog.Logger) *Local {
+func NewLocal(node string, resync time.Duration, volumes Volumes, runtime microvms.Runtime, clk clock.Clock, log *slog.Logger) *Local {
 	return &Local{node: node, resync: resync, volumes: volumes, runtime: runtime, clk: clk, log: log}
 }
 
@@ -74,9 +74,9 @@ func diskID(volume string) string { return "volume-" + volume }
 // Attach checks each Volume m names, then makes its disk if it is missing,
 // writes it Bound to m at its epoch, and returns the disks. It refuses m for a
 // Volume that is missing, of another class, being deleted, pinned elsewhere,
-// attached to another Machine or whose disk cannot be made. It writes nothing
+// attached to another MicroVM or whose disk cannot be made. It writes nothing
 // of the Volumes before every one has passed the checks.
-func (l *Local) Attach(ctx context.Context, m *api.Machine) ([]*v1alpha2.DiskAttachment, error) {
+func (l *Local) Attach(ctx context.Context, m *api.MicroVM) ([]*v1alpha2.DiskAttachment, error) {
 	var names []string
 	for _, mv := range m.Spec.Volumes {
 		if !slices.Contains(names, mv.Name) {
@@ -99,37 +99,37 @@ func (l *Local) Attach(ctx context.Context, m *api.Machine) ([]*v1alpha2.DiskAtt
 }
 
 // inspect reads the Volume name and returns it, or the refusal of m for it.
-func (l *Local) inspect(ctx context.Context, m *api.Machine, name string) (*api.Volume, error) {
+func (l *Local) inspect(ctx context.Context, m *api.MicroVM, name string) (*api.Volume, error) {
 	v, err := l.volumes.GetVolume(ctx, name)
 	if errors.Is(err, api.ErrNotFound) {
-		return nil, &machines.Refusal{Reason: ReasonVolumeNotFound, Message: fmt.Sprintf("volume %q does not exist", name)}
+		return nil, &microvms.Refusal{Reason: ReasonVolumeNotFound, Message: fmt.Sprintf("volume %q does not exist", name)}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read volume %s: %w", name, err)
 	}
 	switch {
 	case v.Spec.StorageClass != api.StorageClassLocal:
-		return nil, &machines.Refusal{Reason: ReasonUnsupportedStorageClass, Message: fmt.Sprintf("volume %q is of class %q, which the local plugin does not serve", name, v.Spec.StorageClass)}
+		return nil, &microvms.Refusal{Reason: ReasonUnsupportedStorageClass, Message: fmt.Sprintf("volume %q is of class %q, which the local plugin does not serve", name, v.Spec.StorageClass)}
 	case v.Metadata.DeletionTimestamp != nil:
-		return nil, &machines.Refusal{Reason: ReasonVolumeNotUsable, Message: fmt.Sprintf("volume %q is being deleted", name)}
+		return nil, &microvms.Refusal{Reason: ReasonVolumeNotUsable, Message: fmt.Sprintf("volume %q is being deleted", name)}
 	case v.Spec.NodeName != l.node:
-		return nil, &machines.Refusal{Reason: ReasonVolumeNotUsable, Message: fmt.Sprintf("volume %q is pinned to node %q, not %q", name, v.Spec.NodeName, l.node)}
+		return nil, &microvms.Refusal{Reason: ReasonVolumeNotUsable, Message: fmt.Sprintf("volume %q is pinned to node %q, not %q", name, v.Spec.NodeName, l.node)}
 	}
 	if a := v.Status.Attachment; a != nil && *a != attachmentOf(m) {
 		if err := (&api.Volume{Metadata: v.Metadata, Status: v.Status}).Attach(m.Metadata.Name, m.Spec.BindingEpoch); err != nil {
-			return nil, &machines.Refusal{Reason: ReasonVolumeInUse, Message: err.Error()}
+			return nil, &microvms.Refusal{Reason: ReasonVolumeInUse, Message: err.Error()}
 		}
 	}
 	return v, nil
 }
 
-func attachmentOf(m *api.Machine) api.Attachment {
-	return api.Attachment{MachineName: m.Metadata.Name, BindingEpoch: m.Spec.BindingEpoch}
+func attachmentOf(m *api.MicroVM) api.Attachment {
+	return api.Attachment{MicroVMName: m.Metadata.Name, BindingEpoch: m.Spec.BindingEpoch}
 }
 
 // bind makes the disk of the Volume name and writes the Volume Bound to m. A
 // write that conflicts is retried from a fresh read, which is checked again.
-func (l *Local) bind(ctx context.Context, m *api.Machine, name string) error {
+func (l *Local) bind(ctx context.Context, m *api.MicroVM, name string) error {
 	for attempt := 0; attempt < statusAttempts; attempt++ {
 		v, err := l.inspect(ctx, m, name)
 		if err != nil {
@@ -198,7 +198,7 @@ func (l *Local) fail(ctx context.Context, v *api.Volume, cause error) error {
 			l.log.Warn("write volume status Failed", "volume", v.Metadata.Name, "err", err)
 		}
 	}
-	return &machines.Refusal{Reason: ReasonVolumeFailed, Message: fmt.Sprintf("the disk of volume %q cannot be made: %v", v.Metadata.Name, cause)}
+	return &microvms.Refusal{Reason: ReasonVolumeFailed, Message: fmt.Sprintf("the disk of volume %q cannot be made: %v", v.Metadata.Name, cause)}
 }
 
 func (l *Local) listDisks(ctx context.Context) (map[string]*v1alpha2.Disk, error) {
@@ -214,7 +214,7 @@ func (l *Local) listDisks(ctx context.Context) (map[string]*v1alpha2.Disk, error
 }
 
 // Release has nothing to give back: the disk lives until its Volume is
-// deleted, and Run frees the Volume once no Machine holds the disk.
+// deleted, and Run frees the Volume once no MicroVM holds the disk.
 func (l *Local) Release(context.Context, string) error { return nil }
 
 // Run reconciles the Volumes every resync until ctx ends.
@@ -231,7 +231,7 @@ func (l *Local) Run(ctx context.Context) {
 
 // reconcile writes the status of each local Volume pinned to this Node and
 // deletes the disk and drops the finalizer of each such Volume being deleted
-// that no Machine holds. One Volume's failure does not stop the others.
+// that no MicroVM holds. One Volume's failure does not stop the others.
 func (l *Local) reconcile(ctx context.Context) error {
 	list, err := l.volumes.ListVolumes(ctx)
 	if err != nil {
@@ -254,7 +254,7 @@ func (l *Local) reconcile(ctx context.Context) error {
 			err = l.sync(ctx, v, disks)
 		}
 		if err != nil {
-			var refusal *machines.Refusal
+			var refusal *microvms.Refusal
 			if !errors.As(err, &refusal) {
 				errs = append(errs, fmt.Errorf("volume %s: %w", v.Metadata.Name, err))
 			}
@@ -263,7 +263,7 @@ func (l *Local) reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// sync writes v's phase and capacity from its disk: Bound while a Machine
+// sync writes v's phase and capacity from its disk: Bound while a MicroVM
 // holds the disk, Released once none does but an attachment remains, and
 // Available before any. A conflicting write is left to the next round.
 func (l *Local) sync(ctx context.Context, v *api.Volume, disks map[string]*v1alpha2.Disk) error {
@@ -292,7 +292,7 @@ func (l *Local) sync(ctx context.Context, v *api.Volume, disks map[string]*v1alp
 }
 
 // finish deletes the disk of the deleting v and removes the agent's finalizer,
-// changing no other entry, once mvmd holds the disk for no Machine. A disk
+// changing no other entry, once mvmd holds the disk for no MicroVM. A disk
 // still held keeps both.
 func (l *Local) finish(ctx context.Context, v *api.Volume, disks map[string]*v1alpha2.Disk) error {
 	if !slices.Contains(v.Metadata.Finalizers, api.NodeAgentFinalizer) {

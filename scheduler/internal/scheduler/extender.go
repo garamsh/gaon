@@ -19,9 +19,9 @@ const (
 )
 
 // extenderArgs is the body of a filter and of a prioritize request: the
-// Machine and the names of the Nodes still in the running.
+// MicroVM and the names of the Nodes still in the running.
 type extenderArgs struct {
-	Machine   *api.Machine `json:"machine"`
+	MicroVM   *api.MicroVM `json:"microvm"`
 	NodeNames []string     `json:"nodeNames"`
 }
 
@@ -56,7 +56,7 @@ func (e *extender) name() string { return "extender " + e.urlPrefix }
 
 // filter returns the names of nodeNames the extender passes, in the order
 // given, and the reason for each one it refuses.
-func (e *extender) filter(ctx context.Context, m *api.Machine, nodeNames []string) ([]string, map[string]string, error) {
+func (e *extender) filter(ctx context.Context, m *api.MicroVM, nodeNames []string) ([]string, map[string]string, error) {
 	var res extenderFilterResult
 	if err := e.call(ctx, e.filterVerb, m, nodeNames, &res); err != nil {
 		return nil, nil, err
@@ -86,7 +86,7 @@ func (e *extender) filter(ctx context.Context, m *api.Machine, nodeNames []strin
 
 // prioritize returns the extender's score, 0 to maxExtenderScore, for each of
 // nodeNames it names.
-func (e *extender) prioritize(ctx context.Context, m *api.Machine, nodeNames []string) (map[string]int, error) {
+func (e *extender) prioritize(ctx context.Context, m *api.MicroVM, nodeNames []string) (map[string]int, error) {
 	var res []extenderPriority
 	if err := e.call(ctx, e.prioritizeVerb, m, nodeNames, &res); err != nil {
 		return nil, err
@@ -104,10 +104,10 @@ func (e *extender) prioritize(ctx context.Context, m *api.Machine, nodeNames []s
 	return scores, nil
 }
 
-// call POSTs the Machine and the Node names to the verb and decodes a 200
+// call POSTs the MicroVM and the Node names to the verb and decodes a 200
 // answer into out.
-func (e *extender) call(ctx context.Context, verb string, m *api.Machine, nodeNames []string, out any) error {
-	body, err := json.Marshal(extenderArgs{Machine: m, NodeNames: nodeNames})
+func (e *extender) call(ctx context.Context, verb string, m *api.MicroVM, nodeNames []string, out any) error {
+	body, err := json.Marshal(extenderArgs{MicroVM: m, NodeNames: nodeNames})
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", e.name(), verb, err)
 	}

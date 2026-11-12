@@ -96,8 +96,8 @@ type WebhookClientConfig struct {
 // WebhookRule selects writes by operation, API group, API version and
 // resource. The wildcard "*" matches any value of its field, except in
 // Resources: there "*" matches every resource but no subresource, "*/*"
-// matches every resource and subresource, and "machines/status",
-// "machines/*" and "*/status" match subresources.
+// matches every resource and subresource, and "microvms/status",
+// "microvms/*" and "*/status" match subresources.
 type WebhookRule struct {
 	Operations  []Operation `json:"operations"`
 	APIGroups   []string    `json:"apiGroups"`

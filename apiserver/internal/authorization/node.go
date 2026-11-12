@@ -21,14 +21,14 @@ func (a *rbac) node(ctx context.Context, user string, r Request) (bool, error) {
 		return own && r.Verb == api.VerbUpdate, nil
 	case "leases":
 		return own && (r.Verb == api.VerbGet || r.Verb == api.VerbCreate || r.Verb == api.VerbUpdate), nil
-	case "machines":
+	case "microvms":
 		switch r.Verb {
 		case api.VerbGet, api.VerbList, api.VerbWatch:
 			return a.isNode(ctx, user)
 		case api.VerbUpdate:
 			return a.bound(ctx, user, r.Name)
 		}
-	case "machines/status":
+	case "microvms/status":
 		if r.Verb == api.VerbUpdate {
 			return a.bound(ctx, user, r.Name)
 		}
@@ -63,9 +63,9 @@ func (a *rbac) isNode(ctx context.Context, user string) (bool, error) {
 	return found(err)
 }
 
-// bound reports whether the Machine name is bound to the Node user.
+// bound reports whether the MicroVM name is bound to the Node user.
 func (a *rbac) bound(ctx context.Context, user, name string) (bool, error) {
-	m, err := a.src.GetMachine(ctx, name)
+	m, err := a.src.GetMicroVM(ctx, name)
 	if ok, err := found(err); !ok || err != nil {
 		return false, err
 	}
@@ -81,10 +81,10 @@ func (a *rbac) pinned(ctx context.Context, user, name string) (bool, error) {
 	return v.Spec.NodeName == user, nil
 }
 
-// uses reports whether a Machine bound to the Node user mounts the Volume
+// uses reports whether a MicroVM bound to the Node user mounts the Volume
 // name.
 func (a *rbac) uses(ctx context.Context, user, name string) (bool, error) {
-	ms, err := a.src.ListMachines(ctx)
+	ms, err := a.src.ListMicroVMs(ctx)
 	if err != nil {
 		return false, err
 	}

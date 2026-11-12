@@ -17,7 +17,7 @@ type Params struct {
 	RenewPeriod time.Duration
 	// DeadlineLength is the length each deadline renewal asks mvmd for.
 	DeadlineLength time.Duration
-	// Delta is δ, how long a Machine can run past mvmd's recorded expiry.
+	// Delta is δ, how long a MicroVM can run past mvmd's recorded expiry.
 	Delta time.Duration
 	// RPCTimeout bounds each call of a renewal round.
 	RPCTimeout time.Duration

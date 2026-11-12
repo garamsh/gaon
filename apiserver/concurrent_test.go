@@ -8,9 +8,9 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-func TestPutMachine_ConcurrentWritersOfOneVersionHaveOneWinner(t *testing.T) {
+func TestPutMicroVM_ConcurrentWritersOfOneVersionHaveOneWinner(t *testing.T) {
 	e := newEnv(t)
-	m := e.createMachine(t, machine("m1"))
+	m := e.createMicroVM(t, microvm("m1"))
 
 	const writers = 8
 	errs := make(chan error, writers)
@@ -18,7 +18,7 @@ func TestPutMachine_ConcurrentWritersOfOneVersionHaveOneWinner(t *testing.T) {
 		go func() {
 			update := *m
 			update.Spec.IdleTimeoutSeconds = int32(i + 1)
-			_, err := e.api.PutMachine(ctx(t), &update)
+			_, err := e.api.PutMicroVM(ctx(t), &update)
 			errs <- err
 		}()
 	}

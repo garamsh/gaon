@@ -1,4 +1,4 @@
-package machines
+package microvms
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
-// ended handles a Machine that mvmd holds stopped under `Once`. It judges the
+// ended handles a MicroVM that mvmd holds stopped under `Once`. It judges the
 // exit once and reports it: a clean one as the outcome's clean, a failure as
-// the outcome's exitFailure. The Machine is never started again.
+// the outcome's exitFailure. The MicroVM is never started again.
 func (s *service) ended(ctx context.Context, id string, r *v1alpha2.Machine) (outcome, error) {
 	st := s.runOf(id)
 	if !st.exited {
@@ -25,7 +25,7 @@ func (s *service) ended(ctx context.Context, id string, r *v1alpha2.Machine) (ou
 	return outcome{runtime: r, clean: true}, nil
 }
 
-// resume starts the Machine that the agent holds stopped for `Halted` and that
+// resume starts the MicroVM that the agent holds stopped for `Halted` and that
 // now runs `Once`. Its next exit is judged afresh.
 func (s *service) resume(ctx context.Context, id string, r *v1alpha2.Machine) (outcome, error) {
 	st := s.runOf(id)

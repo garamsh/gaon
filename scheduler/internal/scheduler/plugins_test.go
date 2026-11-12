@@ -57,7 +57,7 @@ const leastAllocatedYAML = "scorePlugins:\n  - name: LeastAllocated\n"
 // stubCall is a request the stub extender received.
 type stubCall struct {
 	Verb      string
-	Machine   api.Machine
+	MicroVM   api.MicroVM
 	NodeNames []string
 }
 
@@ -90,13 +90,13 @@ func (s *stubExtender) handler(t *testing.T, verbs stubVerbs) http.Handler {
 			return
 		}
 		var body struct {
-			Machine   api.Machine `json:"machine"`
+			MicroVM   api.MicroVM `json:"microvm"`
 			NodeNames []string    `json:"nodeNames"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("extender request does not decode: %v", err)
 		}
-		c := stubCall{Verb: verb, Machine: body.Machine, NodeNames: body.NodeNames}
+		c := stubCall{Verb: verb, MicroVM: body.MicroVM, NodeNames: body.NodeNames}
 		s.mu.Lock()
 		s.calls = append(s.calls, c)
 		s.mu.Unlock()
@@ -150,13 +150,13 @@ func indent(lines []string) string {
 	return b.String()
 }
 
-// twoNodes adds a (4 cpu, 8Gi) and b (10 cpu, 10Gi), both empty: a Machine
+// twoNodes adds a (4 cpu, 8Gi) and b (10 cpu, 10Gi), both empty: a MicroVM
 // requesting 1 cpu and 1Gi scores 81 on a and 90 on b under LeastAllocated,
 // and a sorts first.
 func twoNodes(f *fakeAPI) {
 	f.addNode(node("a", "4", "8Gi"))
 	f.addNode(node("b", "10", "10Gi"))
-	f.addMachine(newMachine("m1", "1", "1Gi"))
+	f.addMicroVM(newMicroVM("m1", "1", "1Gi"))
 }
 
 func TestLeastAllocated_ChoosesTheNodeWithTheMostFreeShare(t *testing.T) {
@@ -164,44 +164,44 @@ func TestLeastAllocated_ChoosesTheNodeWithTheMostFreeShare(t *testing.T) {
 		f, client := newFakeAPI(t)
 		twoNodes(f)
 		require.NoError(t, reconcileWith(t, client, loadConfig(t, configHeader+leastAllocatedYAML)))
-		assert.Equal(t, "b", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "b", f.microvm("m1").Spec.NodeName)
 	})
 
 	t.Run("control: with no configuration the first fitting Node by name wins", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		twoNodes(f)
 		reconcile(t, client)
-		assert.Equal(t, "a", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "a", f.microvm("m1").Spec.NodeName)
 	})
 
 	t.Run("a binding made earlier in the pass lowers the score of its Node", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		f.addNode(node("a", "4", "4Gi"))
 		f.addNode(node("b", "4", "4Gi"))
-		f.addMachine(newMachine("m1", "2", "2Gi"))
-		f.addMachine(newMachine("m2", "1", "1Gi"))
+		f.addMicroVM(newMicroVM("m1", "2", "2Gi"))
+		f.addMicroVM(newMicroVM("m2", "1", "1Gi"))
 		require.NoError(t, reconcileWith(t, client, loadConfig(t, configHeader+leastAllocatedYAML)))
-		assert.Equal(t, "a", f.machine("m1").Spec.NodeName, "equal scores go to the first by name")
-		assert.Equal(t, "b", f.machine("m2").Spec.NodeName, "a is now half allocated")
+		assert.Equal(t, "a", f.microvm("m1").Spec.NodeName, "equal scores go to the first by name")
+		assert.Equal(t, "b", f.microvm("m2").Spec.NodeName, "a is now half allocated")
 	})
 
-	t.Run("the Machines already bound count as allocated", func(t *testing.T) {
+	t.Run("the MicroVMs already bound count as allocated", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		f.addNode(node("a", "4", "4Gi"))
 		f.addNode(node("b", "4", "4Gi"))
-		f.addMachine(bound(newMachine("old", "3", "3Gi"), "a", 1))
-		f.addMachine(newMachine("m1", "1", "1Gi"))
+		f.addMicroVM(bound(newMicroVM("old", "3", "3Gi"), "a", 1))
+		f.addMicroVM(newMicroVM("m1", "1", "1Gi"))
 		require.NoError(t, reconcileWith(t, client, loadConfig(t, configHeader+leastAllocatedYAML)))
-		assert.Equal(t, "b", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "b", f.microvm("m1").Spec.NodeName)
 	})
 
-	t.Run("a Node the Machine does not fit is not scored", func(t *testing.T) {
+	t.Run("a Node the MicroVM does not fit is not scored", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		f.addNode(node("a", "100", "100Gi"))
 		f.addNode(node("b", "1", "1Gi"))
-		f.addMachine(newMachine("m1", "2", "1Gi"))
+		f.addMicroVM(newMicroVM("m1", "2", "1Gi"))
 		require.NoError(t, reconcileWith(t, client, loadConfig(t, configHeader+leastAllocatedYAML)))
-		assert.Equal(t, "a", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "a", f.microvm("m1").Spec.NodeName)
 	})
 }
 
@@ -230,7 +230,7 @@ func TestScore_IsTheSumOfEachPluginScoreTimesItsWeight(t *testing.T) {
 
 			require.NoError(t, reconcileWith(t, client, cfg))
 
-			assert.Equal(t, tt.want, f.machine("m1").Spec.NodeName)
+			assert.Equal(t, tt.want, f.microvm("m1").Spec.NodeName)
 		})
 	}
 }
@@ -242,7 +242,7 @@ func TestExtender_FilterRemovesANodeAndReceivesWhatPassedTheBuiltIns(t *testing.
 		f.addNode(node("b", "4", "8Gi"))
 		f.addNode(withCondition(node("c", "4", "8Gi"), api.NodeReady, api.ConditionFalse))
 		f.addNode(node("d", "1", "1Gi"))
-		f.addMachine(newMachine("m1", "2", "1Gi"))
+		f.addMicroVM(newMicroVM("m1", "2", "1Gi"))
 		ext := newStubExtender(t, verbs)
 		return f, ext, loadConfig(t, configHeader+extenderYAML(ext.URL, "filterVerb: filter")), client
 	}
@@ -252,18 +252,18 @@ func TestExtender_FilterRemovesANodeAndReceivesWhatPassedTheBuiltIns(t *testing.
 			answer(w, map[string]any{"nodeNames": []string{"b"}, "failedNodes": map[string]string{"a": "no GPU"}})
 		}})
 		require.NoError(t, reconcileWith(t, client, cfg))
-		assert.Equal(t, "b", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "b", f.microvm("m1").Spec.NodeName)
 
 		calls := ext.callsTo("filter")
 		require.Len(t, calls, 1)
-		assert.Equal(t, "m1", calls[0].Machine.Metadata.Name)
+		assert.Equal(t, "m1", calls[0].MicroVM.Metadata.Name)
 		assert.Equal(t, []string{"a", "b"}, calls[0].NodeNames, "c is not Ready and d is too small, so neither is sent")
 	})
 
 	t.Run("control: an extender that passes every Node leaves the first by name", func(t *testing.T) {
 		f, _, cfg, client := setup(t, stubVerbs{"filter": passAll})
 		require.NoError(t, reconcileWith(t, client, cfg))
-		assert.Equal(t, "a", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "a", f.microvm("m1").Spec.NodeName)
 	})
 
 	t.Run("a Node the extender leaves out of both lists is refused", func(t *testing.T) {
@@ -271,7 +271,7 @@ func TestExtender_FilterRemovesANodeAndReceivesWhatPassedTheBuiltIns(t *testing.
 			answer(w, map[string]any{"nodeNames": []string{"b"}})
 		}})
 		require.NoError(t, reconcileWith(t, client, cfg))
-		assert.Equal(t, "b", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "b", f.microvm("m1").Spec.NodeName)
 	})
 }
 
@@ -280,7 +280,7 @@ func TestExtender_PrioritizeChangesTheChoiceAndFilterThenPrioritizeSeeTheSameSho
 	f.addNode(node("a", "4", "8Gi"))
 	f.addNode(node("b", "4", "8Gi"))
 	f.addNode(node("c", "4", "8Gi"))
-	f.addMachine(newMachine("m1", "1", "1Gi"))
+	f.addMicroVM(newMicroVM("m1", "1", "1Gi"))
 	ext := newStubExtender(t, stubVerbs{
 		"filter": func(w http.ResponseWriter, c stubCall) {
 			answer(w, map[string]any{"nodeNames": []string{"a", "b"}, "failedNodes": map[string]string{"c": "full"}})
@@ -291,7 +291,7 @@ func TestExtender_PrioritizeChangesTheChoiceAndFilterThenPrioritizeSeeTheSameSho
 
 	require.NoError(t, reconcileWith(t, client, cfg))
 
-	assert.Equal(t, "b", f.machine("m1").Spec.NodeName, "b scores highest among those that passed; c scored 10 but was filtered")
+	assert.Equal(t, "b", f.microvm("m1").Spec.NodeName, "b scores highest among those that passed; c scored 10 but was filtered")
 	prio := ext.callsTo("prioritize")
 	require.Len(t, prio, 1)
 	assert.Equal(t, []string{"a", "b"}, prio[0].NodeNames)
@@ -300,10 +300,10 @@ func TestExtender_PrioritizeChangesTheChoiceAndFilterThenPrioritizeSeeTheSameSho
 		f, client := newFakeAPI(t)
 		f.addNode(node("a", "4", "8Gi"))
 		f.addNode(node("b", "4", "8Gi"))
-		f.addMachine(newMachine("m1", "1", "1Gi"))
+		f.addMicroVM(newMicroVM("m1", "1", "1Gi"))
 		cfg := loadConfig(t, configHeader+extenderYAML(ext.URL, "filterVerb: filter"))
 		require.NoError(t, reconcileWith(t, client, cfg))
-		assert.Equal(t, "a", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "a", f.microvm("m1").Spec.NodeName)
 	})
 }
 
@@ -326,7 +326,7 @@ func TestExtender_ScoreIsMultipliedByItsWeightAndTen(t *testing.T) {
 			ext := newStubExtender(t, stubVerbs{"prioritize": scoresOf(map[string]int{"a": 1})})
 			cfg := loadConfig(t, configHeader+leastAllocatedYAML+"    weight: 3\n"+extenderYAML(ext.URL, "prioritizeVerb: prioritize", tt.weight))
 			require.NoError(t, reconcileWith(t, client, cfg))
-			assert.Equal(t, tt.want, f.machine("m1").Spec.NodeName)
+			assert.Equal(t, tt.want, f.microvm("m1").Spec.NodeName)
 		})
 	}
 
@@ -336,7 +336,7 @@ func TestExtender_ScoreIsMultipliedByItsWeightAndTen(t *testing.T) {
 		ext := newStubExtender(t, stubVerbs{"prioritize": scoresOf(map[string]int{"a": 3})})
 		cfg := loadConfig(t, configHeader+leastAllocatedYAML+"    weight: 3\n"+extenderYAML(ext.URL, "prioritizeVerb: prioritize"))
 		require.NoError(t, reconcileWith(t, client, cfg))
-		assert.Equal(t, "a", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "a", f.microvm("m1").Spec.NodeName)
 	})
 }
 
@@ -364,7 +364,7 @@ func failures(t *testing.T) []struct {
 	}
 }
 
-func TestExtender_FailureLeavesAnUnboundMachineUnboundWithExtenderErrorUnlessIgnorable(t *testing.T) {
+func TestExtender_FailureLeavesAnUnboundMicroVMUnboundWithExtenderErrorUnlessIgnorable(t *testing.T) {
 	for _, tt := range failures(t) {
 		t.Run(tt.name, func(t *testing.T) {
 			verbs := stubVerbs{"filter": passAll, "prioritize": scoresOf(nil)}
@@ -377,9 +377,9 @@ func TestExtender_FailureLeavesAnUnboundMachineUnboundWithExtenderErrorUnlessIgn
 				twoNodes(f)
 				cfg := loadConfig(t, configHeader+extenderYAML(ext.URL, lines...))
 
-				require.NoError(t, reconcileWith(t, client, cfg), "the failed Machine is reported on its status, not as a failed pass")
+				require.NoError(t, reconcileWith(t, client, cfg), "the failed MicroVM is reported on its status, not as a failed pass")
 
-				m := f.machine("m1")
+				m := f.microvm("m1")
 				assert.Empty(t, m.Spec.NodeName)
 				assert.Zero(t, f.bindingCount())
 				require.Len(t, m.Status.Conditions, 1)
@@ -391,25 +391,25 @@ func TestExtender_FailureLeavesAnUnboundMachineUnboundWithExtenderErrorUnlessIgn
 				assert.Contains(t, c.Message, ext.URL)
 			})
 
-			t.Run("ignorable is skipped and the Machine is bound", func(t *testing.T) {
+			t.Run("ignorable is skipped and the MicroVM is bound", func(t *testing.T) {
 				f, client := newFakeAPI(t)
 				twoNodes(f)
 				cfg := loadConfig(t, configHeader+extenderYAML(ext.URL, append(lines, "ignorable: true")...))
 
 				require.NoError(t, reconcileWith(t, client, cfg))
 
-				assert.Equal(t, "a", f.machine("m1").Spec.NodeName)
+				assert.Equal(t, "a", f.microvm("m1").Spec.NodeName)
 				assert.Zero(t, f.statusPutCount())
 			})
 		})
 	}
 }
 
-func TestExtender_FailureLeavesABoundMachineBoundAndItsStatusAlone(t *testing.T) {
+func TestExtender_FailureLeavesABoundMicroVMBoundAndItsStatusAlone(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(withCondition(node("dead", "4", "8Gi"), api.NodeLeaseExpired, api.ConditionTrue))
 	f.addNode(node("b", "4", "8Gi"))
-	f.addMachine(bound(newMachine("m1", "1", "1Gi"), "dead", 1))
+	f.addMicroVM(bound(newMicroVM("m1", "1", "1Gi"), "dead", 1))
 	var failing atomic.Bool
 	failing.Store(true)
 	ext := newStubExtender(t, stubVerbs{"filter": func(w http.ResponseWriter, c stubCall) {
@@ -422,27 +422,27 @@ func TestExtender_FailureLeavesABoundMachineBoundAndItsStatusAlone(t *testing.T)
 	cfg := loadConfig(t, configHeader+extenderYAML(ext.URL, "filterVerb: filter"))
 
 	require.NoError(t, reconcileWith(t, client, cfg))
-	m := f.machine("m1")
+	m := f.microvm("m1")
 	assert.Equal(t, "dead", m.Spec.NodeName)
 	assert.Zero(t, f.bindingCount())
 	assert.Zero(t, f.statusPutCount())
 
 	failing.Store(false)
 	require.NoError(t, reconcileWith(t, client, cfg))
-	assert.Equal(t, "b", f.machine("m1").Spec.NodeName, "control: the same Machine is rebound once the extender answers")
+	assert.Equal(t, "b", f.microvm("m1").Spec.NodeName, "control: the same MicroVM is rebound once the extender answers")
 }
 
 func TestExtender_IsNotCalledWhenNoNodePassedTheBuiltInFilters(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(node("a", "1", "1Gi"))
-	f.addMachine(newMachine("m1", "2", "1Gi"))
+	f.addMicroVM(newMicroVM("m1", "2", "1Gi"))
 	ext := newStubExtender(t, stubVerbs{"filter": passAll})
 	cfg := loadConfig(t, configHeader+extenderYAML(ext.URL, "filterVerb: filter"))
 
 	require.NoError(t, reconcileWith(t, client, cfg))
 
 	assert.Empty(t, ext.callsTo("filter"))
-	assert.Equal(t, scheduler.ReasonUnschedulable, f.machine("m1").Status.Conditions[0].Reason)
+	assert.Equal(t, scheduler.ReasonUnschedulable, f.microvm("m1").Status.Conditions[0].Reason)
 }
 
 func TestUnschedulableMessage_CountsTheNodesEachFilterAndExtenderRefusedByReason(t *testing.T) {
@@ -453,7 +453,7 @@ func TestUnschedulableMessage_CountsTheNodesEachFilterAndExtenderRefusedByReason
 	f.addNode(node("x", "4", "8Gi"))
 	f.addNode(node("y", "4", "8Gi"))
 	f.addNode(node("z", "4", "8Gi"))
-	f.addMachine(newMachine("m1", "2", "1Gi"))
+	f.addMicroVM(newMicroVM("m1", "2", "1Gi"))
 	ext := newStubExtender(t, stubVerbs{"filter": func(w http.ResponseWriter, c stubCall) {
 		answer(w, map[string]any{"failedNodes": map[string]string{"x": "no GPU", "y": "no GPU", "z": "rack drained"}})
 	}})
@@ -461,7 +461,7 @@ func TestUnschedulableMessage_CountsTheNodesEachFilterAndExtenderRefusedByReason
 
 	require.NoError(t, reconcileWith(t, client, cfg))
 
-	m := f.machine("m1")
+	m := f.microvm("m1")
 	require.Len(t, m.Status.Conditions, 1)
 	c := m.Status.Conditions[0]
 	assert.Equal(t, scheduler.ReasonUnschedulable, c.Reason)
@@ -497,18 +497,18 @@ func TestExtender_OverHTTPSTrustsOnlyItsCAAndPresentsTheClientCertificate(t *tes
 		twoNodes(f)
 		cfg := loadConfig(t, configHeader+extenderYAML(ts.URL, append(base, "tlsCertFile: "+certFile, "tlsKeyFile: "+keyFile)...))
 		require.NoError(t, reconcileWith(t, client, cfg))
-		assert.Equal(t, "b", f.machine("m1").Spec.NodeName, "the extender dropped the first Node")
+		assert.Equal(t, "b", f.microvm("m1").Spec.NodeName, "the extender dropped the first Node")
 		_, sawCert := peers.Load(1)
 		assert.True(t, sawCert, "the server saw the client certificate")
 	})
 
-	t.Run("without a client certificate the server refuses and the Machine is not bound", func(t *testing.T) {
+	t.Run("without a client certificate the server refuses and the MicroVM is not bound", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		twoNodes(f)
 		cfg := loadConfig(t, configHeader+extenderYAML(ts.URL, base...))
 		require.NoError(t, reconcileWith(t, client, cfg))
-		assert.Empty(t, f.machine("m1").Spec.NodeName)
-		assert.Equal(t, scheduler.ReasonExtenderError, f.machine("m1").Status.Conditions[0].Reason)
+		assert.Empty(t, f.microvm("m1").Spec.NodeName)
+		assert.Equal(t, scheduler.ReasonExtenderError, f.microvm("m1").Status.Conditions[0].Reason)
 	})
 
 	t.Run("a CA that did not sign the server certificate is refused", func(t *testing.T) {
@@ -516,7 +516,7 @@ func TestExtender_OverHTTPSTrustsOnlyItsCAAndPresentsTheClientCertificate(t *tes
 		twoNodes(f)
 		cfg := loadConfig(t, configHeader+extenderYAML(ts.URL, "filterVerb: filter", "tlsCAFile: "+certFile, "tlsCertFile: "+certFile, "tlsKeyFile: "+keyFile))
 		require.NoError(t, reconcileWith(t, client, cfg))
-		assert.Empty(t, f.machine("m1").Spec.NodeName)
+		assert.Empty(t, f.microvm("m1").Spec.NodeName)
 	})
 }
 
@@ -625,12 +625,12 @@ func TestExtender_TimeoutIsTheConfiguredOne(t *testing.T) {
 	f, client := newFakeAPI(t)
 	twoNodes(f)
 	require.NoError(t, reconcileWith(t, client, loadConfig(t, configHeader+extenderYAML(ext.URL, "filterVerb: filter"))))
-	assert.Equal(t, "a", f.machine("m1").Spec.NodeName)
+	assert.Equal(t, "a", f.microvm("m1").Spec.NodeName)
 
 	f, client = newFakeAPI(t)
 	twoNodes(f)
 	require.NoError(t, reconcileWith(t, client, loadConfig(t, configHeader+extenderYAML(ext.URL, "filterVerb: filter", "timeout: 50ms"))))
-	assert.Empty(t, f.machine("m1").Spec.NodeName)
+	assert.Empty(t, f.microvm("m1").Spec.NodeName)
 }
 
 func TestExtender_RedirectIsAFailedCallAndIsNotFollowed(t *testing.T) {
@@ -660,19 +660,19 @@ func TestExtender_RedirectIsAFailedCallAndIsNotFollowed(t *testing.T) {
 	t.Cleanup(ext.Close)
 	cfg := loadConfig(t, configHeader+extenderYAML(ext.URL+"/ext", "filterVerb: filter"))
 
-	t.Run("control: the same extender answering 200 directly places the Machine", func(t *testing.T) {
+	t.Run("control: the same extender answering 200 directly places the MicroVM", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		twoNodes(f)
 		require.NoError(t, reconcileWith(t, client, cfg))
-		assert.Equal(t, "a", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "a", f.microvm("m1").Spec.NodeName)
 	})
 
-	t.Run("a 307 fails the call: the Machine stays unbound with ExtenderError and nothing is sent elsewhere", func(t *testing.T) {
+	t.Run("a 307 fails the call: the MicroVM stays unbound with ExtenderError and nothing is sent elsewhere", func(t *testing.T) {
 		redirect.Store(true)
 		f, client := newFakeAPI(t)
 		twoNodes(f)
 		require.NoError(t, reconcileWith(t, client, cfg))
-		m := f.machine("m1")
+		m := f.microvm("m1")
 		assert.Empty(t, m.Spec.NodeName)
 		require.Len(t, m.Status.Conditions, 1)
 		assert.Equal(t, scheduler.ReasonExtenderError, m.Status.Conditions[0].Reason)

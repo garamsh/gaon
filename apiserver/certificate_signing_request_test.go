@@ -140,8 +140,8 @@ func TestCertificateSigningRequest_ATokenHolderIsForbiddenEverythingElse(t *test
 	cases := []struct {
 		name, method, path, body string
 	}{
-		{"list machines", http.MethodGet, "/machines", ""},
-		{"put machine", http.MethodPut, "/machines/m1", `{}`},
+		{"list microvms", http.MethodGet, "/microvms", ""},
+		{"put microvm", http.MethodPut, "/microvms/m1", `{}`},
 		{"put node", http.MethodPut, "/nodes/n1", `{}`},
 		{"list requests", http.MethodGet, "/certificatesigningrequests", ""},
 		{"watch requests", http.MethodGet, "/certificatesigningrequests?watch=true&resourceVersion=1", ""},
@@ -200,11 +200,11 @@ func TestCertificateSigningRequest_ACertificateHolderIsServedAsBefore(t *testing
 	s := newTokenServer(t, tokenFile)
 	holder := s.certClient(t, "node-1")
 
-	m, machineErr := holder.PutMachine(ctx(t), machine("m1"))
+	m, microvmErr := holder.PutMicroVM(ctx(t), microvm("m1"))
 	created, err := holder.PutCertificateSigningRequest(ctx(t), csr(t, "node-1"))
 	list, listErr := holder.ListCertificateSigningRequests(ctx(t))
 
-	require.NoError(t, machineErr)
+	require.NoError(t, microvmErr)
 	assert.Equal(t, "m1", m.Metadata.Name)
 	require.NoError(t, err)
 	assert.Equal(t, "node-1", created.Spec.Username, "the CN is the identity")
@@ -304,7 +304,7 @@ func TestCertificateSigningRequest_AStatusWriteIsValidated(t *testing.T) {
 func TestCertificateSigningRequest_PlainHTTPAuthenticatesNobody(t *testing.T) {
 	e := newEnv(t)
 	// A token sent over plain HTTP is not honoured: no identity comes of it.
-	req, err := http.NewRequest(http.MethodGet, e.base+apiRoot+"/machines", nil)
+	req, err := http.NewRequest(http.MethodGet, e.base+apiRoot+"/microvms", nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+tokenA)
 	resp, err := http.DefaultClient.Do(req)

@@ -77,7 +77,7 @@ func quantities(parts ...string) string {
 	return joinOrDash(set)
 }
 
-func volumeMounts(vs []api.MachineVolume) []string {
+func volumeMounts(vs []api.MicroVMVolume) []string {
 	out := make([]string, len(vs))
 	for i, v := range vs {
 		out[i] = v.Name + ":" + v.MountPath
@@ -104,7 +104,7 @@ func attachment(a *api.Attachment) string {
 	if a == nil {
 		return "-"
 	}
-	return fmt.Sprintf("%s (epoch %d)", a.MachineName, a.BindingEpoch)
+	return fmt.Sprintf("%s (epoch %d)", a.MicroVMName, a.BindingEpoch)
 }
 
 // requestState is Denied when the request has a Denied condition that is

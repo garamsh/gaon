@@ -39,50 +39,50 @@ const holdFinalizer = "example.com/hold"
 // call to the resources named here, so a refusal can come only from the call
 // the row is about. A write not named here is matched on every resource.
 var webhookResources = map[string][]string{
-	// The binding is also a write of the Machine; only the Volume's own
+	// The binding is also a write of the MicroVM; only the Volume's own
 	// update is sent to these webhooks.
 	"volume pin at a binding": {"volumes"},
 }
 
 func writePaths() []writePath {
 	return []writePath{
-		{"machine create", func(t *testing.T, e *env) (func() error, func() any) {
-			return func() error { return discard(e.api.PutMachine(ctx(t), machine("m1"))) },
-				stored(t, func() (*api.Machine, error) { return e.api.GetMachine(ctx(t), "m1") })
+		{"microvm create", func(t *testing.T, e *env) (func() error, func() any) {
+			return func() error { return discard(e.api.PutMicroVM(ctx(t), microvm("m1"))) },
+				stored(t, func() (*api.MicroVM, error) { return e.api.GetMicroVM(ctx(t), "m1") })
 		}},
-		{"machine update", func(t *testing.T, e *env) (func() error, func() any) {
-			m := e.createMachine(t, machine("m1"))
+		{"microvm update", func(t *testing.T, e *env) (func() error, func() any) {
+			m := e.createMicroVM(t, microvm("m1"))
 			m.Spec.IdleTimeoutSeconds = 30
-			return func() error { return discard(e.api.PutMachine(ctx(t), m)) },
-				stored(t, func() (*api.Machine, error) { return e.api.GetMachine(ctx(t), "m1") })
+			return func() error { return discard(e.api.PutMicroVM(ctx(t), m)) },
+				stored(t, func() (*api.MicroVM, error) { return e.api.GetMicroVM(ctx(t), "m1") })
 		}},
-		{"machine status", func(t *testing.T, e *env) (func() error, func() any) {
-			m := e.bind(t, e.createMachine(t, machine("m1")), "n1", 1)
-			m.Status = api.MachineStatus{Phase: api.MachineRunning, BindingEpoch: 1}
-			return func() error { return discard(e.api.PutMachineStatus(ctx(t), m)) },
-				stored(t, func() (*api.Machine, error) { return e.api.GetMachine(ctx(t), "m1") })
+		{"microvm status", func(t *testing.T, e *env) (func() error, func() any) {
+			m := e.bind(t, e.createMicroVM(t, microvm("m1")), "n1", 1)
+			m.Status = api.MicroVMStatus{Phase: api.MicroVMRunning, BindingEpoch: 1}
+			return func() error { return discard(e.api.PutMicroVMStatus(ctx(t), m)) },
+				stored(t, func() (*api.MicroVM, error) { return e.api.GetMicroVM(ctx(t), "m1") })
 		}},
-		{"machine binding", func(t *testing.T, e *env) (func() error, func() any) {
-			m := e.createMachine(t, machine("m1"))
+		{"microvm binding", func(t *testing.T, e *env) (func() error, func() any) {
+			m := e.createMicroVM(t, microvm("m1"))
 			b := api.Binding{ResourceVersion: m.Metadata.ResourceVersion, NodeName: "n1", BindingEpoch: 1}
-			return func() error { return discard(e.api.BindMachine(ctx(t), "m1", b)) },
-				stored(t, func() (*api.Machine, error) { return e.api.GetMachine(ctx(t), "m1") })
+			return func() error { return discard(e.api.BindMicroVM(ctx(t), "m1", b)) },
+				stored(t, func() (*api.MicroVM, error) { return e.api.GetMicroVM(ctx(t), "m1") })
 		}},
-		{"machine delete", func(t *testing.T, e *env) (func() error, func() any) {
-			m := e.createMachine(t, machine("m1"))
-			return func() error { return discard(e.api.DeleteMachine(ctx(t), "m1", m.Metadata.ResourceVersion)) },
-				stored(t, func() (*api.Machine, error) { return e.api.GetMachine(ctx(t), "m1") })
+		{"microvm delete", func(t *testing.T, e *env) (func() error, func() any) {
+			m := e.createMicroVM(t, microvm("m1"))
+			return func() error { return discard(e.api.DeleteMicroVM(ctx(t), "m1", m.Metadata.ResourceVersion)) },
+				stored(t, func() (*api.MicroVM, error) { return e.api.GetMicroVM(ctx(t), "m1") })
 		}},
-		{"machine finalizer removal", func(t *testing.T, e *env) (func() error, func() any) {
-			held := machine("m1")
+		{"microvm finalizer removal", func(t *testing.T, e *env) (func() error, func() any) {
+			held := microvm("m1")
 			held.Metadata.Finalizers = []string{holdFinalizer}
-			m := e.createMachine(t, held)
-			deleting, err := e.api.DeleteMachine(ctx(t), "m1", m.Metadata.ResourceVersion)
+			m := e.createMicroVM(t, held)
+			deleting, err := e.api.DeleteMicroVM(ctx(t), "m1", m.Metadata.ResourceVersion)
 			require.NoError(t, err)
 			require.NotNil(t, deleting.Metadata.DeletionTimestamp)
 			deleting.Metadata.Finalizers = nil
-			return func() error { return discard(e.api.PutMachine(ctx(t), deleting)) },
-				stored(t, func() (*api.Machine, error) { return e.api.GetMachine(ctx(t), "m1") })
+			return func() error { return discard(e.api.PutMicroVM(ctx(t), deleting)) },
+				stored(t, func() (*api.MicroVM, error) { return e.api.GetMicroVM(ctx(t), "m1") })
 		}},
 
 		{"node create", func(t *testing.T, e *env) (func() error, func() any) {
@@ -145,13 +145,13 @@ func writePaths() []writePath {
 		}},
 		{"volume pin at a binding", func(t *testing.T, e *env) (func() error, func() any) {
 			e.createVolume(t, "v1")
-			m := e.machineUsing(t, "m1", "v1")
-			return func() error { return discard(e.api.BindMachine(ctx(t), "m1", binding(m, "n1", 1))) },
+			m := e.microvmUsing(t, "m1", "v1")
+			return func() error { return discard(e.api.BindMicroVM(ctx(t), "m1", binding(m, "n1", 1))) },
 				stored(t, func() (*api.Volume, error) { return e.api.GetVolume(ctx(t), "v1") })
 		}},
 		{"volume status", func(t *testing.T, e *env) (func() error, func() any) {
 			v := e.createVolume(t, "v1")
-			e.boundMachine(t, "m1", 1)
+			e.boundMicroVM(t, "m1", 1)
 			return func() error { return discard(e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 1))) },
 				stored(t, func() (*api.Volume, error) { return e.api.GetVolume(ctx(t), "v1") })
 		}},
@@ -178,19 +178,19 @@ func writePaths() []writePath {
 
 		{"cluster role create", func(t *testing.T, e *env) (func() error, func() any) {
 			return func() error {
-					return discard(e.rbacClient().PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "machines", api.VerbGet))))
+					return discard(e.rbacClient().PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "microvms", api.VerbGet))))
 				},
 				stored(t, func() (*api.ClusterRole, error) { return e.rbacClient().GetClusterRole(ctx(t), "r1") })
 		}},
 		{"cluster role update", func(t *testing.T, e *env) (func() error, func() any) {
-			r, err := e.rbacClient().PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "machines", api.VerbGet)))
+			r, err := e.rbacClient().PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "microvms", api.VerbGet)))
 			require.NoError(t, err)
-			r.Rules = []api.PolicyRule{rule(api.Group, "machines", api.VerbList)}
+			r.Rules = []api.PolicyRule{rule(api.Group, "microvms", api.VerbList)}
 			return func() error { return discard(e.rbacClient().PutClusterRole(ctx(t), r)) },
 				stored(t, func() (*api.ClusterRole, error) { return e.rbacClient().GetClusterRole(ctx(t), "r1") })
 		}},
 		{"cluster role delete", func(t *testing.T, e *env) (func() error, func() any) {
-			r, err := e.rbacClient().PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "machines", api.VerbGet)))
+			r, err := e.rbacClient().PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "microvms", api.VerbGet)))
 			require.NoError(t, err)
 			return func() error {
 					return discard(e.rbacClient().DeleteClusterRole(ctx(t), "r1", r.Metadata.ResourceVersion))

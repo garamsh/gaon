@@ -27,7 +27,7 @@ Current architecture of the system and the decisions behind it. This file is the
   - [scheduler.md](./scheduler.md): what the Scheduler binds, the placement rule, and when it rebinds.
   - [node-lifecycle.md](./node-lifecycle.md): how the node lifecycle controller confirms Lease expiry and the condition it records.
   - [csr-signer.md](./csr-signer.md): how the signer in `gaon-controllers` decides a CertificateSigningRequest, what it signs and how it is configured.
-  - [node-agent.md](./node-agent.md): what `gaon-node-agent` does on a node: registration, Lease and fencing renewal, and running bound Machines on mvmd.
+  - [node-agent.md](./node-agent.md): what `gaon-node-agent` does on a node: registration, Lease and fencing renewal, and running bound MicroVMs on mvmd.
   - [cli.md](./cli.md): the `gaon` client CLI, its commands and how `apply` treats a concurrent change.
   - [deployment.md](./deployment.md): which gaon services run on which Node, what a Node's config carries for them, how certificates reach them and which gaon commit is run.
   - [e2e.md](./e2e.md): how the end-to-end test of M1 runs, what it asserts, and what the host needs.
@@ -43,8 +43,9 @@ Current architecture of the system and the decisions behind it. This file is the
   - [0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md): a user registers a resource kind with a CustomResourceDefinition, and the API server serves it under its own group.
   - [0010](./adr/0010-a-user-registers-admission-webhooks-with-webhook-configurations-the-api-server-calls-them-on-every-accepted-write.md): a user registers admission webhooks with webhook configurations, and the API server calls them on every accepted write.
   - [0011](./adr/0011-the-scheduler-places-through-filter-and-score-plugins-and-an-out-of-process-extender-configured-by-a-file.md): the Scheduler places through filter and score plugins and an out-of-process extender, configured by a file.
-  - [0012](./adr/0012-the-node-agent-asks-a-network-plugin-and-a-storage-plugin-compiled-into-it-before-it-creates-a-machine.md): the Node Agent asks a network plugin and a storage plugin, compiled into it, before it creates a Machine.
+  - [0012](./adr/0012-the-node-agent-asks-a-network-plugin-and-a-storage-plugin-compiled-into-it-before-it-creates-a-machine.md): the Node Agent asks a network plugin and a storage plugin, compiled into it, before it creates a MicroVM.
   - [0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md): a Volume is created through its own path, a `local` Volume is a disk its Node's agent makes, and a binding pins it to a Node.
   - [0014](./adr/0014-the-gaon-cli-reads-like-kubectl-get-lists-and-reads-describe-shows-a-kind-has-a-plural-and-a-short-name-and-list-is-removed.md): the gaon CLI reads like kubectl: `get` lists and reads, `describe` shows, a kind has a plural and a short name, and `list` is removed.
   - [0015](./adr/0015-the-gaon-cli-derives-the-other-groups-roots-from-server-and-finds-a-registered-kinds-plural-in-the-established-definitions.md): the gaon CLI derives the other groups' roots from `--server` and finds a registered kind's plural in the Established definitions.
   - [0016](./adr/0016-the-gaon-cli-reads-its-server-and-credentials-from-a-config-file-of-clusters-users-and-contexts.md): the gaon CLI reads its server and credentials from a config file of clusters, users and contexts.
+  - [0017](./adr/0017-the-machine-kind-becomes-microvm-short-name-mvm-in-v1alpha1-in-place.md): the `Machine` kind becomes `MicroVM`, short name `mvm`, in `v1alpha1` in place.

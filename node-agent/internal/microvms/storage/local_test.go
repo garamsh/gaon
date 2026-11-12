@@ -16,9 +16,9 @@ import (
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
-	"github.com/garamsh/gaon/node-agent/internal/machines"
-	"github.com/garamsh/gaon/node-agent/internal/machines/network"
-	"github.com/garamsh/gaon/node-agent/internal/machines/storage"
+	"github.com/garamsh/gaon/node-agent/internal/microvms"
+	"github.com/garamsh/gaon/node-agent/internal/microvms/network"
+	"github.com/garamsh/gaon/node-agent/internal/microvms/storage"
 	"github.com/garamsh/mvmd/lib/runtimeapi"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
@@ -70,10 +70,10 @@ func volume(name, nodeName string) api.Volume {
 	return v
 }
 
-func machineUsing(name string, epoch api.Epoch, volumes ...string) api.Machine {
-	m := api.Machine{
+func microvmUsing(name string, epoch api.Epoch, volumes ...string) api.MicroVM {
+	m := api.MicroVM{
 		Metadata: api.ObjectMeta{Name: name, Generation: 1},
-		Spec: api.MachineSpec{
+		Spec: api.MicroVMSpec{
 			Image:        image,
 			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "2", Memory: "1Gi"}},
 			RunStrategy:  api.RunAlways,
@@ -82,7 +82,7 @@ func machineUsing(name string, epoch api.Epoch, volumes ...string) api.Machine {
 		},
 	}
 	for _, v := range volumes {
-		m.Spec.Volumes = append(m.Spec.Volumes, api.MachineVolume{Name: v, MountPath: "/mnt/" + v})
+		m.Spec.Volumes = append(m.Spec.Volumes, api.MicroVMVolume{Name: v, MountPath: "/mnt/" + v})
 	}
 	return m
 }
@@ -106,19 +106,19 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	require.Eventually(t, cond, 5*time.Second, 5*time.Millisecond, what)
 }
 
-func refusal(t *testing.T, err error) *machines.Refusal {
+func refusal(t *testing.T, err error) *microvms.Refusal {
 	t.Helper()
-	var ref *machines.Refusal
+	var ref *microvms.Refusal
 	require.ErrorAs(t, err, &ref)
 	return ref
 }
 
-func TestLocal_AttachMakesTheDiskAndBindsTheVolumeToTheMachine(t *testing.T) {
+func TestLocal_AttachMakesTheDiskAndBindsTheVolumeToTheMicroVM(t *testing.T) {
 	r := newRig(t)
 	r.gaon.SetVolume(volume("data", node))
 	r.gaon.SetVolume(volume("other", node))
-	m := machineUsing("db", 1, "data")
-	r.gaon.SetMachine(m)
+	m := microvmUsing("db", 1, "data")
+	r.gaon.SetMicroVM(m)
 
 	disks, err := r.local.Attach(context.Background(), &m)
 
@@ -130,18 +130,18 @@ func TestLocal_AttachMakesTheDiskAndBindsTheVolumeToTheMachine(t *testing.T) {
 	assert.EqualValues(t, 10<<20, disk.GetSizeBytes())
 	v := r.volume(t, "data")
 	assert.Equal(t, api.VolumeBound, v.Status.Phase)
-	assert.Equal(t, &api.Attachment{MachineName: "db", BindingEpoch: 1}, v.Status.Attachment)
+	assert.Equal(t, &api.Attachment{MicroVMName: "db", BindingEpoch: 1}, v.Status.Attachment)
 	assert.Equal(t, api.Quantity("10485760"), v.Status.Capacity)
 	_, ok = r.mvmd.Disk("volume-other")
-	assert.False(t, ok, "control: a Volume the Machine does not name gets no disk")
+	assert.False(t, ok, "control: a Volume the MicroVM does not name gets no disk")
 	assert.Equal(t, api.VolumePending, r.volume(t, "other").Status.Phase)
 }
 
-func TestLocal_AttachIsRepeatableForTheSameMachineAndEpoch(t *testing.T) {
+func TestLocal_AttachIsRepeatableForTheSameMicroVMAndEpoch(t *testing.T) {
 	r := newRig(t)
 	r.gaon.SetVolume(volume("data", node))
-	m := machineUsing("db", 1, "data", "data")
-	r.gaon.SetMachine(m)
+	m := microvmUsing("db", 1, "data", "data")
+	r.gaon.SetMicroVM(m)
 
 	first, err := r.local.Attach(context.Background(), &m)
 	require.NoError(t, err)
@@ -156,7 +156,7 @@ func TestLocal_AttachIsRepeatableForTheSameMachineAndEpoch(t *testing.T) {
 	assert.Equal(t, first[0].GetDiskId(), second[0].GetDiskId())
 	assert.Equal(t, []string{"CreateDisk volume-data"}, r.mvmd.Calls(), "the disk is made once")
 	assert.Equal(t, api.VolumeBound, r.volume(t, "data").Status.Phase, "the second call writes Bound again")
-	assert.Equal(t, &api.Attachment{MachineName: "db", BindingEpoch: 1}, r.volume(t, "data").Status.Attachment)
+	assert.Equal(t, &api.Attachment{MicroVMName: "db", BindingEpoch: 1}, r.volume(t, "data").Status.Attachment)
 }
 
 func TestLocal_AttachRefusesAVolumeItCannotServeAndServesTheOnesItCan(t *testing.T) {
@@ -166,7 +166,7 @@ func TestLocal_AttachRefusesAVolumeItCannotServeAndServesTheOnesItCan(t *testing
 	other := volume("other-class", node)
 	other.Spec.StorageClass = "ceph"
 	inUse := volume("in-use", node)
-	inUse.Status = api.VolumeStatus{Phase: api.VolumeBound, Attachment: &api.Attachment{MachineName: "web", BindingEpoch: 1}}
+	inUse.Status = api.VolumeStatus{Phase: api.VolumeBound, Attachment: &api.Attachment{MicroVMName: "web", BindingEpoch: 1}}
 	tests := []struct {
 		name   string
 		volume string
@@ -177,7 +177,7 @@ func TestLocal_AttachRefusesAVolumeItCannotServeAndServesTheOnesItCan(t *testing
 		{"a Volume of another class", "other-class", []api.Volume{other}, storage.ReasonUnsupportedStorageClass},
 		{"a Volume being deleted", "deleting", []api.Volume{deleting}, storage.ReasonVolumeNotUsable},
 		{"a Volume pinned to another Node", "elsewhere", []api.Volume{volume("elsewhere", "n2")}, storage.ReasonVolumeNotUsable},
-		{"a Volume attached to another Machine at the same epoch", "in-use", []api.Volume{inUse}, storage.ReasonVolumeInUse},
+		{"a Volume attached to another MicroVM at the same epoch", "in-use", []api.Volume{inUse}, storage.ReasonVolumeInUse},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -186,8 +186,8 @@ func TestLocal_AttachRefusesAVolumeItCannotServeAndServesTheOnesItCan(t *testing
 			for _, v := range tt.seed {
 				r.gaon.SetVolume(v)
 			}
-			m := machineUsing("db", 1, "good", tt.volume)
-			r.gaon.SetMachine(m)
+			m := microvmUsing("db", 1, "good", tt.volume)
+			r.gaon.SetMicroVM(m)
 
 			_, err := r.local.Attach(context.Background(), &m)
 
@@ -195,10 +195,10 @@ func TestLocal_AttachRefusesAVolumeItCannotServeAndServesTheOnesItCan(t *testing
 			_, made := r.mvmd.Disk("volume-" + tt.volume)
 			assert.False(t, made, "no disk is made for the refused Volume")
 
-			control := machineUsing("web", 1, "good")
-			r.gaon.SetMachine(control)
+			control := microvmUsing("web", 1, "good")
+			r.gaon.SetMicroVM(control)
 			disks, err := r.local.Attach(context.Background(), &control)
-			require.NoError(t, err, "control: a Machine naming only the good Volume is served")
+			require.NoError(t, err, "control: a MicroVM naming only the good Volume is served")
 			assert.Equal(t, "volume-good", disks[0].GetDiskId())
 		})
 	}
@@ -207,24 +207,24 @@ func TestLocal_AttachRefusesAVolumeItCannotServeAndServesTheOnesItCan(t *testing
 func TestLocal_AttachTakesAVolumeAttachedAtALowerEpoch(t *testing.T) {
 	r := newRig(t)
 	v := volume("data", node)
-	v.Status = api.VolumeStatus{Phase: api.VolumeReleased, Attachment: &api.Attachment{MachineName: "db", BindingEpoch: 1}}
+	v.Status = api.VolumeStatus{Phase: api.VolumeReleased, Attachment: &api.Attachment{MicroVMName: "db", BindingEpoch: 1}}
 	r.gaon.SetVolume(v)
 	r.mvmd.AddDisk("volume-data", 10<<20)
-	m := machineUsing("db", 2, "data")
-	r.gaon.SetMachine(m)
+	m := microvmUsing("db", 2, "data")
+	r.gaon.SetMicroVM(m)
 
 	_, err := r.local.Attach(context.Background(), &m)
 
 	require.NoError(t, err)
-	assert.Equal(t, &api.Attachment{MachineName: "db", BindingEpoch: 2}, r.volume(t, "data").Status.Attachment)
+	assert.Equal(t, &api.Attachment{MicroVMName: "db", BindingEpoch: 2}, r.volume(t, "data").Status.Attachment)
 	assert.NotContains(t, r.mvmd.Calls(), "CreateDisk volume-data", "control: the disk that exists is not made again")
 }
 
 func TestLocal_AttachWritesFailedAndRefusesWhenTheDiskCannotBeMade(t *testing.T) {
 	r := newRig(t)
 	r.gaon.SetVolume(volume("data", node))
-	m := machineUsing("db", 1, "data")
-	r.gaon.SetMachine(m)
+	m := microvmUsing("db", 1, "data")
+	r.gaon.SetMicroVM(m)
 	r.mvmd.FailDiskCreates(true)
 
 	_, err := r.local.Attach(context.Background(), &m)
@@ -235,15 +235,15 @@ func TestLocal_AttachWritesFailedAndRefusesWhenTheDiskCannotBeMade(t *testing.T)
 
 	r.mvmd.FailDiskCreates(false)
 	_, err = r.local.Attach(context.Background(), &m)
-	require.NoError(t, err, "control: the same Machine is served once the disk can be made")
+	require.NoError(t, err, "control: the same MicroVM is served once the disk can be made")
 	assert.Equal(t, api.VolumeBound, r.volume(t, "data").Status.Phase)
 }
 
 func TestLocal_AttachWritesFailedOnlyForTheOutcomeKindsThatRefuseTheDisk(t *testing.T) {
 	r := newRig(t)
 	r.gaon.SetVolume(volume("data", node))
-	m := machineUsing("db", 1, "data")
-	r.gaon.SetMachine(m)
+	m := microvmUsing("db", 1, "data")
+	r.gaon.SetMicroVM(m)
 
 	r.mvmd.FailDiskCreatesWith(v1alpha2.OutcomeKind_OUTCOME_KIND_FAILED)
 	_, err := r.local.Attach(context.Background(), &m)
@@ -256,7 +256,7 @@ func TestLocal_AttachWritesFailedOnlyForTheOutcomeKindsThatRefuseTheDisk(t *test
 	r.mvmd.FailDiskCreatesWith(v1alpha2.OutcomeKind_OUTCOME_KIND_UNSUPPORTED)
 	_, err = r.local.Attach(context.Background(), &m)
 	require.Error(t, err)
-	var ref *machines.Refusal
+	var ref *microvms.Refusal
 	assert.False(t, errors.As(err, &ref), "the error is not a refusal")
 	assert.Equal(t, api.VolumePending, r.volume(t, "data").Status.Phase, "no Failed is written")
 
@@ -274,8 +274,8 @@ func TestLocal_AttachRoundsAFractionalSizeUpToWholeBytes(t *testing.T) {
 	whole := volume("whole", node)
 	whole.Spec.Storage = "3"
 	r.gaon.SetVolume(whole)
-	m := machineUsing("db", 1, "data", "whole")
-	r.gaon.SetMachine(m)
+	m := microvmUsing("db", 1, "data", "whole")
+	r.gaon.SetMicroVM(m)
 
 	_, err := r.local.Attach(context.Background(), &m)
 
@@ -319,10 +319,10 @@ func TestLocal_RunWritesFailedWhenTheDiskCannotBeMadeAndAvailableWhenItCan(t *te
 	eventually(t, "control: data is Available once the disk can be made", r.phase("data", api.VolumeAvailable))
 }
 
-func TestLocal_RunWritesBoundWhileAMachineHoldsTheDiskAndReleasedKeepingTheAttachmentAfter(t *testing.T) {
+func TestLocal_RunWritesBoundWhileAMicroVMHoldsTheDiskAndReleasedKeepingTheAttachmentAfter(t *testing.T) {
 	r := newRig(t)
 	v := volume("data", node)
-	attachment := &api.Attachment{MachineName: "db", BindingEpoch: 1}
+	attachment := &api.Attachment{MicroVMName: "db", BindingEpoch: 1}
 	v.Status = api.VolumeStatus{Phase: api.VolumeAvailable, Attachment: attachment, Capacity: "10485760"}
 	r.gaon.SetVolume(v)
 	r.mvmd.AddDisk("volume-data", 10<<20)
@@ -339,7 +339,7 @@ func TestLocal_RunWritesBoundWhileAMachineHoldsTheDiskAndReleasedKeepingTheAttac
 	assert.Equal(t, attachment, r.volume(t, "data").Status.Attachment, "Released keeps the attachment")
 }
 
-func TestLocal_RunDeletesTheDiskAndRemovesOnlyItsFinalizerOfAVolumeNoMachineHolds(t *testing.T) {
+func TestLocal_RunDeletesTheDiskAndRemovesOnlyItsFinalizerOfAVolumeNoMicroVMHolds(t *testing.T) {
 	r := newRig(t)
 	// The Volumes are listed by name, so "a-held" and "a-unowned" are read
 	// before "b-free" in each round.
@@ -411,14 +411,14 @@ func TestLocal_RunLetsAVolumeGoWhenItsLastFinalizerGoesAndKeepsAHeldOneUntilThen
 	assert.False(t, ok)
 }
 
-func TestLocal_ServesAMachineThroughTheAgentFromCreateToDelete(t *testing.T) {
+func TestLocal_ServesAMicroVMThroughTheAgentFromCreateToDelete(t *testing.T) {
 	r := newRig(t)
 	r.mvmd.Arm(time.Hour, 1)
 	r.gaon.SetVolume(volume("data", node))
 	clk := clock.System{}
 	def, err := network.NewDefault(nil, nil)
 	require.NoError(t, err)
-	svc := machines.NewService(node, machines.Params{
+	svc := microvms.NewService(node, microvms.Params{
 		Resync: 20 * time.Millisecond, Retry: 20 * time.Millisecond, ReadTimeout: time.Second,
 		RestartBackoff: time.Hour, RestartBackoffMax: time.Hour, RestartResetAfter: time.Hour,
 	}, api.NewClient(r.gaon.URL, nil), r.rt, def, r.local, clk, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -427,7 +427,7 @@ func TestLocal_ServesAMachineThroughTheAgentFromCreateToDelete(t *testing.T) {
 	go func() { svc.Run(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
 	r.run(t)
-	r.gaon.SetMachine(machineUsing("db", 1, "data"))
+	r.gaon.SetMicroVM(microvmUsing("db", 1, "data"))
 
 	eventually(t, "db runs with the disk", func() bool {
 		m, ok := r.mvmd.Machine("db-e1")
@@ -435,12 +435,12 @@ func TestLocal_ServesAMachineThroughTheAgentFromCreateToDelete(t *testing.T) {
 	})
 	eventually(t, "data is Bound to db", func() bool {
 		v := r.volume(t, "data")
-		return v.Status.Phase == api.VolumeBound && v.Status.Attachment != nil && v.Status.Attachment.MachineName == "db"
+		return v.Status.Phase == api.VolumeBound && v.Status.Attachment != nil && v.Status.Attachment.MicroVMName == "db"
 	})
 
-	r.gaon.DeleteMachine("db")
+	r.gaon.DeleteMicroVM("db")
 	eventually(t, "data is Released once db is gone", r.phase("data", api.VolumeReleased))
-	assert.Equal(t, &api.Attachment{MachineName: "db", BindingEpoch: 1}, r.volume(t, "data").Status.Attachment)
+	assert.Equal(t, &api.Attachment{MicroVMName: "db", BindingEpoch: 1}, r.volume(t, "data").Status.Attachment)
 	_, ok := r.mvmd.Disk("volume-data")
-	assert.True(t, ok, "the disk outlives the Machine")
+	assert.True(t, ok, "the disk outlives the MicroVM")
 }

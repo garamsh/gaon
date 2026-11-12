@@ -24,7 +24,7 @@ import (
 // renew period of the kill (node-lifecycle.md, resource-api.md §Lease and
 // fencing); the Scheduler then polls every interval (scheduler.md) and the
 // Node Agent reconciles every resync period (node-agent.md). The time mvmd
-// takes to start a Machine is not stated anywhere, so startAllowance is the
+// takes to start a MicroVM is not stated anywhere, so startAllowance is the
 // test's own figure.
 const (
 	leaseDuration     = 30 * time.Second
@@ -41,24 +41,24 @@ const (
 	setupTimeout = 3 * time.Minute
 )
 
-const machineName = "e2e-web"
+const microvmName = "e2e-web"
 
-func TestFailover_AMachineAppliedWithTheCLIRunsOnAnotherNodeAfterItsNodeIsKilled(t *testing.T) {
+func TestFailover_AMicroVMAppliedWithTheCLIRunsOnAnotherNodeAfterItsNodeIsKilled(t *testing.T) {
 	cluster := bootCluster(t)
 	victim, keeper := cluster.Workers[0], cluster.ControlPlane
 	require.NotEqual(t, victim.Name, keeper.Name)
 	client := apiClient(t, cluster)
 	ctx := context.Background()
 
-	// Only the victim is admitted, so the Scheduler can bind the Machine nowhere else.
+	// Only the victim is admitted, so the Scheduler can bind the MicroVM nowhere else.
 	apply(t, cluster, nodeYAML(victim.Name))
-	first := waitMachine(t, ctx, client, setupTimeout, "the Machine Running on "+victim.Name, func(m *api.Machine) bool {
-		return m.Spec.NodeName == victim.Name && m.EffectivePhase() == api.MachineRunning
-	}, func() { apply(t, cluster, machineYAML(cluster.Image)) })
+	first := waitMicroVM(t, ctx, client, setupTimeout, "the MicroVM Running on "+victim.Name, func(m *api.MicroVM) bool {
+		return m.Spec.NodeName == victim.Name && m.EffectivePhase() == api.MicroVMRunning
+	}, func() { apply(t, cluster, microvmYAML(cluster.Image)) })
 	require.Equal(t, api.Epoch(1), first.Spec.BindingEpoch, "the first binding is epoch 1")
-	t.Logf("machine %s is Running on %s at epoch %d", machineName, victim.Name, first.Spec.BindingEpoch)
+	t.Logf("microvm %s is Running on %s at epoch %d", microvmName, victim.Name, first.Spec.BindingEpoch)
 
-	// The other Node is admitted now, so it is where the Machine can go.
+	// The other Node is admitted now, so it is where the MicroVM can go.
 	apply(t, cluster, nodeYAML(keeper.Name))
 	require.Eventually(t, func() bool {
 		n, err := client.GetNode(ctx, keeper.Name)
@@ -75,20 +75,20 @@ func TestFailover_AMachineAppliedWithTheCLIRunsOnAnotherNodeAfterItsNodeIsKilled
 	last := first
 	for {
 		elapsed := time.Since(killed)
-		// The Machine is read before the Node: a binding seen at epoch 2 was
+		// The MicroVM is read before the Node: a binding seen at epoch 2 was
 		// written after LeaseExpired, which stays True while the Node is down.
-		m, err := client.GetMachine(ctx, machineName)
+		m, err := client.GetMicroVM(ctx, microvmName)
 		require.NoError(t, err)
 		n, err := client.GetNode(ctx, victim.Name)
 		require.NoError(t, err)
 
 		require.GreaterOrEqual(t, m.Spec.BindingEpoch, last.Spec.BindingEpoch, "the epoch never goes down")
 		if m.Spec.BindingEpoch == last.Spec.BindingEpoch {
-			require.Equal(t, last.Spec.NodeName, m.Spec.NodeName, "the Machine moves only with a new epoch")
+			require.Equal(t, last.Spec.NodeName, m.Spec.NodeName, "the MicroVM moves only with a new epoch")
 		} else {
 			require.Equal(t, last.Spec.BindingEpoch+1, m.Spec.BindingEpoch, "the epoch goes up by one")
-			require.Equal(t, keeper.Name, m.Spec.NodeName, "the Machine is rebound to the other Node")
-			require.Equal(t, api.ConditionTrue, condition(n, api.NodeLeaseExpired), "the Machine is rebound only after %s's Lease expiry is confirmed", victim.Name)
+			require.Equal(t, keeper.Name, m.Spec.NodeName, "the MicroVM is rebound to the other Node")
+			require.Equal(t, api.ConditionTrue, condition(n, api.NodeLeaseExpired), "the MicroVM is rebound only after %s's Lease expiry is confirmed", victim.Name)
 		}
 		require.False(t, alive(victim.PID), "%s stays down, so it runs nothing", victim.Name)
 
@@ -101,13 +101,13 @@ func TestFailover_AMachineAppliedWithTheCLIRunsOnAnotherNodeAfterItsNodeIsKilled
 				"%s has no LeaseExpired condition True %s after its kill, the bound node-lifecycle.md gives", victim.Name, expiryBound)
 		}
 		last = m
-		if m.Spec.NodeName == keeper.Name && m.EffectivePhase() == api.MachineRunning {
+		if m.Spec.NodeName == keeper.Name && m.EffectivePhase() == api.MicroVMRunning {
 			require.Equal(t, first.Spec.BindingEpoch+1, m.Status.BindingEpoch)
-			t.Logf("machine %s is Running on %s at epoch %d, %s after the kill", machineName, keeper.Name, m.Status.BindingEpoch, elapsed.Round(time.Millisecond))
+			t.Logf("microvm %s is Running on %s at epoch %d, %s after the kill", microvmName, keeper.Name, m.Status.BindingEpoch, elapsed.Round(time.Millisecond))
 			return
 		}
 		if elapsed > failoverBound {
-			require.FailNow(t, "the Machine is not Running on another Node in time",
+			require.FailNow(t, "the MicroVM is not Running on another Node in time",
 				"after %s: nodeName %q, epoch %d, phase %q", failoverBound, m.Spec.NodeName, m.Spec.BindingEpoch, m.EffectivePhase())
 		}
 		time.Sleep(pollInterval)
@@ -130,15 +130,15 @@ func condition(n *api.Node, kind string) api.ConditionStatus {
 	return api.ConditionFalse
 }
 
-// waitMachine polls the Machine until ok holds and returns it. before runs once
+// waitMicroVM polls the MicroVM until ok holds and returns it. before runs once
 // first. It fails with the last state read when the timeout passes.
-func waitMachine(t *testing.T, ctx context.Context, client *api.Client, timeout time.Duration, what string, ok func(*api.Machine) bool, before func()) *api.Machine {
+func waitMicroVM(t *testing.T, ctx context.Context, client *api.Client, timeout time.Duration, what string, ok func(*api.MicroVM) bool, before func()) *api.MicroVM {
 	t.Helper()
 	before()
 	deadline := time.Now().Add(timeout)
-	state := "no Machine read yet"
+	state := "no MicroVM read yet"
 	for time.Now().Before(deadline) {
-		if m, err := client.GetMachine(ctx, machineName); err == nil {
+		if m, err := client.GetMicroVM(ctx, microvmName); err == nil {
 			if ok(m) {
 				return m
 			}
@@ -164,11 +164,11 @@ func nodeYAML(name string) string {
 	return "apiVersion: compute.gaon.garam.sh/v1alpha1\nkind: Node\nmetadata:\n  name: " + name + "\nspec:\n  admitted: true\n"
 }
 
-func machineYAML(image string) string {
+func microvmYAML(image string) string {
 	return `apiVersion: compute.gaon.garam.sh/v1alpha1
-kind: Machine
+kind: MicroVM
 metadata:
-  name: ` + machineName + `
+  name: ` + microvmName + `
 spec:
   image: ` + image + `
   runStrategy: Always

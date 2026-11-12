@@ -25,11 +25,11 @@ func parseResources(cpu, memory api.Quantity) (resources, error) {
 	return resources{cpu: c, memory: m}, nil
 }
 
-func requests(m *api.Machine) (resources, error) {
+func requests(m *api.MicroVM) (resources, error) {
 	r := m.Spec.Resources.Requests
 	res, err := parseResources(r.CPU, r.Memory)
 	if err != nil {
-		return resources{}, fmt.Errorf("machine %s requests: %w", m.Metadata.Name, err)
+		return resources{}, fmt.Errorf("microvm %s requests: %w", m.Metadata.Name, err)
 	}
 	return res, nil
 }
@@ -51,7 +51,7 @@ func (r resources) covers(o resources) bool {
 	return r.cpu.Cmp(o.cpu) >= 0 && r.memory.Cmp(o.memory) >= 0
 }
 
-// eligible reports whether the Scheduler may place a Machine on n: it is
+// eligible reports whether the Scheduler may place a MicroVM on n: it is
 // Admitted, Ready, and the node lifecycle controller has not set LeaseExpired.
 func eligible(n *api.Node) bool {
 	return n.Status.State == api.NodeStateAdmitted &&
@@ -90,8 +90,8 @@ type ledger struct {
 }
 
 // newLedger takes the capacity of each eligible Node less the requests of the
-// Machines bound to it, whatever their phase.
-func newLedger(nodes []api.Node, machines []api.Machine) (*ledger, error) {
+// MicroVMs bound to it, whatever their phase.
+func newLedger(nodes []api.Node, microvms []api.MicroVM) (*ledger, error) {
 	l := &ledger{views: map[string]*nodeView{}}
 	for i := range nodes {
 		n := &nodes[i]
@@ -108,8 +108,8 @@ func newLedger(nodes []api.Node, machines []api.Machine) (*ledger, error) {
 		l.views[n.Metadata.Name] = v
 	}
 	slices.Sort(l.names)
-	for i := range machines {
-		m := &machines[i]
+	for i := range microvms {
+		m := &microvms[i]
 		v, ok := l.views[m.Spec.NodeName]
 		if !ok || !eligible(v.node) {
 			continue

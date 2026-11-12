@@ -19,12 +19,12 @@ func TestPutClusterRole_CreatesThenUpdatesOnTheCurrentVersion(t *testing.T) {
 	e := newEnv(t)
 	rbac := e.rbacClient()
 
-	created, err := rbac.PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "machines", api.VerbGet)))
+	created, err := rbac.PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "microvms", api.VerbGet)))
 	require.NoError(t, err)
 	assert.NotEmpty(t, created.Metadata.ResourceVersion)
 
 	update := *created
-	update.Rules = []api.PolicyRule{rule(api.Group, "machines", api.VerbList)}
+	update.Rules = []api.PolicyRule{rule(api.Group, "microvms", api.VerbList)}
 	updated, err := rbac.PutClusterRole(ctx(t), &update)
 	require.NoError(t, err)
 	assert.NotEqual(t, created.Metadata.ResourceVersion, updated.Metadata.ResourceVersion)
@@ -37,7 +37,7 @@ func TestPutClusterRole_CreatesThenUpdatesOnTheCurrentVersion(t *testing.T) {
 func TestPutClusterRole_CreateOfAnExistingNameIsAlreadyExists(t *testing.T) {
 	e := newEnv(t)
 	rbac := e.rbacClient()
-	_, err := rbac.PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "machines", api.VerbGet)))
+	_, err := rbac.PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "microvms", api.VerbGet)))
 	require.NoError(t, err)
 
 	_, err = rbac.PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "nodes", api.VerbGet)))
@@ -50,16 +50,16 @@ func TestPutClusterRole_RefusesARoleThatIsNotValid(t *testing.T) {
 	e := newEnv(t)
 	rbac := e.rbacClient()
 
-	_, err := rbac.PutClusterRole(ctx(t), clusterRole("bogus", rule(api.Group, "machines", "bogus")))
+	_, err := rbac.PutClusterRole(ctx(t), clusterRole("bogus", rule(api.Group, "microvms", "bogus")))
 	assert.ErrorIs(t, err, api.ErrInvalid, "an unknown verb")
-	_, err = rbac.PutClusterRole(ctx(t), clusterRole("fine", rule(api.Group, "machines", api.VerbGet)))
+	_, err = rbac.PutClusterRole(ctx(t), clusterRole("fine", rule(api.Group, "microvms", api.VerbGet)))
 	assert.NoError(t, err, "control: a rule")
 }
 
 func TestClusterRole_GetListAndDelete(t *testing.T) {
 	e := newEnv(t)
 	rbac := e.rbacClient()
-	r1, err := rbac.PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "machines", api.VerbGet)))
+	r1, err := rbac.PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "microvms", api.VerbGet)))
 	require.NoError(t, err)
 	_, err = rbac.PutClusterRole(ctx(t), clusterRole("r2", rule(api.Group, "nodes", api.VerbGet)))
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestClusterRole_AWatchSeesAnAddedRole(t *testing.T) {
 	require.NoError(t, err)
 	defer w.Close()
 
-	_, err = rbac.PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "machines", api.VerbGet)))
+	_, err = rbac.PutClusterRole(ctx(t), clusterRole("r1", rule(api.Group, "microvms", api.VerbGet)))
 	require.NoError(t, err)
 
 	ev, err := w.Next()

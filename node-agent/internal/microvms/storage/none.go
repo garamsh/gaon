@@ -11,11 +11,11 @@ import (
 // NoneName is the name that selects the None plugin.
 const NoneName = "none"
 
-// None attaches no disk and refuses no Machine.
+// None attaches no disk and refuses no MicroVM.
 type None struct{}
 
 // Attach returns no disks.
-func (None) Attach(context.Context, *api.Machine) ([]*v1alpha2.DiskAttachment, error) {
+func (None) Attach(context.Context, *api.MicroVM) ([]*v1alpha2.DiskAttachment, error) {
 	return nil, nil
 }
 

@@ -1,4 +1,4 @@
-// Command gaon-scheduler binds unbound Machines to Nodes through the resource API.
+// Command gaon-scheduler binds unbound MicroVMs to Nodes through the resource API.
 package main
 
 import (

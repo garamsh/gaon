@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -31,9 +32,9 @@ func TestVolumeAttach(t *testing.T) {
 		valid    bool
 	}{
 		{"unattached", nil, 3, true},
-		{"attached at a lower epoch", &api.Attachment{MachineName: "old", BindingEpoch: 2}, 3, true},
-		{"attached at the same epoch", &api.Attachment{MachineName: "old", BindingEpoch: 3}, 3, false},
-		{"attached at a higher epoch", &api.Attachment{MachineName: "old", BindingEpoch: 4}, 3, false},
+		{"attached at a lower epoch", &api.Attachment{MicroVMName: "old", BindingEpoch: 2}, 3, true},
+		{"attached at the same epoch", &api.Attachment{MicroVMName: "old", BindingEpoch: 3}, 3, false},
+		{"attached at a higher epoch", &api.Attachment{MicroVMName: "old", BindingEpoch: 4}, 3, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,7 +43,7 @@ func TestVolumeAttach(t *testing.T) {
 			err := v.Attach("m1", tt.epoch)
 			if tt.valid {
 				require.NoError(t, err)
-				assert.Equal(t, &api.Attachment{MachineName: "m1", BindingEpoch: tt.epoch}, v.Status.Attachment)
+				assert.Equal(t, &api.Attachment{MicroVMName: "m1", BindingEpoch: tt.epoch}, v.Status.Attachment)
 				return
 			}
 			assert.ErrorIs(t, err, api.ErrConflict)
@@ -69,7 +70,7 @@ func TestVolumeValidate(t *testing.T) {
 		valid  bool
 	}{
 		{"local volume", func(v *api.Volume) {}, true},
-		{"wrong kind", func(v *api.Volume) { v.Kind = api.KindMachine }, false},
+		{"wrong kind", func(v *api.Volume) { v.Kind = api.KindMicroVM }, false},
 		{"no name", func(v *api.Volume) { v.Metadata.Name = "" }, false},
 		{"no storage class", func(v *api.Volume) { v.Spec.StorageClass = "" }, false},
 		{"local, no access mode", func(v *api.Volume) { v.Spec.AccessModes = nil }, false},
@@ -192,11 +193,11 @@ func TestVolumePin(t *testing.T) {
 	}
 }
 
-func TestMachinePinVolumes(t *testing.T) {
-	machine := func(names ...string) *api.Machine {
-		m := newMachine("m1")
+func TestMicroVMPinVolumes(t *testing.T) {
+	microvm := func(names ...string) *api.MicroVM {
+		m := newMicroVM("m1")
 		for _, n := range names {
-			m.Spec.Volumes = append(m.Spec.Volumes, api.MachineVolume{Name: n, MountPath: "/" + n})
+			m.Spec.Volumes = append(m.Spec.Volumes, api.MicroVMVolume{Name: n, MountPath: "/" + n})
 		}
 		return m
 	}
@@ -205,9 +206,9 @@ func TestMachinePinVolumes(t *testing.T) {
 
 	t.Run("pins the unpinned local volumes and reports them", func(t *testing.T) {
 		a, b := newVolume("a"), newVolume("b")
-		changed, err := machine("a", "b", "a").PinVolumes("node-a", map[string]*api.Volume{"a": a, "b": b})
+		changed, err := microvm("a", "b", "a").PinVolumes("node-a", map[string]*api.Volume{"a": a, "b": b})
 		require.NoError(t, err)
-		assert.Equal(t, []*api.Volume{a, b}, changed, "each volume once, in the machine's order")
+		assert.Equal(t, []*api.Volume{a, b}, changed, "each volume once, in the microvm's order")
 		assert.Equal(t, "node-a", a.Spec.NodeName)
 		assert.Equal(t, []string{api.NodeAgentFinalizer}, a.Metadata.Finalizers)
 		assert.Equal(t, "node-a", b.Spec.NodeName)
@@ -216,20 +217,20 @@ func TestMachinePinVolumes(t *testing.T) {
 	t.Run("a volume already pinned to the node is not reported", func(t *testing.T) {
 		here := newVolume("here")
 		here.Spec.NodeName = "node-a"
-		changed, err := machine("here").PinVolumes("node-a", map[string]*api.Volume{"here": here})
+		changed, err := microvm("here").PinVolumes("node-a", map[string]*api.Volume{"here": here})
 		require.NoError(t, err)
 		assert.Empty(t, changed)
 	})
 
-	t.Run("a machine with no volumes pins nothing", func(t *testing.T) {
-		changed, err := machine().PinVolumes("node-a", nil)
+	t.Run("a microvm with no volumes pins nothing", func(t *testing.T) {
+		changed, err := microvm().PinVolumes("node-a", nil)
 		require.NoError(t, err)
 		assert.Empty(t, changed)
 	})
 
 	t.Run("a volume pinned to another node refuses and nothing is pinned", func(t *testing.T) {
 		fresh := newVolume("fresh")
-		_, err := machine("fresh", "pinned-b").PinVolumes("node-a", map[string]*api.Volume{"fresh": fresh, "pinned-b": pinnedB})
+		_, err := microvm("fresh", "pinned-b").PinVolumes("node-a", map[string]*api.Volume{"fresh": fresh, "pinned-b": pinnedB})
 		assert.ErrorIs(t, err, api.ErrConflict)
 		assert.Empty(t, fresh.Spec.NodeName, "the first volume stays unpinned")
 		assert.Empty(t, fresh.Metadata.Finalizers)
@@ -237,7 +238,7 @@ func TestMachinePinVolumes(t *testing.T) {
 
 	t.Run("a missing volume refuses", func(t *testing.T) {
 		fresh := newVolume("fresh")
-		_, err := machine("fresh", "gone").PinVolumes("node-a", map[string]*api.Volume{"fresh": fresh})
+		_, err := microvm("fresh", "gone").PinVolumes("node-a", map[string]*api.Volume{"fresh": fresh})
 		assert.ErrorIs(t, err, api.ErrInvalid)
 		assert.Empty(t, fresh.Spec.NodeName)
 	})
@@ -246,16 +247,16 @@ func TestMachinePinVolumes(t *testing.T) {
 		deleting := newVolume("deleting")
 		now := time.Now()
 		deleting.Metadata.DeletionTimestamp = &now
-		_, err := machine("deleting").PinVolumes("node-a", map[string]*api.Volume{"deleting": deleting})
+		_, err := microvm("deleting").PinVolumes("node-a", map[string]*api.Volume{"deleting": deleting})
 		assert.ErrorIs(t, err, api.ErrConflict)
 	})
 
-	t.Run("a machine rebound to the node its volume is pinned to passes", func(t *testing.T) {
+	t.Run("a microvm rebound to the node its volume is pinned to passes", func(t *testing.T) {
 		here := newVolume("here")
 		here.Spec.NodeName = "node-a"
-		_, err := machine("here").PinVolumes("node-a", map[string]*api.Volume{"here": here})
+		_, err := microvm("here").PinVolumes("node-a", map[string]*api.Volume{"here": here})
 		assert.NoError(t, err)
-		_, err = machine("here").PinVolumes("node-b", map[string]*api.Volume{"here": here})
+		_, err = microvm("here").PinVolumes("node-b", map[string]*api.Volume{"here": here})
 		assert.ErrorIs(t, err, api.ErrConflict, "a volume pinned to an expired node is not followed to another")
 	})
 }
@@ -327,7 +328,7 @@ func TestClientVolumePutGetListDelete(t *testing.T) {
 func TestClientWatchVolumesDeliversVolumeEventsOnly(t *testing.T) {
 	ctx := testContext(t)
 	s, c := newMemoryServer(t)
-	_, err := c.PutMachine(ctx, newMachine("m1"))
+	_, err := c.PutMicroVM(ctx, newMicroVM("m1"))
 	require.NoError(t, err)
 	created, err := c.PutVolume(ctx, newVolume("data"))
 	require.NoError(t, err)
@@ -337,7 +338,7 @@ func TestClientWatchVolumesDeliversVolumeEventsOnly(t *testing.T) {
 	t.Cleanup(func() { _ = w.Close() })
 	ev := nextEvent(t, w)
 	assert.Equal(t, api.EventAdded, ev.Type)
-	assert.Equal(t, "data", ev.Object.Metadata.Name, "the machine's event is not delivered to a Volume watch")
+	assert.Equal(t, "data", ev.Object.Metadata.Name, "the microvm's event is not delivered to a Volume watch")
 
 	_, err = c.DeleteVolume(ctx, "data", created.Metadata.ResourceVersion)
 	require.NoError(t, err)
@@ -372,4 +373,24 @@ func TestNodeAndLeaseValidate(t *testing.T) {
 	assert.NoError(t, lease.Validate())
 	lease.Metadata.Name = ""
 	assert.ErrorIs(t, lease.Validate(), api.ErrInvalid)
+}
+
+func TestVolume_AttachmentIsWrittenAndReadUnderMicroVMName(t *testing.T) {
+	v := newVolume("data")
+	v.Status.Attachment = &api.Attachment{MicroVMName: "web", BindingEpoch: 3}
+
+	out, err := json.Marshal(v)
+	require.NoError(t, err)
+	var fields struct {
+		Status struct {
+			Attachment map[string]any `json:"attachment"`
+		} `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(out, &fields))
+	assert.Equal(t, map[string]any{"microvmName": "web", "bindingEpoch": float64(3)}, fields.Status.Attachment)
+
+	var back api.Volume
+	require.NoError(t, json.Unmarshal(out, &back))
+	require.NotNil(t, back.Status.Attachment, "control: the key written is the key read")
+	assert.Equal(t, api.Attachment{MicroVMName: "web", BindingEpoch: 3}, *back.Status.Attachment)
 }

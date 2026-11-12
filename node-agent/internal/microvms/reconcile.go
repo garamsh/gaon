@@ -1,4 +1,4 @@
-package machines
+package microvms
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
-// reconcileAll removes what is not wanted here, releases the Machines being
-// deleted that mvmd no longer holds, then brings each wanted Machine to its
-// run strategy. The error joins what failed; one Machine's failure does not
+// reconcileAll removes what is not wanted here, releases the MicroVMs being
+// deleted that mvmd no longer holds, then brings each wanted MicroVM to its
+// run strategy. The error joins what failed; one MicroVM's failure does not
 // stop the others.
 func (s *service) reconcileAll(ctx context.Context) error {
 	held, err := s.collect(ctx)
@@ -27,39 +27,39 @@ func (s *service) reconcileAll(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// reconcile brings the Machine name to its run strategy, when it is wanted
+// reconcile brings the MicroVM name to its run strategy, when it is wanted
 // here, and reports its status.
 func (s *service) reconcile(ctx context.Context, name string) error {
-	m, ok := s.cache.machines[name]
+	m, ok := s.cache.microvms[name]
 	if !ok || !s.cache.mine(m) {
 		return nil
 	}
 	if m.Spec.RunStrategy == api.RunOnDemand {
-		s.log.Debug("on-demand Machines are not run", "machine", name)
+		s.log.Debug("on-demand MicroVMs are not run", "microvm", name)
 		return nil
 	}
 	if err := s.setFinalizer(ctx, name, true); err != nil {
-		return fmt.Errorf("machine %s: %w", name, err)
+		return fmt.Errorf("microvm %s: %w", name, err)
 	}
-	if m, ok = s.cache.machines[name]; !ok || !s.cache.mine(m) {
+	if m, ok = s.cache.microvms[name]; !ok || !s.cache.mine(m) {
 		return nil
 	}
 	o, err := s.ensure(ctx, &m)
 	if err != nil {
-		return fmt.Errorf("machine %s: %w", name, err)
+		return fmt.Errorf("microvm %s: %w", name, err)
 	}
 	return s.report(ctx, name, o)
 }
 
-// collect stops and deletes every Machine mvmd holds that the agent created
+// collect stops and deletes every MicroVM mvmd holds that the agent created
 // and that is no longer wanted here: unbound, bound elsewhere, deleted, or
-// bound at an earlier epoch. It returns the names of the Machines mvmd still
+// bound at an earlier epoch. It returns the names of the MicroVMs mvmd still
 // holds under an identifier the agent formed, which is nil when mvmd could not
 // be listed.
 func (s *service) collect(ctx context.Context) (map[string]bool, error) {
 	listed, err := s.runtime.ListMachines(ctx, &v1alpha2.ListMachinesRequest{})
 	if err != nil {
-		return nil, fmt.Errorf("list runtime machines: %w", err)
+		return nil, fmt.Errorf("list runtime microvms: %w", err)
 	}
 	wanted := s.cache.wanted()
 	held := map[string]bool{}
@@ -92,7 +92,7 @@ func (s *service) remove(ctx context.Context, id string) error {
 	if err := s.storage.Release(ctx, id); err != nil {
 		return fmt.Errorf("release %s: %w", id, err)
 	}
-	s.log.Info("removed machine", "id", id)
+	s.log.Info("removed microvm", "id", id)
 	return nil
 }
 
@@ -100,11 +100,11 @@ func notFound(err error) bool {
 	return v1alpha2.KindOf(err) == v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND
 }
 
-// ensure creates the Machine in mvmd when it is missing and starts or stops
+// ensure creates the MicroVM in mvmd when it is missing and starts or stops
 // it as its run strategy asks. A failure the spec or mvmd's answer settles is
 // returned in the outcome, to be reported; any other is returned as an error,
 // to be retried on the next round.
-func (s *service) ensure(ctx context.Context, m *api.Machine) (outcome, error) {
+func (s *service) ensure(ctx context.Context, m *api.MicroVM) (outcome, error) {
 	id := machineID(m.Metadata.Name, m.Spec.BindingEpoch)
 	got, err := s.runtime.InspectMachine(ctx, &v1alpha2.InspectMachineRequest{MachineId: id})
 	switch {
@@ -150,9 +150,9 @@ func (s *service) ensure(ctx context.Context, m *api.Machine) (outcome, error) {
 }
 
 // create asks the network for the policy, pulls the image, readies the
-// volumes and creates the Machine in mvmd with both, then starts it. A
-// plugin's refusal is the Machine's failure.
-func (s *service) create(ctx context.Context, m *api.Machine) (outcome, error) {
+// volumes and creates the MicroVM in mvmd with both, then starts it. A
+// plugin's refusal is the MicroVM's failure.
+func (s *service) create(ctx context.Context, m *api.MicroVM) (outcome, error) {
 	req, image, err := createRequest(m)
 	if err != nil {
 		return outcome{failure: err, failReason: ReasonInvalidSpec}, nil
@@ -184,7 +184,7 @@ func (s *service) create(ctx context.Context, m *api.Machine) (outcome, error) {
 	return outcome{runtime: started}, nil
 }
 
-// refused makes the outcome of a plugin's error: a *Refusal is the Machine's
+// refused makes the outcome of a plugin's error: a *Refusal is the MicroVM's
 // failure, any other error is returned to be retried.
 func refused(plugin string, err error) (outcome, error) {
 	var r *Refusal
@@ -194,10 +194,10 @@ func refused(plugin string, err error) (outcome, error) {
 	return outcome{}, fmt.Errorf("%s plugin: %w", plugin, err)
 }
 
-// rejection is mvmd's refusal of a create, reported as the Machine's failure.
+// rejection is mvmd's refusal of a create, reported as the MicroVM's failure.
 type rejection struct{ err error }
 
-func (e rejection) Error() string { return "mvmd rejected the Machine: " + reasonOf(e.err) }
+func (e rejection) Error() string { return "mvmd rejected the MicroVM: " + reasonOf(e.err) }
 func (e rejection) Unwrap() error { return e.err }
 
 func (s *service) start(ctx context.Context, id string) (*v1alpha2.Machine, error) {
@@ -209,38 +209,38 @@ func (s *service) start(ctx context.Context, id string) (*v1alpha2.Machine, erro
 	return started.GetMachine(), nil
 }
 
-// report writes the status for the Machine name from o, when it differs from
-// the stored one. A conflict re-reads the Machine and tries once more while
+// report writes the status for the MicroVM name from o, when it differs from
+// the stored one. A conflict re-reads the MicroVM and tries once more while
 // the binding is the same.
 func (s *service) report(ctx context.Context, name string, o outcome) error {
 	for attempt := 0; attempt < 2; attempt++ {
-		m, ok := s.cache.machines[name]
+		m, ok := s.cache.microvms[name]
 		if !ok || !s.cache.mine(m) {
 			return nil
 		}
 		st := s.runOf(machineID(name, m.Spec.BindingEpoch))
 		pending := st.unwritten
-		next := machineStatus(&m, o, s.clock.Now(), pending)
+		next := microvmStatus(&m, o, s.clock.Now(), pending)
 		if reflect.DeepEqual(next, m.Status) {
 			return nil
 		}
 		m.Status = next
-		written, err := s.api.PutMachineStatus(ctx, &m)
+		written, err := s.api.PutMicroVMStatus(ctx, &m)
 		switch {
 		case err == nil:
 			s.cache.observe(*written)
 			st.unwritten -= pending
 			return nil
 		case errors.Is(err, api.ErrConflict):
-			fresh, getErr := s.api.GetMachine(ctx, name)
+			fresh, getErr := s.api.GetMicroVM(ctx, name)
 			if getErr != nil {
-				return fmt.Errorf("read machine %s: %w", name, getErr)
+				return fmt.Errorf("read microvm %s: %w", name, getErr)
 			}
 			s.observe(api.EventModified, *fresh)
 		case errors.Is(err, api.ErrInvalid):
 			// The API server refuses a status of an epoch that is not the
-			// spec's: the Machine was rebound meanwhile.
-			s.log.Info("status refused", "machine", name, "error", err)
+			// spec's: the MicroVM was rebound meanwhile.
+			s.log.Info("status refused", "microvm", name, "error", err)
 			return nil
 		default:
 			return fmt.Errorf("put status of %s: %w", name, err)

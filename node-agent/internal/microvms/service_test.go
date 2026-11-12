@@ -1,4 +1,4 @@
-package machines_test
+package microvms_test
 
 import (
 	"context"
@@ -17,9 +17,9 @@ import (
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
-	"github.com/garamsh/gaon/node-agent/internal/machines"
-	"github.com/garamsh/gaon/node-agent/internal/machines/network"
-	"github.com/garamsh/gaon/node-agent/internal/machines/storage"
+	"github.com/garamsh/gaon/node-agent/internal/microvms"
+	"github.com/garamsh/gaon/node-agent/internal/microvms/network"
+	"github.com/garamsh/gaon/node-agent/internal/microvms/storage"
 	"github.com/garamsh/mvmd/lib/runtimeapi"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
@@ -34,13 +34,13 @@ type env struct {
 	rt   v1alpha2.RuntimeServiceClient
 	// network and storage are the plugins the service runs with; a setup
 	// function may replace them, and they default to the built-ins.
-	network machines.Network
-	storage machines.Storage
+	network microvms.Network
+	storage microvms.Storage
 }
 
 // start runs the service against fakes, with the fencing deadline armed
 // unless armed is false, and stops it when the test ends.
-func start(t *testing.T, armed bool, wrap func(machines.API) machines.API, setup ...func(*env)) *env {
+func start(t *testing.T, armed bool, wrap func(microvms.API) microvms.API, setup ...func(*env)) *env {
 	t.Helper()
 	clk := clock.System{}
 	e := &env{gaon: fakegaon.New(t), mvmd: fakemvmd.New(t, clk)}
@@ -62,11 +62,11 @@ func start(t *testing.T, armed bool, wrap func(machines.API) machines.API, setup
 	if armed {
 		e.mvmd.Arm(time.Hour, 1)
 	}
-	var client machines.API = api.NewClient(e.gaon.URL, nil)
+	var client microvms.API = api.NewClient(e.gaon.URL, nil)
 	if wrap != nil {
 		client = wrap(client)
 	}
-	svc := machines.NewService(node, machines.Params{
+	svc := microvms.NewService(node, microvms.Params{
 		Resync: 20 * time.Millisecond, Retry: 20 * time.Millisecond, ReadTimeout: time.Second,
 		RestartBackoff: time.Hour, RestartBackoffMax: time.Hour, RestartResetAfter: time.Hour,
 	},
@@ -78,10 +78,10 @@ func start(t *testing.T, armed bool, wrap func(machines.API) machines.API, setup
 	return e
 }
 
-func machine(name string, epoch api.Epoch, nodeName string, strategy api.RunStrategy) api.Machine {
-	return api.Machine{
+func microvm(name string, epoch api.Epoch, nodeName string, strategy api.RunStrategy) api.MicroVM {
+	return api.MicroVM{
 		Metadata: api.ObjectMeta{Name: name, Generation: 1},
-		Spec: api.MachineSpec{
+		Spec: api.MicroVMSpec{
 			Image:        image,
 			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "2", Memory: "1Gi"}},
 			RunStrategy:  strategy,
@@ -108,9 +108,9 @@ func (e *env) running(id string) func() bool {
 	return func() bool { return e.runtimeState(id) == v1alpha2.MachineState_MACHINE_STATE_RUNNING }
 }
 
-func (e *env) phase(name string, epoch api.Epoch, phase api.MachinePhase) func() bool {
+func (e *env) phase(name string, epoch api.Epoch, phase api.MicroVMPhase) func() bool {
 	return func() bool {
-		s := e.gaon.Machine(name).Status
+		s := e.gaon.MicroVM(name).Status
 		return s.BindingEpoch == epoch && s.Phase == phase
 	}
 }
@@ -119,18 +119,18 @@ func (e *env) gone(id string) func() bool {
 	return func() bool { return !slices.Contains(e.mvmd.IDs(), id) }
 }
 
-func TestRun_CreatesAndStartsAMachineBoundToThisNodeAtItsEpoch(t *testing.T) {
+func TestRun_CreatesAndStartsAMicroVMBoundToThisNodeAtItsEpoch(t *testing.T) {
 	e := start(t, true, nil)
-	e.gaon.SetMachine(machine("m1", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("m1", 1, node, api.RunAlways))
 
 	eventually(t, "mvmd runs m1-e1", e.running("m1-e1"))
-	eventually(t, "status Running at epoch 1", e.phase("m1", 1, api.MachineRunning))
+	eventually(t, "status Running at epoch 1", e.phase("m1", 1, api.MicroVMRunning))
 
 	got, _ := e.mvmd.Machine("m1-e1")
 	assert.EqualValues(t, 2, got.GetResources().GetCpuCount())
 	assert.EqualValues(t, 1<<30, got.GetResources().GetMemoryBytes())
 	assert.Equal(t, []string{strings.Repeat("a", 64)}, trimDigests(e.mvmd.Images()))
-	s := e.gaon.Machine("m1").Status
+	s := e.gaon.MicroVM("m1").Status
 	assert.Equal(t, []string{"10.0.0.2"}, s.Addresses)
 	assert.EqualValues(t, 1, s.ObservedGeneration)
 	require.Len(t, s.Conditions, 1)
@@ -145,72 +145,72 @@ func trimDigests(in []string) []string {
 	return out
 }
 
-func TestRun_IgnoresAMachineBoundToAnotherNode(t *testing.T) {
+func TestRun_IgnoresAMicroVMBoundToAnotherNode(t *testing.T) {
 	e := start(t, true, nil)
-	e.gaon.SetMachine(machine("other", 1, "n2", api.RunAlways))
-	e.gaon.SetMachine(machine("mine", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("other", 1, "n2", api.RunAlways))
+	e.gaon.SetMicroVM(microvm("mine", 1, node, api.RunAlways))
 
 	eventually(t, "control: mine runs", e.running("mine-e1"))
 	assert.NotContains(t, e.mvmd.IDs(), "other-e1")
-	assert.Empty(t, e.gaon.Machine("other").Status.Phase, "the agent writes no status of a Machine that is not bound to it")
+	assert.Empty(t, e.gaon.MicroVM("other").Status.Phase, "the agent writes no status of a MicroVM that is not bound to it")
 }
 
-func TestRun_StopsAndRemovesAMachineReboundElsewhere(t *testing.T) {
+func TestRun_StopsAndRemovesAMicroVMReboundElsewhere(t *testing.T) {
 	e := start(t, true, nil)
-	e.gaon.SetMachine(machine("keep", 1, node, api.RunAlways))
-	e.gaon.SetMachine(machine("m1", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("keep", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("m1", 1, node, api.RunAlways))
 	eventually(t, "m1 runs", e.running("m1-e1"))
 
-	e.gaon.SetMachine(machine("m1", 2, "n2", api.RunAlways))
+	e.gaon.SetMicroVM(microvm("m1", 2, "n2", api.RunAlways))
 
 	eventually(t, "m1-e1 is removed from mvmd", e.gone("m1-e1"))
 	assert.Contains(t, e.mvmd.Calls(), "StopMachine m1-e1", "it is stopped before it is deleted")
-	assert.Equal(t, v1alpha2.MachineState_MACHINE_STATE_RUNNING, e.runtimeState("keep-e1"), "control: a Machine still bound here is left running")
+	assert.Equal(t, v1alpha2.MachineState_MACHINE_STATE_RUNNING, e.runtimeState("keep-e1"), "control: a MicroVM still bound here is left running")
 }
 
-func TestRun_StopsAndRemovesAMachineUnboundOrDeleted(t *testing.T) {
+func TestRun_StopsAndRemovesAMicroVMUnboundOrDeleted(t *testing.T) {
 	e := start(t, true, nil)
-	e.gaon.SetMachine(machine("unbound", 1, node, api.RunAlways))
-	e.gaon.SetMachine(machine("deleted", 1, node, api.RunAlways))
-	e.gaon.SetMachine(machine("keep", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("unbound", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("deleted", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("keep", 1, node, api.RunAlways))
 	eventually(t, "all run", func() bool {
 		return e.running("unbound-e1")() && e.running("deleted-e1")() && e.running("keep-e1")()
 	})
 
-	e.gaon.SetMachine(machine("unbound", 1, "", api.RunAlways))
-	e.gaon.DeleteMachine("deleted")
+	e.gaon.SetMicroVM(microvm("unbound", 1, "", api.RunAlways))
+	e.gaon.DeleteMicroVM("deleted")
 
 	eventually(t, "unbound-e1 is removed", e.gone("unbound-e1"))
 	eventually(t, "deleted-e1 is removed", e.gone("deleted-e1"))
-	assert.True(t, e.running("keep-e1")(), "control: the Machine still bound here runs")
+	assert.True(t, e.running("keep-e1")(), "control: the MicroVM still bound here runs")
 }
 
-func TestRun_ReplacesTheMachineWhenReboundToThisNodeAtALaterEpoch(t *testing.T) {
+func TestRun_ReplacesTheMicroVMWhenReboundToThisNodeAtALaterEpoch(t *testing.T) {
 	e := start(t, true, nil)
-	e.gaon.SetMachine(machine("m1", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("m1", 1, node, api.RunAlways))
 	eventually(t, "m1-e1 runs", e.running("m1-e1"))
 
-	e.gaon.SetMachine(machine("m1", 2, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("m1", 2, node, api.RunAlways))
 
 	eventually(t, "m1-e2 runs", e.running("m1-e2"))
 	eventually(t, "m1-e1 is removed", e.gone("m1-e1"))
-	eventually(t, "status is that of epoch 2", e.phase("m1", 2, api.MachineRunning))
+	eventually(t, "status is that of epoch 2", e.phase("m1", 2, api.MicroVMRunning))
 }
 
 func TestRun_IgnoresABindingOlderThanTheNewestEpochSeen(t *testing.T) {
 	e := start(t, true, nil)
-	e.gaon.SetMachine(machine("m1", 2, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("m1", 2, node, api.RunAlways))
 	eventually(t, "m1-e2 runs", e.running("m1-e2"))
 
-	// A delayed event shows the Machine bound here at epoch 1, then a later
-	// Machine proves the stream was read past it.
-	e.gaon.Inject(api.EventModified, machine("m1", 1, node, api.RunAlways))
-	e.gaon.SetMachine(machine("marker", 1, node, api.RunAlways))
+	// A delayed event shows the MicroVM bound here at epoch 1, then a later
+	// MicroVM proves the stream was read past it.
+	e.gaon.Inject(api.EventModified, microvm("m1", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("marker", 1, node, api.RunAlways))
 	eventually(t, "marker runs, so the stale event has been read", e.running("marker-e1"))
 
 	assert.NotContains(t, e.mvmd.Calls(), "CreateMachine m1-e1")
 	assert.True(t, e.running("m1-e2")(), "the newest binding is left running")
-	assert.EqualValues(t, 2, e.gaon.Machine("m1").Spec.BindingEpoch)
+	assert.EqualValues(t, 2, e.gaon.MicroVM("m1").Spec.BindingEpoch)
 }
 
 func TestRun_ReportsPhaseFromMvmdState(t *testing.T) {
@@ -219,25 +219,25 @@ func TestRun_ReportsPhaseFromMvmdState(t *testing.T) {
 		strategy api.RunStrategy
 		state    v1alpha2.MachineState
 		reason   string
-		phase    api.MachinePhase
+		phase    api.MicroVMPhase
 		cond     string
 		message  string
 	}{
-		{"a faulted VMM is Failed with mvmd's reason", api.RunAlways, v1alpha2.MachineState_MACHINE_STATE_FAULTED, "vmm exited: oom", api.MachineFailed, machines.ReasonFaulted, "vmm exited: oom"},
-		{"a paused Machine is Suspended", api.RunAlways, v1alpha2.MachineState_MACHINE_STATE_PAUSED, "", api.MachineSuspended, machines.ReasonSuspended, ""},
+		{"a faulted VMM is Failed with mvmd's reason", api.RunAlways, v1alpha2.MachineState_MACHINE_STATE_FAULTED, "vmm exited: oom", api.MicroVMFailed, microvms.ReasonFaulted, "vmm exited: oom"},
+		{"a paused MicroVM is Suspended", api.RunAlways, v1alpha2.MachineState_MACHINE_STATE_PAUSED, "", api.MicroVMSuspended, microvms.ReasonSuspended, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := start(t, true, nil)
-			e.gaon.SetMachine(machine("m1", 1, node, tt.strategy))
-			eventually(t, "status Running", e.phase("m1", 1, api.MachineRunning))
+			e.gaon.SetMicroVM(microvm("m1", 1, node, tt.strategy))
+			eventually(t, "status Running", e.phase("m1", 1, api.MicroVMRunning))
 
 			e.mvmd.SetState("m1-e1", tt.state, tt.reason)
 
 			eventually(t, "phase "+string(tt.phase), e.phase("m1", 1, tt.phase))
-			s := e.gaon.Machine("m1").Status
+			s := e.gaon.MicroVM("m1").Status
 			require.Len(t, s.Conditions, 1)
-			assert.Equal(t, machines.ConditionReady, s.Conditions[0].Type)
+			assert.Equal(t, microvms.ConditionReady, s.Conditions[0].Type)
 			assert.Equal(t, api.ConditionFalse, s.Conditions[0].Status)
 			assert.Equal(t, tt.cond, s.Conditions[0].Reason)
 			assert.Equal(t, tt.message, s.Conditions[0].Message)
@@ -245,44 +245,44 @@ func TestRun_ReportsPhaseFromMvmdState(t *testing.T) {
 	}
 }
 
-func TestRun_StopsAHaltedMachineAndStartsItAgainWhenResumed(t *testing.T) {
+func TestRun_StopsAHaltedMicroVMAndStartsItAgainWhenResumed(t *testing.T) {
 	e := start(t, true, nil)
-	e.gaon.SetMachine(machine("m1", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("m1", 1, node, api.RunAlways))
 	eventually(t, "m1-e1 runs", e.running("m1-e1"))
 
-	e.gaon.SetMachine(machine("m1", 1, node, api.RunHalted))
-	eventually(t, "status Stopped", e.phase("m1", 1, api.MachineStopped))
+	e.gaon.SetMicroVM(microvm("m1", 1, node, api.RunHalted))
+	eventually(t, "status Stopped", e.phase("m1", 1, api.MicroVMStopped))
 	assert.Equal(t, v1alpha2.MachineState_MACHINE_STATE_STOPPED, e.runtimeState("m1-e1"))
 
-	e.gaon.SetMachine(machine("m1", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("m1", 1, node, api.RunAlways))
 	eventually(t, "m1-e1 runs again", e.running("m1-e1"))
-	eventually(t, "status Running", e.phase("m1", 1, api.MachineRunning))
+	eventually(t, "status Running", e.phase("m1", 1, api.MicroVMRunning))
 }
 
 func TestRun_ReportsFailedWhenMvmdRejectsTheCreateAboveMaxVCPUs(t *testing.T) {
 	e := start(t, true, nil, func(e *env) { e.mvmd.MaxVCPUs = 2 })
-	over := machine("over", 1, node, api.RunAlways)
+	over := microvm("over", 1, node, api.RunAlways)
 	over.Spec.Resources.Limits.CPU = "4"
-	e.gaon.SetMachine(over)
-	e.gaon.SetMachine(machine("within", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(over)
+	e.gaon.SetMicroVM(microvm("within", 1, node, api.RunAlways))
 
-	eventually(t, "status Failed", e.phase("over", 1, api.MachineFailed))
-	eventually(t, "control: a Machine at the limit runs", e.running("within-e1"))
+	eventually(t, "status Failed", e.phase("over", 1, api.MicroVMFailed))
+	eventually(t, "control: a MicroVM at the limit runs", e.running("within-e1"))
 
-	s := e.gaon.Machine("over").Status
+	s := e.gaon.MicroVM("over").Status
 	require.Len(t, s.Conditions, 1)
-	assert.Equal(t, machines.ReasonRejected, s.Conditions[0].Reason)
+	assert.Equal(t, microvms.ReasonRejected, s.Conditions[0].Reason)
 	assert.Equal(t, api.ConditionFalse, s.Conditions[0].Status)
 	assert.Contains(t, s.Conditions[0].Message, "max_vcpus", "the condition carries mvmd's reason")
 	assert.NotContains(t, e.mvmd.IDs(), "over-e1")
 }
 
-func TestRun_CreatesAMachineWithTheKernelItsSpecNames(t *testing.T) {
+func TestRun_CreatesAMicroVMWithTheKernelItsSpecNames(t *testing.T) {
 	e := start(t, true, nil, func(e *env) { e.mvmd.Kernels = []string{"default", "alt"} })
-	named := machine("named", 1, node, api.RunAlways)
+	named := microvm("named", 1, node, api.RunAlways)
 	named.Spec.Kernel = "alt"
-	e.gaon.SetMachine(named)
-	e.gaon.SetMachine(machine("unnamed", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(named)
+	e.gaon.SetMicroVM(microvm("unnamed", 1, node, api.RunAlways))
 
 	eventually(t, "named-e1 runs", e.running("named-e1"))
 	eventually(t, "control: unnamed-e1 runs", e.running("unnamed-e1"))
@@ -294,48 +294,48 @@ func TestRun_CreatesAMachineWithTheKernelItsSpecNames(t *testing.T) {
 
 func TestRun_ReportsFailedWhenMvmdRejectsTheCreateForAnUnknownKernel(t *testing.T) {
 	e := start(t, true, nil, func(e *env) { e.mvmd.Kernels = []string{"default"} })
-	bad := machine("bad", 1, node, api.RunAlways)
+	bad := microvm("bad", 1, node, api.RunAlways)
 	bad.Spec.Kernel = "missing"
-	e.gaon.SetMachine(bad)
-	good := machine("good", 1, node, api.RunAlways)
+	e.gaon.SetMicroVM(bad)
+	good := microvm("good", 1, node, api.RunAlways)
 	good.Spec.Kernel = "default"
-	e.gaon.SetMachine(good)
+	e.gaon.SetMicroVM(good)
 
-	eventually(t, "status Failed", e.phase("bad", 1, api.MachineFailed))
-	eventually(t, "control: a Machine naming an offered kernel runs", e.running("good-e1"))
-	s := e.gaon.Machine("bad").Status
+	eventually(t, "status Failed", e.phase("bad", 1, api.MicroVMFailed))
+	eventually(t, "control: a MicroVM naming an offered kernel runs", e.running("good-e1"))
+	s := e.gaon.MicroVM("bad").Status
 	require.Len(t, s.Conditions, 1)
-	assert.Equal(t, machines.ReasonRejected, s.Conditions[0].Reason)
+	assert.Equal(t, microvms.ReasonRejected, s.Conditions[0].Reason)
 	assert.Contains(t, s.Conditions[0].Message, "missing")
 	assert.NotContains(t, e.mvmd.IDs(), "bad-e1")
 }
 
 func TestRun_ReportsFailedForAnImageWithoutADigest(t *testing.T) {
 	e := start(t, true, nil)
-	bad := machine("bad", 1, node, api.RunAlways)
+	bad := microvm("bad", 1, node, api.RunAlways)
 	bad.Spec.Image = "registry.example/app:latest"
-	e.gaon.SetMachine(bad)
-	e.gaon.SetMachine(machine("good", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(bad)
+	e.gaon.SetMicroVM(microvm("good", 1, node, api.RunAlways))
 
-	eventually(t, "status Failed", e.phase("bad", 1, api.MachineFailed))
-	eventually(t, "control: a Machine with a digest runs", e.running("good-e1"))
-	assert.Equal(t, machines.ReasonInvalidSpec, e.gaon.Machine("bad").Status.Conditions[0].Reason)
+	eventually(t, "status Failed", e.phase("bad", 1, api.MicroVMFailed))
+	eventually(t, "control: a MicroVM with a digest runs", e.running("good-e1"))
+	assert.Equal(t, microvms.ReasonInvalidSpec, e.gaon.MicroVM("bad").Status.Conditions[0].Reason)
 	assert.NotContains(t, e.mvmd.Calls(), "CreateMachine bad-e1")
 }
 
-func TestRun_KeepsAMachinePendingUntilMvmdsDeadlineIsArmed(t *testing.T) {
+func TestRun_KeepsAMicroVMPendingUntilMvmdsDeadlineIsArmed(t *testing.T) {
 	e := start(t, false, nil)
-	e.gaon.SetMachine(machine("m1", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("m1", 1, node, api.RunAlways))
 
 	eventually(t, "created and Pending", func() bool {
 		return e.runtimeState("m1-e1") == v1alpha2.MachineState_MACHINE_STATE_CREATED
 	})
-	assert.NotEqual(t, api.MachineRunning, e.gaon.Machine("m1").Status.Phase)
+	assert.NotEqual(t, api.MicroVMRunning, e.gaon.MicroVM("m1").Status.Phase)
 
 	e.mvmd.Arm(time.Hour, 2)
 
 	eventually(t, "m1-e1 runs once armed", e.running("m1-e1"))
-	eventually(t, "status Running", e.phase("m1", 1, api.MachineRunning))
+	eventually(t, "status Running", e.phase("m1", 1, api.MicroVMRunning))
 }
 
 func TestRun_RemovesWhatItCreatedBeforeARestartAndLeavesWhatItDidNot(t *testing.T) {
@@ -345,7 +345,7 @@ func TestRun_RemovesWhatItCreatedBeforeARestartAndLeavesWhatItDidNot(t *testing.
 			require.NoError(t, err)
 		}
 	})
-	e.gaon.SetMachine(machine("m1", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("m1", 1, node, api.RunAlways))
 
 	eventually(t, "the orphan of an earlier run is removed", e.gone("orphan-e3"))
 	eventually(t, "m1 runs", e.running("m1-e1"))
@@ -353,24 +353,24 @@ func TestRun_RemovesWhatItCreatedBeforeARestartAndLeavesWhatItDidNot(t *testing.
 }
 
 // conflictOnce answers the first status write with a conflict, as a write
-// does when the Machine changed since it was read.
+// does when the MicroVM changed since it was read.
 type conflictOnce struct {
-	machines.API
+	microvms.API
 	hit atomic.Bool
 }
 
-func (c *conflictOnce) PutMachineStatus(ctx context.Context, m *api.Machine) (*api.Machine, error) {
+func (c *conflictOnce) PutMicroVMStatus(ctx context.Context, m *api.MicroVM) (*api.MicroVM, error) {
 	if !c.hit.Swap(true) {
 		return nil, api.NewAPIError(api.ReasonConflict, "version is stale")
 	}
-	return c.API.PutMachineStatus(ctx, m)
+	return c.API.PutMicroVMStatus(ctx, m)
 }
 
-func TestRun_ReadsTheMachineAgainAndRetriesAStatusWriteThatConflicts(t *testing.T) {
+func TestRun_ReadsTheMicroVMAgainAndRetriesAStatusWriteThatConflicts(t *testing.T) {
 	c := &conflictOnce{}
-	e := start(t, true, func(a machines.API) machines.API { c.API = a; return c })
-	e.gaon.SetMachine(machine("m1", 1, node, api.RunAlways))
+	e := start(t, true, func(a microvms.API) microvms.API { c.API = a; return c })
+	e.gaon.SetMicroVM(microvm("m1", 1, node, api.RunAlways))
 
-	eventually(t, "status Running", e.phase("m1", 1, api.MachineRunning))
+	eventually(t, "status Running", e.phase("m1", 1, api.MicroVMRunning))
 	assert.True(t, c.hit.Load(), "setup: the first write was answered with a conflict")
 }
