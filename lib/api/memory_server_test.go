@@ -99,6 +99,24 @@ func newMemoryServer(t *testing.T) (*memoryServer, *api.Client) {
 	mux.HandleFunc("GET /validatingwebhookconfigurations", listOrWatch(s, "validatingwebhookconfigurations/", api.KindValidatingWebhookConfiguration, func(items []api.ValidatingWebhookConfiguration, rv api.ResourceVersion) any {
 		return &api.ValidatingWebhookConfigurationList{TypeMeta: api.TypeMeta{APIVersion: api.AdmissionRegistrationGroupVersion, Kind: api.KindValidatingWebhookConfigurationList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
 	}))
+	mux.HandleFunc("PUT /services/{name}", putValidated(s, "services/", api.KindService, func(v *api.Service) (*api.ObjectMeta, error) { return &v.Metadata, v.Validate() }))
+	mux.HandleFunc("DELETE /services/{name}", deleteObject[api.Service](s, "services/", api.KindService, func(v *api.Service) *api.ObjectMeta { return &v.Metadata }))
+	mux.HandleFunc("GET /services/{name}", getObject[api.Service](s, "services/"))
+	mux.HandleFunc("GET /services", listOrWatch(s, "services/", api.KindService, func(items []api.Service, rv api.ResourceVersion) any {
+		return &api.ServiceList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindServiceList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
+	mux.HandleFunc("PUT /endpoints/{name}", putValidated(s, "endpoints/", api.KindEndpoints, func(v *api.Endpoints) (*api.ObjectMeta, error) { return &v.Metadata, v.Validate() }))
+	mux.HandleFunc("DELETE /endpoints/{name}", deleteObject[api.Endpoints](s, "endpoints/", api.KindEndpoints, func(v *api.Endpoints) *api.ObjectMeta { return &v.Metadata }))
+	mux.HandleFunc("GET /endpoints/{name}", getObject[api.Endpoints](s, "endpoints/"))
+	mux.HandleFunc("GET /endpoints", listOrWatch(s, "endpoints/", api.KindEndpoints, func(items []api.Endpoints, rv api.ResourceVersion) any {
+		return &api.EndpointsList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindEndpointsList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
+	mux.HandleFunc("PUT /networkpolicies/{name}", putValidated(s, "networkpolicies/", api.KindNetworkPolicy, func(v *api.NetworkPolicy) (*api.ObjectMeta, error) { return &v.Metadata, v.Validate() }))
+	mux.HandleFunc("DELETE /networkpolicies/{name}", deleteObject[api.NetworkPolicy](s, "networkpolicies/", api.KindNetworkPolicy, func(v *api.NetworkPolicy) *api.ObjectMeta { return &v.Metadata }))
+	mux.HandleFunc("GET /networkpolicies/{name}", getObject[api.NetworkPolicy](s, "networkpolicies/"))
+	mux.HandleFunc("GET /networkpolicies", listOrWatch(s, "networkpolicies/", api.KindNetworkPolicy, func(items []api.NetworkPolicy, rv api.ResourceVersion) any {
+		return &api.NetworkPolicyList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindNetworkPolicyList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
 	for _, ct := range []api.CustomResourceType{widgetType, gadgetType} {
 		s.customRoutes(mux, ct)
 	}
