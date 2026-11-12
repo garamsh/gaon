@@ -134,6 +134,20 @@ func TestRun_ReadsAnOwnerAbsentFromTheListBeforeDeleting(t *testing.T) {
 	assert.True(t, f.has(volumeType, "of-that-owner"))
 }
 
+func TestRun_KeepsAnObjectWhoseOwnerReadFailsAndDeletesOneWhoseOwnerReadsNotFound(t *testing.T) {
+	f := newFakeAPI(t)
+	f.add(mvmType, "unreadable", "uid-1")
+	f.hide(mvmType, "unreadable")
+	f.failRead(mvmType, "unreadable")
+	f.add(volumeType, "of-an-unreadable-owner", "uid-v1", ownerOf(mvmType, "unreadable", "uid-1"))
+	f.add(volumeType, "of-a-missing-owner", "uid-v2", ownerOf(mvmType, "missing", "uid-2"))
+
+	start(t, f)
+
+	assert.Equal(t, []string{"Volume/of-a-missing-owner"}, f.deleted(), "control: an owner whose read answers not found is gone")
+	assert.True(t, f.has(volumeType, "of-an-unreadable-owner"))
+}
+
 func TestRun_LeavesAlone_AnObjectBeingDeletedAndAKindWithNoDelete(t *testing.T) {
 	f := newFakeAPI(t)
 	now := time.Now()

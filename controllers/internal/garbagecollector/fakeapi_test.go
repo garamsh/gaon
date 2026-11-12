@@ -48,6 +48,7 @@ type fakeAPI struct {
 	objects map[string]map[string]*api.CustomObject
 	hidden  map[string]bool
 	failing map[string]bool
+	failGet map[string]bool
 	after   map[string]func()
 	deletes []string
 	nextRV  int
@@ -56,7 +57,7 @@ type fakeAPI struct {
 func newFakeAPI(t *testing.T) *fakeAPI {
 	f := &fakeAPI{
 		t: t, objects: map[string]map[string]*api.CustomObject{}, hidden: map[string]bool{},
-		failing: map[string]bool{}, after: map[string]func(){}, nextRV: 100,
+		failing: map[string]bool{}, failGet: map[string]bool{}, after: map[string]func(){}, nextRV: 100,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /apis/{group}/{version}/{plural}", f.list)
@@ -154,6 +155,13 @@ func (f *fakeAPI) failList(t api.CustomResourceType) {
 	f.failing[prefix(t)] = true
 }
 
+// failRead makes a read of the object answer 500.
+func (f *fakeAPI) failRead(t api.CustomResourceType, name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failGet[prefix(t)+"/"+name] = true
+}
+
 // afterList runs fn once a list of the kind t has been read from the store and
 // before it is answered, outside the fake's lock.
 func (f *fakeAPI) afterList(t api.CustomResourceType, fn func()) {
@@ -206,6 +214,10 @@ func (f *fakeAPI) get(w http.ResponseWriter, r *http.Request) {
 	p := "/apis/" + r.PathValue("group") + "/" + r.PathValue("version") + "/" + r.PathValue("plural")
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failGet[p+"/"+r.PathValue("name")] {
+		writeJSON(w, http.StatusInternalServerError, api.NewAPIError(api.ReasonInternalError, "get"))
+		return
+	}
 	o, ok := f.objects[p][r.PathValue("name")]
 	if !ok {
 		writeJSON(w, http.StatusNotFound, api.NewAPIError(api.ReasonNotFound, "object"))
