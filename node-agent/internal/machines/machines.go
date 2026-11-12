@@ -92,6 +92,7 @@ func createRequest(m *api.Machine) (*v1alpha2.CreateMachineRequest, *v1alpha2.Im
 		MachineId:   machineID(m.Metadata.Name, m.Spec.BindingEpoch),
 		RequestId:   machineID(m.Metadata.Name, m.Spec.BindingEpoch),
 		ImageDigest: image[2],
+		Kernel:      m.Spec.Kernel,
 		Resources:   &v1alpha2.Resources{CpuCount: cpuCount, MemoryBytes: memoryBytes},
 	}
 	if m.Spec.RootDiskSize != "" {

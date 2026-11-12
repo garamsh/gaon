@@ -34,6 +34,9 @@ type Server struct {
 	Socket string
 	// MaxVCPUs, when above zero, is the most vCPUs a Create accepts.
 	MaxVCPUs uint32
+	// Kernels, when not empty, are the kernel names the node offers: a Create
+	// naming another is rejected. An empty name is always accepted.
+	Kernels []string
 
 	clock       clock.Clock
 	mu          sync.Mutex

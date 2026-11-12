@@ -263,6 +263,39 @@ func TestRun_ReportsFailedWhenMvmdRejectsTheCreateAboveMaxVCPUs(t *testing.T) {
 	assert.NotContains(t, e.mvmd.IDs(), "over-e1")
 }
 
+func TestRun_CreatesAMachineWithTheKernelItsSpecNames(t *testing.T) {
+	e := start(t, true, nil, func(e *env) { e.mvmd.Kernels = []string{"default", "alt"} })
+	named := machine("named", 1, node, api.RunAlways)
+	named.Spec.Kernel = "alt"
+	e.gaon.SetMachine(named)
+	e.gaon.SetMachine(machine("unnamed", 1, node, api.RunAlways))
+
+	eventually(t, "named-e1 runs", e.running("named-e1"))
+	eventually(t, "control: unnamed-e1 runs", e.running("unnamed-e1"))
+	got, _ := e.mvmd.Machine("named-e1")
+	assert.Equal(t, "alt", got.GetKernel())
+	other, _ := e.mvmd.Machine("unnamed-e1")
+	assert.Empty(t, other.GetKernel(), "an empty spec.kernel stays empty for mvmd's default")
+}
+
+func TestRun_ReportsFailedWhenMvmdRejectsTheCreateForAnUnknownKernel(t *testing.T) {
+	e := start(t, true, nil, func(e *env) { e.mvmd.Kernels = []string{"default"} })
+	bad := machine("bad", 1, node, api.RunAlways)
+	bad.Spec.Kernel = "missing"
+	e.gaon.SetMachine(bad)
+	good := machine("good", 1, node, api.RunAlways)
+	good.Spec.Kernel = "default"
+	e.gaon.SetMachine(good)
+
+	eventually(t, "status Failed", e.phase("bad", 1, api.MachineFailed))
+	eventually(t, "control: a Machine naming an offered kernel runs", e.running("good-e1"))
+	s := e.gaon.Machine("bad").Status
+	require.Len(t, s.Conditions, 1)
+	assert.Equal(t, machines.ReasonRejected, s.Conditions[0].Reason)
+	assert.Contains(t, s.Conditions[0].Message, "missing")
+	assert.NotContains(t, e.mvmd.IDs(), "bad-e1")
+}
+
 func TestRun_ReportsFailedForAnImageWithoutADigest(t *testing.T) {
 	e := start(t, true, nil)
 	bad := machine("bad", 1, node, api.RunAlways)

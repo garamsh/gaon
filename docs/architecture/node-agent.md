@@ -73,6 +73,7 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 
 - **Watched set:** the agent lists the Machines, watches from the list's version and reconciles on every change and every resync. A failed or expired watch is followed by a new list.
 - **Identity in mvmd:** a Machine is held in mvmd as its name with the binding epoch appended. A binding at a later epoch is therefore a different mvmd machine, and the earlier one is removed, never reused.
+- **Kernel:** the agent passes `spec.kernel` unchanged as the create request's `kernel`, so an empty value leaves mvmd to pick the node's default.
 - **Epoch rule:** the agent keeps the newest epoch it has seen for each Machine and ignores an event, a list entry or a re-read carrying an older one.
 - **Run:** a Machine bound to this node, not being deleted and not `OnDemand`, has its image pulled by digest, is created in mvmd and started, according to `runStrategy`: `Halted` is stopped and not created, `Once` is not started again after it stopped, unless the agent stopped it for `Halted` and `runStrategy` is now `Once`, which starts it, the others are started whenever mvmd holds them created, and restarted as below when it holds them stopped or faulted.
 - **Remove:** every mvmd machine the agent named that is not a Machine bound here now, whether unbound, bound elsewhere, bound at an older epoch, being deleted or no longer in the API, is stopped and deleted. This also clears what an earlier run left. An mvmd machine whose identifier the agent did not form is left alone.
@@ -94,7 +95,7 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 | stopped, other | `Pending` | false, started again once the restart wait is over |
 | faulted | `Failed` | false, the reason is mvmd's last failure reason; stopped and started again once the restart wait is over |
 
-- **Failures the agent settles itself** go to `Failed` with the `Ready` condition false and a reason: `InvalidSpec` for an image that is not `<repository>@sha256:<digest>` or resources it cannot convert, and `Rejected` for a create mvmd refuses, such as one above a Driver's `max_vcpus`, with mvmd's reason as the message. The Driver's limit is not on the Node's status.
+- **Failures the agent settles itself** go to `Failed` with the `Ready` condition false and a reason: `InvalidSpec` for an image that is not `<repository>@sha256:<digest>` or resources it cannot convert, and `Rejected` for a create mvmd refuses, such as one above a Driver's `max_vcpus` or one naming a kernel the node does not offer, with mvmd's reason as the message. The Driver's limit is not on the Node's status.
 - **Outcome kind `IN_PROGRESS`** is treated as never produced by mvmd (garamsh/mvmd#307).
 
 ### What the agent does not do yet
