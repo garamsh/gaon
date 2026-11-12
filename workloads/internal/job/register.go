@@ -12,7 +12,7 @@ import (
 
 // register registers each kind the unit serves.
 func (s *service) register(ctx context.Context) error {
-	for _, want := range []*api.CustomResourceDefinition{Definition(), CronJobDefinition()} {
+	for _, want := range []*api.CustomResourceDefinition{Definition(), CronJobDefinition(), DeploymentDefinition()} {
 		if err := s.registerDefinition(ctx, want); err != nil {
 			return err
 		}

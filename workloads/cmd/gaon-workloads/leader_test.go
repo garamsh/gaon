@@ -47,12 +47,18 @@ type electionAPI struct {
 	jobPuts map[string]int
 	// clock, when set, is the time the instances read.
 	clock job.Clock
+	// deletes counts the MicroVM deletions, by instance.
+	deletes map[string]int
+	// dep is the Deployment the server holds, if a test sets one, and the state
+	// of the replicas it checks and the agents it plays.
+	dep   *api.CustomObject
+	fleet fleetState
 }
 
 func newElectionAPI(t *testing.T) *electionAPI {
 	t.Helper()
 	a := &electionAPI{microvms: map[string]api.MicroVM{}, work: map[string]int{}, creates: map[string]int{}, polls: map[string]int{},
-		jobs: map[string]api.CustomObject{}, jobPuts: map[string]int{}}
+		jobs: map[string]api.CustomObject{}, jobPuts: map[string]int{}, deletes: map[string]int{}}
 	ts := httptest.NewServer(http.HandlerFunc(a.serve))
 	t.Cleanup(ts.Close)
 	a.URL = ts.URL
@@ -135,6 +141,16 @@ func (a *electionAPI) serve(w http.ResponseWriter, r *http.Request) {
 		a.cron.Status = in.Status
 		a.cron.Metadata.ResourceVersion = api.ResourceVersion(fmt.Sprint("c", a.version))
 		_ = json.NewEncoder(w).Encode(a.cron)
+	case strings.HasSuffix(path, "/deployments"):
+		a.work[who]++
+		a.listDeployments(w)
+	case strings.Contains(path, "/deployments/") && strings.HasSuffix(path, "/status"):
+		a.work[who]++
+		a.putDeploymentStatus(w, r, fail)
+	case strings.Contains(path, "/microvms/") && r.Method == http.MethodDelete:
+		a.work[who]++
+		a.deletes[who]++
+		a.deleteMicroVM(w, r, fail)
 	case strings.HasSuffix(path, "/microvms") && r.Method == http.MethodGet:
 		a.work[who]++
 		list := api.MicroVMList{Metadata: api.ListMeta{ResourceVersion: "1"}, Items: []api.MicroVM{}}
@@ -154,7 +170,10 @@ func (a *electionAPI) serve(w http.ResponseWriter, r *http.Request) {
 			fail(api.ReasonAlreadyExists)
 			return
 		}
+		a.version++
+		m.Metadata.ResourceVersion = api.ResourceVersion(fmt.Sprint("m", a.version))
 		a.microvms[m.Metadata.Name] = m
+		a.checkBounds()
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(m)
 	default:

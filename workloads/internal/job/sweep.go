@@ -11,16 +11,16 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// sweep reconciles every Job once, then every CronJob. A failure of one
-// object is logged and does not stop the others.
+// sweep reconciles every Job once, then every CronJob, then every Deployment.
+// A failure of one object is logged and does not stop the others.
 func (s *service) sweep(ctx context.Context) {
-	jobs, err := s.jobs.List(ctx)
-	if err != nil {
+	if jobs, err := s.jobs.List(ctx); err != nil {
 		s.log.Warn("list jobs", "error", err)
-		return
+	} else {
+		s.sweepJobs(ctx, jobs.Items)
+		s.sweepCronJobs(ctx, jobs.Items)
 	}
-	s.sweepJobs(ctx, jobs.Items)
-	s.sweepCronJobs(ctx, jobs.Items)
+	s.sweepDeployments(ctx)
 }
 
 func (s *service) sweepJobs(ctx context.Context, jobs []api.CustomObject) {
@@ -57,7 +57,7 @@ func (s *service) reconcile(ctx context.Context, obj *api.CustomObject, all []ap
 	}
 
 	next := Status{Conditions: old.Conditions}
-	for _, m := range owned(obj, all) {
+	for _, m := range owned(Kind, obj, all) {
 		switch m.EffectivePhase() {
 		case api.MicroVMSucceeded:
 			next.Succeeded++
@@ -96,13 +96,14 @@ func (s *service) reconcile(ctx context.Context, obj *api.CustomObject, all []ap
 	return errors.Join(createErr, err)
 }
 
-// owned returns the MicroVMs that name the Job, by uid, as their owner. A
-// recreated Job of the same name does not own the MicroVMs of the old one.
-func owned(job *api.CustomObject, all []api.MicroVM) []api.MicroVM {
+// owned returns the MicroVMs that name the object of the kind, by uid, as their
+// owner. A recreated object of the same name does not own the MicroVMs of the
+// old one.
+func owned(kind string, job *api.CustomObject, all []api.MicroVM) []api.MicroVM {
 	var out []api.MicroVM
 	for _, m := range all {
 		for _, ref := range m.Metadata.OwnerReferences {
-			if ref.APIVersion == APIVersion && ref.Kind == Kind && ref.Name == job.Metadata.Name && ref.UID == job.Metadata.UID {
+			if ref.APIVersion == APIVersion && ref.Kind == kind && ref.Name == job.Metadata.Name && ref.UID == job.Metadata.UID {
 				out = append(out, m)
 				break
 			}
@@ -118,10 +119,7 @@ func (s *service) create(ctx context.Context, job *api.CustomObject, spec Spec, 
 	for _, m := range all {
 		taken[m.Metadata.Name] = true
 	}
-	name := job.Metadata.Name + "-0"
-	for i := 1; taken[name]; i++ {
-		name = job.Metadata.Name + "-" + strconv.Itoa(i)
-	}
+	name := nextName(job.Metadata.Name, taken)
 	tmpl := spec.Template
 	tmpl.RunStrategy = api.RunOnce
 	tmpl.NodeName, tmpl.BindingEpoch = "", 0
@@ -140,6 +138,17 @@ func (s *service) create(ctx context.Context, job *api.CustomObject, spec Spec, 
 		return fmt.Errorf("create microvm %s: %w", name, err)
 	}
 	return nil
+}
+
+// nextName returns base followed by the first index no name in taken has, and
+// adds it to taken.
+func nextName(base string, taken map[string]bool) string {
+	name := base + "-0"
+	for i := 1; taken[name]; i++ {
+		name = base + "-" + strconv.Itoa(i)
+	}
+	taken[name] = true
+	return name
 }
 
 func (s *service) condition(typ, reason, message string) api.Condition {
