@@ -3,6 +3,7 @@ package apiserver_test
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,6 +93,42 @@ func TestPutCustomObject_RefusesAnObjectThatFailsTheSchema(t *testing.T) {
 	list, err := widgets.List(ctx(t))
 	require.NoError(t, err)
 	assert.Len(t, list.Items, 7, "no refused object was stored")
+}
+
+func TestPutCustomObject_AnIntOrStringFieldTakesAnIntegerOrAMatchingString(t *testing.T) {
+	e := newEnv(t)
+	e.define(t, definition(t, gadgetType, `{"type":"object","properties":{"spec":{"type":"object","properties":{
+	  "surge":{"x-kubernetes-int-or-string":true,"pattern":"^[0-9]+%$"},
+	  "mode":{"x-kubernetes-int-or-string":true,"enum":[1,"auto"]}}}}}`, false))
+	gadgets := e.custom(t, gadgetType)
+
+	for name, spec := range map[string]string{
+		"a boolean":                 `{"surge":true}`,
+		"a fraction":                `{"surge":1.5}`,
+		"an array":                  `{"surge":[1]}`,
+		"an object":                 `{"surge":{}}`,
+		"a string off the pattern":  `{"surge":"abc"}`,
+		"an integer outside enum":   `{"mode":2}`,
+		"a string outside the enum": `{"mode":"other"}`,
+		"a boolean for the enum":    `{"mode":true}`,
+	} {
+		_, err := gadgets.Put(ctx(t), object(gadgetType, "bad", spec))
+		assert.ErrorIs(t, err, api.ErrInvalid, name)
+	}
+	for name, spec := range map[string]string{
+		"an integer":              `{"surge":1}`,
+		"an integer as 2.0":       `{"surge":2.0}`,
+		"a string on the pattern": `{"surge":"25%"}`,
+		"an integer in the enum":  `{"mode":1}`,
+		"a string in the enum":    `{"mode":"auto"}`,
+		"a null field":            `{"surge":null}`,
+	} {
+		_, err := gadgets.Put(ctx(t), object(gadgetType, "good-"+strings.ReplaceAll(name, " ", "-"), spec))
+		assert.NoError(t, err, "control: "+name)
+	}
+	list, err := gadgets.List(ctx(t))
+	require.NoError(t, err)
+	assert.Len(t, list.Items, 6, "no refused object was stored")
 }
 
 func TestPutCustomObject_ASchemaChangeAppliesToTheNextWrite(t *testing.T) {

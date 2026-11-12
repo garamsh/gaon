@@ -43,6 +43,9 @@ func fitSection(root *api.JSONSchemaProps, section string, raw json.RawMessage) 
 // fit returns v with the fields s does not name dropped, or the first way v
 // fails s.
 func fit(s *api.JSONSchemaProps, v any, path string) (any, error) {
+	if s.IntOrString {
+		return fitIntOrString(s, v, path)
+	}
 	switch s.Type {
 	case api.SchemaObject:
 		m, ok := v.(map[string]any)
@@ -90,6 +93,34 @@ func fit(s *api.JSONSchemaProps, v any, path string) (any, error) {
 		if _, ok := v.(bool); !ok {
 			return nil, mismatch(path, "a boolean", v)
 		}
+	}
+	if !inEnum(s.Enum, v) {
+		return nil, api.NewAPIError(api.ReasonInvalid, "%s is not one of the values the schema allows", path)
+	}
+	return v, nil
+}
+
+// fitIntOrString accepts an integer, or a string that meets the pattern, and
+// either only if it is one of the enum values where the node has some.
+func fitIntOrString(s *api.JSONSchemaProps, v any, path string) (any, error) {
+	switch x := v.(type) {
+	case json.Number:
+		f, err := x.Float64()
+		if err != nil || f != math.Trunc(f) {
+			return nil, api.NewAPIError(api.ReasonInvalid, "%s is %s, want an integer or a string", path, x)
+		}
+	case string:
+		if s.Pattern != "" {
+			matched, err := regexp.MatchString(s.Pattern, x)
+			if err != nil {
+				return nil, err
+			}
+			if !matched {
+				return nil, api.NewAPIError(api.ReasonInvalid, "%s does not match the pattern %q", path, s.Pattern)
+			}
+		}
+	default:
+		return nil, mismatch(path, "an integer or a string", v)
 	}
 	if !inEnum(s.Enum, v) {
 		return nil, api.NewAPIError(api.ReasonInvalid, "%s is not one of the values the schema allows", path)
