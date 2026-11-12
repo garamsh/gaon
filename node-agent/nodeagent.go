@@ -44,7 +44,7 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 		RestartBackoffMax: cfg.RestartBackoffMax,
 		RestartResetAfter: cfg.RestartResetAfter,
 		ReadTimeout:       cfg.Liveness.RPCTimeout,
-	}, client, runtime, clk, log)
+	}, client, runtime, cfg.Network, cfg.Storage, clk, log)
 
 	loops := []func(context.Context){
 		live.Run,

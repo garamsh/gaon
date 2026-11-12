@@ -59,9 +59,24 @@ func newRig(t *testing.T, wrap func(API) API) *rig {
 		RestartBackoff: 10 * time.Second, RestartBackoffMax: 5 * time.Minute, RestartResetAfter: 10 * time.Minute,
 		ReadTimeout: 200 * time.Millisecond,
 	}
-	r.svc = NewService(rigNode, params, client, v1alpha2.NewRuntimeServiceClient(conn), clk, slog.New(slog.NewTextHandler(io.Discard, nil))).(*service)
+	r.svc = NewService(rigNode, params, client, v1alpha2.NewRuntimeServiceClient(conn), emptyNetwork{}, noStorage{}, clk, slog.New(slog.NewTextHandler(io.Discard, nil))).(*service)
 	return r
 }
+
+// emptyNetwork and noStorage are plugins that add nothing, so the rig tests
+// restarts alone; this package cannot import the built-ins, which import it.
+type emptyNetwork struct{}
+
+func (emptyNetwork) Policy(context.Context, *api.Machine) (*v1alpha2.NetworkPolicy, error) {
+	return &v1alpha2.NetworkPolicy{}, nil
+}
+
+type noStorage struct{}
+
+func (noStorage) Attach(context.Context, *api.Machine) ([]*v1alpha2.DiskAttachment, error) {
+	return nil, nil
+}
+func (noStorage) Release(context.Context, string) error { return nil }
 
 func rigMachine(epoch api.Epoch, strategy api.RunStrategy) api.Machine {
 	return api.Machine{
