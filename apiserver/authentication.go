@@ -21,12 +21,14 @@ const bootstrapPrefix = "bootstrap:"
 
 type identityKey struct{}
 
-// identity is who made a request: the CN of its client certificate, or
-// bootstrap:<id> for a token holder. name is empty where the server
-// authenticates nobody, which is plain HTTP.
+// identity is who made a request: the CN of its client certificate and the
+// Organization values of its subject as groups, or bootstrap:<id> for a token
+// holder. name is empty where the server authenticates nobody, which is plain
+// HTTP.
 type identity struct {
-	name  string
-	token bool
+	name   string
+	groups []string
+	token  bool
 }
 
 func callerOf(r *http.Request) identity {
@@ -104,7 +106,8 @@ func (h *handler) authenticate(mux *http.ServeMux, tokens tokenSet) http.Handler
 		switch {
 		case r.TLS == nil:
 		case len(r.TLS.PeerCertificates) > 0:
-			id = identity{name: r.TLS.PeerCertificates[0].Subject.CommonName}
+			subject := r.TLS.PeerCertificates[0].Subject
+			id = identity{name: subject.CommonName, groups: subject.Organization}
 		default:
 			var ok bool
 			if id, ok = tokens.identify(r.Header.Get("Authorization")); !ok {

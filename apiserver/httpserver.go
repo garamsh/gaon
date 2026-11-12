@@ -1,6 +1,7 @@
 package apiserver
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -9,7 +10,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
+	"github.com/garamsh/gaon/apiserver/internal/authorization"
 	"github.com/garamsh/gaon/apiserver/internal/resourceapi"
 	"github.com/garamsh/gaon/lib/api"
 )
@@ -20,35 +23,48 @@ const maxBody = 1 << 20
 // relative to it.
 const root = "/apis/" + api.GroupVersion
 
+// rbacRoot is the root of the paths of ClusterRoles and ClusterRoleBindings.
+const rbacRoot = "/apis/" + api.RBACGroupVersion
+
 type traceKey struct{}
 
-// newHandler serves the paths of resource-api.md §Paths under root over svc,
-// and answers NotFound to any other path. It is the one place that maps a
+// newHandler serves the paths of resource-api.md §Paths under root and
+// rbacRoot over svc, and answers NotFound to any other path. az authorizes
+// each request a certificate holder makes. It is the one place that maps a
 // failure to an HTTP status.
-func newHandler(svc resourceapi.Service, tokens tokenSet, log *slog.Logger) http.Handler {
-	h := &handler{log: log}
+func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tokenSet, log *slog.Logger) http.Handler {
+	h := &handler{log: log, az: az}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, api.NewAPIError(api.ReasonNotFound, "no such path"))
 	})
-	mux.HandleFunc("PUT "+root+"/machines/{name}", put(h, svc.PutMachine))
-	mux.HandleFunc("POST "+root+"/machines/{name}/binding", h.bind(svc))
-	mux.HandleFunc("PUT "+root+"/machines/{name}/status", put(h, svc.PutMachineStatus))
-	mux.HandleFunc("DELETE "+root+"/machines/{name}", h.deleteMachine(svc))
-	mux.HandleFunc("GET "+root+"/machines/{name}", get(h, svc.GetMachine))
-	mux.HandleFunc("GET "+root+"/machines", listOrWatch(h, svc.ListMachines, svc.WatchMachines))
-	mux.HandleFunc("PUT "+root+"/volumes/{name}/status", put(h, svc.PutVolumeStatus))
-	mux.HandleFunc("PUT "+root+"/nodes/{name}", put(h, svc.PutNode))
-	mux.HandleFunc("PUT "+root+"/nodes/{name}/status", put(h, svc.PutNodeStatus))
-	mux.HandleFunc("GET "+root+"/nodes/{name}", get(h, svc.GetNode))
-	mux.HandleFunc("GET "+root+"/nodes", listOrWatch(h, svc.ListNodes, svc.WatchNodes))
-	mux.HandleFunc("PUT "+root+"/leases/{name}", put(h, svc.PutLease))
-	mux.HandleFunc("GET "+root+"/leases/{name}", get(h, svc.GetLease))
-	mux.HandleFunc("GET "+root+"/leases", listOrWatch(h, svc.ListLeases, svc.WatchLeases))
-	mux.HandleFunc(createCSRRoute, h.createCertificateSigningRequest(svc))
-	mux.HandleFunc("PUT "+root+"/certificatesigningrequests/{name}/status", put(h, svc.PutCertificateSigningRequestStatus))
-	mux.HandleFunc(getCSRRoute, h.getCertificateSigningRequest(svc))
-	mux.HandleFunc("GET "+root+"/certificatesigningrequests", listOrWatch(h, svc.ListCertificateSigningRequests, svc.WatchCertificateSigningRequests))
+	mux.HandleFunc("PUT "+root+"/machines/{name}", h.guard(api.Group, "machines", putVerb, h.putMachine(svc)))
+	mux.HandleFunc("POST "+root+"/machines/{name}/binding", h.guard(api.Group, "machines/binding", fixed(api.VerbCreate), h.bind(svc)))
+	mux.HandleFunc("PUT "+root+"/machines/{name}/status", h.guard(api.Group, "machines/status", fixed(api.VerbUpdate), put(h, svc.PutMachineStatus)))
+	mux.HandleFunc("DELETE "+root+"/machines/{name}", h.guard(api.Group, "machines", fixed(api.VerbDelete), deleteObject(h, svc.DeleteMachine)))
+	mux.HandleFunc("GET "+root+"/machines/{name}", h.guard(api.Group, "machines", fixed(api.VerbGet), get(h, svc.GetMachine)))
+	mux.HandleFunc("GET "+root+"/machines", h.guard(api.Group, "machines", readVerb, listOrWatch(h, svc.ListMachines, svc.WatchMachines)))
+	mux.HandleFunc("PUT "+root+"/volumes/{name}/status", h.guard(api.Group, "volumes/status", fixed(api.VerbUpdate), put(h, svc.PutVolumeStatus)))
+	mux.HandleFunc("PUT "+root+"/nodes/{name}", h.guard(api.Group, "nodes", putVerb, put(h, svc.PutNode)))
+	mux.HandleFunc("PUT "+root+"/nodes/{name}/status", h.guard(api.Group, "nodes/status", fixed(api.VerbUpdate), put(h, svc.PutNodeStatus)))
+	mux.HandleFunc("GET "+root+"/nodes/{name}", h.guard(api.Group, "nodes", fixed(api.VerbGet), get(h, svc.GetNode)))
+	mux.HandleFunc("GET "+root+"/nodes", h.guard(api.Group, "nodes", readVerb, listOrWatch(h, svc.ListNodes, svc.WatchNodes)))
+	mux.HandleFunc("PUT "+root+"/leases/{name}", h.guard(api.Group, "leases", putVerb, put(h, svc.PutLease)))
+	mux.HandleFunc("GET "+root+"/leases/{name}", h.guard(api.Group, "leases", fixed(api.VerbGet), get(h, svc.GetLease)))
+	mux.HandleFunc("GET "+root+"/leases", h.guard(api.Group, "leases", readVerb, listOrWatch(h, svc.ListLeases, svc.WatchLeases)))
+	mux.HandleFunc(createCSRRoute, h.guard(api.Group, "certificatesigningrequests", fixed(api.VerbCreate), h.createCertificateSigningRequest(svc)))
+	mux.HandleFunc("PUT "+root+"/certificatesigningrequests/{name}/status", h.guard(api.Group, "certificatesigningrequests/status", fixed(api.VerbUpdate), put(h, svc.PutCertificateSigningRequestStatus)))
+	mux.HandleFunc(getCSRRoute, h.guard(api.Group, "certificatesigningrequests", fixed(api.VerbGet), h.getCertificateSigningRequest(svc)))
+	mux.HandleFunc("GET "+root+"/certificatesigningrequests", h.guard(api.Group, "certificatesigningrequests", readVerb, listOrWatch(h, svc.ListCertificateSigningRequests, svc.WatchCertificateSigningRequests)))
+
+	mux.HandleFunc("PUT "+rbacRoot+"/clusterroles/{name}", h.guard(api.RBACGroup, "clusterroles", putVerb, h.putClusterRole(svc)))
+	mux.HandleFunc("DELETE "+rbacRoot+"/clusterroles/{name}", h.guard(api.RBACGroup, "clusterroles", fixed(api.VerbDelete), deleteObject(h, svc.DeleteClusterRole)))
+	mux.HandleFunc("GET "+rbacRoot+"/clusterroles/{name}", h.guard(api.RBACGroup, "clusterroles", fixed(api.VerbGet), get(h, svc.GetClusterRole)))
+	mux.HandleFunc("GET "+rbacRoot+"/clusterroles", h.guard(api.RBACGroup, "clusterroles", readVerb, listOrWatch(h, svc.ListClusterRoles, svc.WatchClusterRoles)))
+	mux.HandleFunc("PUT "+rbacRoot+"/clusterrolebindings/{name}", h.guard(api.RBACGroup, "clusterrolebindings", putVerb, h.putClusterRoleBinding(svc)))
+	mux.HandleFunc("DELETE "+rbacRoot+"/clusterrolebindings/{name}", h.guard(api.RBACGroup, "clusterrolebindings", fixed(api.VerbDelete), deleteObject(h, svc.DeleteClusterRoleBinding)))
+	mux.HandleFunc("GET "+rbacRoot+"/clusterrolebindings/{name}", h.guard(api.RBACGroup, "clusterrolebindings", fixed(api.VerbGet), get(h, svc.GetClusterRoleBinding)))
+	mux.HandleFunc("GET "+rbacRoot+"/clusterrolebindings", h.guard(api.RBACGroup, "clusterrolebindings", readVerb, listOrWatch(h, svc.ListClusterRoleBindings, svc.WatchClusterRoleBindings)))
 	return h.recoverPanics(h.authenticate(mux, tokens))
 }
 
@@ -60,6 +76,72 @@ const (
 
 type handler struct {
 	log *slog.Logger
+	az  authorization.Authorizer
+}
+
+// verbOf is the verb of a request, which the method says except for a PUT and a
+// GET of a collection.
+type verbOf func(*http.Request) (api.Verb, error)
+
+func fixed(v api.Verb) verbOf {
+	return func(*http.Request) (api.Verb, error) { return v, nil }
+}
+
+// readVerb is watch for a collection read with watch=true, and list for any
+// other.
+func readVerb(r *http.Request) (api.Verb, error) {
+	if r.URL.Query().Get("watch") == "true" {
+		return api.VerbWatch, nil
+	}
+	return api.VerbList, nil
+}
+
+// putVerb is update for a body that carries a resourceVersion and create for
+// one that does not. It leaves the body to be read again.
+func putVerb(r *http.Request) (api.Verb, error) {
+	body, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxBody))
+	if err != nil {
+		return "", api.NewAPIError(api.ReasonInvalid, "read body: %v", err)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var peek struct {
+		Metadata struct {
+			ResourceVersion api.ResourceVersion `json:"resourceVersion"`
+		} `json:"metadata"`
+	}
+	if json.Unmarshal(body, &peek) == nil && peek.Metadata.ResourceVersion != "" {
+		return api.VerbUpdate, nil
+	}
+	return api.VerbCreate, nil
+}
+
+// caller is the identity as the authorizers see it.
+func (id identity) caller() authorization.Caller {
+	return authorization.Caller{User: id.name, Groups: id.groups}
+}
+
+// guard runs next for a caller the authorizer allows to make the verb on the
+// resource, which is "machines" or, for a subresource, "machines/status". A
+// bearer-token holder has reached only the routes of ADR 0007 and is not
+// authorized here.
+func (h *handler) guard(group, resource string, verb verbOf, next http.HandlerFunc) http.HandlerFunc {
+	name, sub, _ := strings.Cut(resource, "/")
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := callerOf(r)
+		if id.token {
+			next(w, r)
+			return
+		}
+		v, err := verb(r)
+		if err == nil {
+			err = h.az.Authorize(r.Context(), id.caller(), authorization.Request{Group: group, Resource: name, Subresource: sub, Verb: v, Name: r.PathValue("name")})
+		}
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // recoverPanics answers 500 where a handler panics, which net/http would
@@ -136,10 +218,73 @@ func (h *handler) getCertificateSigningRequest(svc resourceapi.Service) http.Han
 	}
 }
 
-func (h *handler) deleteMachine(svc resourceapi.Service) http.HandlerFunc {
+// deleteObject removes the object the resourceVersion of the query names.
+func deleteObject[T any](h *handler, call func(context.Context, string, api.ResourceVersion) (*T, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rv := api.ResourceVersion(r.URL.Query().Get("resourceVersion"))
-		out, err := svc.DeleteMachine(r.Context(), r.PathValue("name"), rv)
+		out, err := call(r.Context(), r.PathValue("name"), rv)
+		h.respond(w, r, out, err)
+	}
+}
+
+// putMachine writes a Machine, and an update of one only as far as the
+// caller's grant reaches: a Node's grant is its finalizer.
+func (h *handler) putMachine(svc resourceapi.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in api.Machine
+		if !h.decode(w, r, &in) {
+			return
+		}
+		name := r.PathValue("name")
+		if in.Metadata.ResourceVersion != "" {
+			if err := h.az.AuthorizeMachineUpdate(r.Context(), callerOf(r).caller(), name, &in); err != nil {
+				h.fail(w, r, err)
+				return
+			}
+		}
+		out, err := svc.PutMachine(r.Context(), name, &in)
+		h.respond(w, r, out, err)
+	}
+}
+
+// putClusterRole writes a ClusterRole only for a caller that holds every
+// permission its rules grant.
+func (h *handler) putClusterRole(svc resourceapi.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in api.ClusterRole
+		if !h.decode(w, r, &in) {
+			return
+		}
+		if err := in.Validate(); err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		if err := h.az.AuthorizeRole(r.Context(), callerOf(r).caller(), in.Rules); err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		out, err := svc.PutClusterRole(r.Context(), r.PathValue("name"), &in)
+		h.respond(w, r, out, err)
+	}
+}
+
+// putClusterRoleBinding writes a ClusterRoleBinding only for a caller that
+// holds every permission of the role it references.
+func (h *handler) putClusterRoleBinding(svc resourceapi.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in api.ClusterRoleBinding
+		if !h.decode(w, r, &in) {
+			return
+		}
+		if err := in.Validate(); err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		if err := h.az.AuthorizeBinding(r.Context(), callerOf(r).caller(), in.RoleRef); err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		out, err := svc.PutClusterRoleBinding(r.Context(), r.PathValue("name"), &in)
 		h.respond(w, r, out, err)
 	}
 }
