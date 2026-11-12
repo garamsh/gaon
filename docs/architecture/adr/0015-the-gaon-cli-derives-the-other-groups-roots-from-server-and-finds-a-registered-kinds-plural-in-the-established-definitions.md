@@ -26,7 +26,7 @@ Append-only: once merged, the body below is not rewritten. A fact later found wr
 5. **Unknown kind.** The usage error lists the built-in kinds and the Established registered kinds. A definition not yet Established is not listed and not matched.
 6. **Apply.** A document is matched by its `apiVersion` and `kind`: a built-in kind by its group and version, a registered kind by the group, the one version and the `kind` of an Established definition. The CLI decodes a registered object strictly into `CustomObject` and checks it with `CustomObject.Validate` for the definition's type before any document is sent. The schema is checked by the API server, as the CLI does not hold it.
 7. **Output.** A registered kind's table is `NAME GENERATION`, and `describe` adds `Spec` and `Status`, each as one line of compact JSON, or `-` when absent. `-o yaml` and `-o json` print the object as the API returned it.
-8. **What "nothing is sent" means.** ADR 0014 and [cli.md](../cli.md) §Apply said a refused apply sends nothing. The definitions list is a read made to find a registered kind, so an apply that is refused may have sent that one `GET` and sends no write.
+8. **What "nothing is sent" means.** [cli.md](../cli.md) §Apply said a refused apply sends nothing. The definitions list is a read made to find a registered kind, so an apply that is refused may have sent that one `GET` and sends no write.
 
 ## Consequences
 
