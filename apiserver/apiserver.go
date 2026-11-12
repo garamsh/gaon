@@ -75,7 +75,11 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 	}
 	var accounts *accountTokens
 	if verifier != nil {
-		accounts = &accountTokens{verifier: verifier, microvm: svc.GetMicroVM, now: time.Now}
+		audiences := cfg.APIAudiences
+		if len(audiences) == 0 {
+			audiences = []string{cfg.ServiceAccountIssuer}
+		}
+		accounts = &accountTokens{verifier: verifier, audiences: audiences, microvm: svc.GetMicroVM, now: time.Now}
 	}
 	srv := &http.Server{
 		Handler:           newHandler(svc, az, tokens, accounts, log),

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -63,6 +64,8 @@ func (s tokenSet) identify(header string) (identity, bool) {
 // accountTokens authenticates the bearer tokens of the server's own issuer.
 type accountTokens struct {
 	verifier *token.Verifier
+	// audiences are the audiences the server accepts; a token holds one.
+	audiences []string
 	// microvm reads the MicroVM a token is bound to.
 	microvm func(ctx context.Context, name string) (*api.MicroVM, error)
 	now     func() time.Time
@@ -70,7 +73,7 @@ type accountTokens struct {
 
 // identify returns the identity of the holder of the service account token in
 // header: the token's subject, where the token verifies, has not expired and
-// is bound to a MicroVM that still exists with the uid it names. A token that
+// holds an accepted audience and is bound to a MicroVM that still exists with the uid it names. A token that
 // does not hold is not an error; a failure to read the MicroVM is. A nil
 // accountTokens authenticates nobody.
 func (a *accountTokens) identify(ctx context.Context, header string) (identity, bool, error) {
@@ -80,6 +83,9 @@ func (a *accountTokens) identify(ctx context.Context, header string) (identity, 
 	}
 	claims, err := a.verifier.Verify(presented, a.now())
 	if err != nil {
+		return identity{}, false, nil
+	}
+	if !slices.ContainsFunc(claims.Audience, func(aud string) bool { return slices.Contains(a.audiences, aud) }) {
 		return identity{}, false, nil
 	}
 	m, err := a.microvm(ctx, claims.Extension.MicroVM.Name)

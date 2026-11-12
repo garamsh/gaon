@@ -74,6 +74,7 @@ func TestParseConfig_Refuses(t *testing.T) {
 		"issuer, no key":   {"-service-account-issuer", "https://gaon"},
 		"key, no issuer":   {"-service-account-signing-key-file", "key.pem"},
 		"verify keys only": {"-service-account-verify-key-files", "old.pem"},
+		"audiences only":   {"-api-audiences", "openbao"},
 		"http issuer":      {"-service-account-issuer", "http://gaon", "-service-account-signing-key-file", "key.pem"},
 		"issuer with path": {"-service-account-issuer", "https://gaon/path", "-service-account-signing-key-file", "key.pem"},
 		"issuer, query":    {"-service-account-issuer", "https://gaon?a=b", "-service-account-signing-key-file", "key.pem"},
@@ -95,6 +96,10 @@ func TestParseConfig_TokenSigningFlags(t *testing.T) {
 	cfg, err = apiserver.ParseConfig([]string{"-service-account-issuer", "https://gaon:6443", "-service-account-signing-key-file", "key.pem", "-service-account-verify-key-files", "a.pem, b.pem"})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a.pem", "b.pem"}, cfg.ServiceAccountVerifyKeyFiles)
+
+	cfg, err = apiserver.ParseConfig([]string{"-service-account-issuer", "https://gaon", "-service-account-signing-key-file", "key.pem", "-api-audiences", "openbao, gaon"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"openbao", "gaon"}, cfg.APIAudiences)
 }
 
 func TestRun_RefusesAVerificationKeyThatIsNotAnECPublicKey(t *testing.T) {

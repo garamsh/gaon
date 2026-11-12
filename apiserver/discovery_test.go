@@ -249,7 +249,7 @@ func newBearerFixture(t *testing.T, verifyFiles ...string) *bearerFixture {
 	require.NoError(t, err)
 	_, err = rbac.PutClusterRoleBinding(ctx(t), clusterRoleBinding("web-only", "web-only", userSubject(api.ServiceAccountSubject("web"))))
 	require.NoError(t, err)
-	f.raw = issueToken(t, f.compute, f.m1, "gaon")
+	f.raw = issueToken(t, f.compute, f.m1, f.issuer)
 	return f
 }
 
@@ -303,7 +303,7 @@ func TestBearer_RefusesATokenThatDoesNotHold(t *testing.T) {
 	parts := strings.Split(f.raw, ".")
 	require.Len(t, parts, 3)
 	altered := *valid
-	altered.Audience = []string{"another"}
+	altered.Extension.ServiceAccount.UID = "forged"
 	alteredJSON, err := json.Marshal(&altered)
 	require.NoError(t, err)
 	cases := map[string]string{
@@ -312,6 +312,7 @@ func TestBearer_RefusesATokenThatDoesNotHold(t *testing.T) {
 		"expired":                                       forge(t, f.key, f.issuer, &expired),
 		"another issuer":                                forge(t, f.key, f.issuer, &elsewhere),
 		"not a token":                                   "abc.def.ghi",
+		"audience openbao, not the issuer":              issueToken(t, f.compute, f.m1, "openbao"),
 	}
 	for name, raw := range cases {
 		_, err := f.as(t, raw).GetMicroVM(ctx(t), "web")
@@ -319,6 +320,8 @@ func TestBearer_RefusesATokenThatDoesNotHold(t *testing.T) {
 	}
 	_, err = f.as(t, forge(t, f.key, f.issuer, valid)).GetMicroVM(ctx(t), "web")
 	assert.NoError(t, err, "control: the same claims signed by the configured key")
+	_, err = f.as(t, f.raw).GetMicroVM(ctx(t), "web")
+	assert.NoError(t, err, "control: a token whose audience is the issuer")
 }
 
 func TestBearer_ATokenIsNotAcceptedWhereNoIssuerIsConfigured(t *testing.T) {

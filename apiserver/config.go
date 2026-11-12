@@ -43,6 +43,10 @@ type Config struct {
 	// server publishes and accepts beside the signing key's, for a rotation.
 	// They need the issuer and the signing key.
 	ServiceAccountVerifyKeyFiles []string
+	// APIAudiences are the audiences the server accepts in a service account
+	// token: a token is authenticated only if its aud holds one of them. Where
+	// none is given the issuer is the one. They need the issuer.
+	APIAudiences []string
 }
 
 // The authorization modes of ADR 0008, Decision 2.
@@ -85,6 +89,7 @@ func ParseConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.ServiceAccountIssuer, "service-account-issuer", "", "the iss of service account tokens; given with service-account-signing-key-file")
 	fs.StringVar(&cfg.ServiceAccountSigningKeyFile, "service-account-signing-key-file", "", "PEM file of the EC P-256 key that signs service account tokens, the same on every API server; given with service-account-issuer")
 	verifyKeys := fs.String("service-account-verify-key-files", "", "comma separated PEM files of public keys published and accepted beside the signing key's, for a rotation; given with service-account-issuer")
+	audiences := fs.String("api-audiences", "", "comma separated audiences a service account token must hold one of to authenticate; defaults to service-account-issuer")
 	fs.StringVar(&cfg.EtcdCA, "etcd-ca-file", "", "PEM file of the CA that signs etcd's certificate; given with etcd-cert-file and etcd-key-file")
 	fs.StringVar(&cfg.EtcdCert, "etcd-cert-file", "", "PEM file of the client certificate presented to etcd; given with etcd-ca-file and etcd-key-file")
 	fs.StringVar(&cfg.EtcdKey, "etcd-key-file", "", "PEM file of the client certificate's key; given with etcd-ca-file and etcd-cert-file")
@@ -103,6 +108,11 @@ func ParseConfig(args []string) (Config, error) {
 	for _, f := range strings.Split(*verifyKeys, ",") {
 		if f = strings.TrimSpace(f); f != "" {
 			cfg.ServiceAccountVerifyKeyFiles = append(cfg.ServiceAccountVerifyKeyFiles, f)
+		}
+	}
+	for _, a := range strings.Split(*audiences, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			cfg.APIAudiences = append(cfg.APIAudiences, a)
 		}
 	}
 	if cfg.DialTimeout <= 0 {
@@ -134,6 +144,9 @@ func (c Config) validateTokenSigning() error {
 	if c.ServiceAccountIssuer == "" {
 		if len(c.ServiceAccountVerifyKeyFiles) > 0 {
 			return errors.New("service-account-verify-key-files needs service-account-issuer and service-account-signing-key-file")
+		}
+		if len(c.APIAudiences) > 0 {
+			return errors.New("api-audiences needs service-account-issuer and service-account-signing-key-file")
 		}
 		return nil
 	}
