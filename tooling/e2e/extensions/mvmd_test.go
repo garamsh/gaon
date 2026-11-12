@@ -5,6 +5,7 @@ package extensions
 import (
 	"context"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,14 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
+)
+
+// A Machine whose id starts with exitsPrefix stops as soon as it is started, as
+// an entrypoint that ran and returned 0 does; one that starts with failsPrefix
+// stops the same way with exit code 1. Every other Machine keeps running.
+const (
+	exitsPrefix = "exits-"
+	failsPrefix = "fails-"
 )
 
 // mvmd is the smallest mvmd a Node Agent runs against: it serves the runtime
@@ -86,6 +95,9 @@ func (m *mvmd) StartMachine(_ context.Context, r *v1alpha2.StartMachineRequest) 
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such machine")
 	}
 	held.State = v1alpha2.MachineState_MACHINE_STATE_RUNNING
+	if exitCode(held.Id) >= 0 {
+		held.State = v1alpha2.MachineState_MACHINE_STATE_STOPPED
+	}
 	return &v1alpha2.StartMachineResponse{Machine: proto.Clone(held).(*v1alpha2.Machine)}, nil
 }
 
@@ -115,6 +127,32 @@ func (m *mvmd) InspectMachine(_ context.Context, r *v1alpha2.InspectMachineReque
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such machine")
 	}
 	return &v1alpha2.InspectMachineResponse{Machine: proto.Clone(held).(*v1alpha2.Machine)}, nil
+}
+
+// exitCode is the code the entrypoint of the Machine id exits with, or -1 for a
+// Machine that does not exit.
+func exitCode(id string) int32 {
+	switch {
+	case strings.HasPrefix(id, exitsPrefix):
+		return 0
+	case strings.HasPrefix(id, failsPrefix):
+		return 1
+	}
+	return -1
+}
+
+// ReadExecOutput answers a read of the entrypoint of a Machine that exits with
+// its record.
+func (m *mvmd) ReadExecOutput(r *v1alpha2.ReadExecOutputRequest, stream grpc.ServerStreamingServer[v1alpha2.ReadExecOutputResponse]) error {
+	m.mu.Lock()
+	_, held := m.machines[r.GetMachineId()]
+	m.mu.Unlock()
+	code := exitCode(r.GetMachineId())
+	if !held || code < 0 || r.GetExecId() != "entrypoint" {
+		return v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such exec")
+	}
+	rec := &v1alpha2.ExecRecord{ExecId: "entrypoint", Status: v1alpha2.ExecStatus_EXEC_STATUS_EXITED, ExitCode: code}
+	return stream.Send(&v1alpha2.ReadExecOutputResponse{Part: &v1alpha2.ReadExecOutputResponse_Record{Record: rec}})
 }
 
 func (m *mvmd) ListMachines(context.Context, *v1alpha2.ListMachinesRequest) (*v1alpha2.ListMachinesResponse, error) {

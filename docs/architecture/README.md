@@ -31,6 +31,7 @@ Current architecture of the system and the decisions behind it. This file is the
   - [node-agent.md](./node-agent.md): what `gaon-node-agent` does on a node: registration, Lease and fencing renewal, and running bound MicroVMs on mvmd.
   - [cli.md](./cli.md): the `gaon` client CLI, its commands and how `apply` treats a concurrent change.
   - [deployment.md](./deployment.md): which gaon services run on which Node, what a Node's config carries for them, how certificates reach them and which gaon commit is run.
+  - [workloads.md](./workloads.md): how `gaon-workloads` registers the `Job` kind and runs a Job's MicroVMs to completion with retries, as a client of the public API.
   - [e2e.md](./e2e.md): how the end-to-end test of M1 runs, what it asserts, and what the host needs.
 - ADRs
   - [0001](./adr/0001-the-repository-is-a-go-workspace-of-executable-units-partitioned-by-responsibility.md): the repository is a Go workspace of executable units, each its own module, partitioned by responsibility.
@@ -56,3 +57,4 @@ Current architecture of the system and the decisions behind it. This file is the
   - [0021](./adr/0021-the-bootstrap-roles-give-the-scheduler-and-the-controllers-the-coordination-lease-and-the-controllers-read-and-delete-every-resource.md): the bootstrap roles give the scheduler and the controllers the coordination Lease, and the controllers read and delete every resource.
   - [0022](./adr/0022-a-nodes-certificate-carries-the-organization-gaon-nodes-and-the-signer-signs-no-other-organization.md): a Node's certificate carries the Organization `gaon:nodes`, and the signer signs no other Organization.
   - [0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md): the control plane runs on three Nodes over a three-member etcd, and the scheduler and the controllers act only while holding a coordination Lease.
+  - [0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-registers-and-runs-to-completion-as-a-client-of-the-public-api.md): a Job is a custom resource kind the workloads unit registers and runs to completion as a client of the public API.

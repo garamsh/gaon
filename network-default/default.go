@@ -60,7 +60,9 @@ func parsePrefixes(direction string, in []string) ([]netip.Prefix, error) {
 
 // Policy implements plugin.Network. A MicroVM naming a network other than
 // "default" is refused with ReasonUnknownNetwork, and one naming a port
-// outside 1 to 65535, which mvmd would refuse, with ReasonInvalidSpec.
+// outside 1 to 65535 or a protocol other than TCP or UDP, which mvmd would
+// refuse, with ReasonInvalidSpec. A port is allowed with the protocol it
+// declares.
 func (d *Default) Policy(_ context.Context, m *api.MicroVM) (*plugin.NetworkPolicy, error) {
 	if i := slices.IndexFunc(m.Spec.Networks, func(n string) bool { return n != Name }); i >= 0 {
 		return nil, &plugin.Refusal{
@@ -75,6 +77,12 @@ func (d *Default) Policy(_ context.Context, m *api.MicroVM) (*plugin.NetworkPoli
 				Message: fmt.Sprintf("spec.ports holds %d, want 1 to 65535", p.Port),
 			}
 		}
+		if p.Protocol != api.ProtocolTCP && p.Protocol != api.ProtocolUDP {
+			return nil, &plugin.Refusal{
+				Reason:  ReasonInvalidSpec,
+				Message: fmt.Sprintf("spec.ports holds protocol %q, want TCP or UDP", p.Protocol),
+			}
+		}
 	}
 	policy := &plugin.NetworkPolicy{}
 	for _, p := range d.egress {
@@ -82,10 +90,14 @@ func (d *Default) Policy(_ context.Context, m *api.MicroVM) (*plugin.NetworkPoli
 	}
 	for _, mp := range m.Spec.Ports {
 		port := mp.Port
+		protocol := plugin.TCP
+		if mp.Protocol == api.ProtocolUDP {
+			protocol = plugin.UDP
+		}
 		for _, p := range d.ingress {
 			policy.Ingress = append(policy.Ingress, plugin.NetworkRule{
 				Prefix:   p.String(),
-				Protocol: plugin.TCP,
+				Protocol: protocol,
 				Ports:    []plugin.PortRange{{First: uint32(port), Last: uint32(port)}},
 			})
 		}

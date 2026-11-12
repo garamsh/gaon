@@ -1,6 +1,6 @@
 # ADR 0010: A user registers admission webhooks with webhook configurations, and the API server calls them on every accepted write
 
-> Status: accepted
+> Status: accepted; the admission rule is amended by ADR 0020 (the token request is not sent to a webhook)
 > Date: 2026-11-12
 
 Drafted for garamsh/gaon#85, under goal garamsh/gaon#74. The design is the PM's, taken under the project owner's decisions in #74 (Kubernetes semantics, a gaon-native implementation, additive only, no namespaces) and recorded in #85 §Design. It places the order of a write relative to the authorization of [ADR 0008](./0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md) and the schema and pruning of [ADR 0009](./0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md). This ADR is the contract; serving it in the API server is a later issue of #74.

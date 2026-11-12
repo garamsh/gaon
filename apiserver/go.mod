@@ -3,11 +3,12 @@ module github.com/garamsh/gaon/apiserver
 go 1.26.0
 
 require (
+	github.com/evanphx/json-patch/v5 v5.9.11
 	github.com/garamsh/gaon/lib/api v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.12.1
 	go.etcd.io/etcd/client/v3 v3.6.16
 	go.etcd.io/etcd/server/v3 v3.6.16
-	go.uber.org/zap v1.27.0
+	go.uber.org/zap v1.28.0
 )
 
 require (
@@ -17,7 +18,6 @@ require (
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
