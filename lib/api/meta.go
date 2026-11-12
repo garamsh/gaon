@@ -2,11 +2,18 @@ package api
 
 import "time"
 
-// The API group and version of the resources in this package.
+// The API group and version of the compute resources in this package.
 const (
 	Group        = "compute.gaon.garam.sh"
 	Version      = "v1alpha1"
 	GroupVersion = Group + "/" + Version
+)
+
+// The API group and version of the roles and bindings, served under their own
+// root beside the compute group's.
+const (
+	RBACGroup        = "rbac.gaon.garam.sh"
+	RBACGroupVersion = RBACGroup + "/" + Version
 )
 
 // The kinds of the resources in this package.
@@ -21,6 +28,11 @@ const (
 
 	KindCertificateSigningRequest     = "CertificateSigningRequest"
 	KindCertificateSigningRequestList = "CertificateSigningRequestList"
+
+	KindClusterRole            = "ClusterRole"
+	KindClusterRoleList        = "ClusterRoleList"
+	KindClusterRoleBinding     = "ClusterRoleBinding"
+	KindClusterRoleBindingList = "ClusterRoleBindingList"
 )
 
 // ResourceVersion is the version of an object in the Store. Clients treat it
@@ -87,9 +99,9 @@ func (c Condition) validate() error {
 }
 
 // validateIdentity checks the type and the name every resource must carry.
-func validateIdentity(t TypeMeta, kind string, m ObjectMeta) error {
-	if t.APIVersion != GroupVersion {
-		return invalid("apiVersion is %q, want %q", t.APIVersion, GroupVersion)
+func validateIdentity(t TypeMeta, groupVersion, kind string, m ObjectMeta) error {
+	if t.APIVersion != groupVersion {
+		return invalid("apiVersion is %q, want %q", t.APIVersion, groupVersion)
 	}
 	if t.Kind != kind {
 		return invalid("kind is %q, want %q", t.Kind, kind)

@@ -26,7 +26,8 @@ type WatchEvent struct {
 }
 
 // NewEvent returns the event of type t, one of Added, Modified and Deleted,
-// for obj, a Machine, Node, Lease or CertificateSigningRequest.
+// for obj, a Machine, Node, Lease, CertificateSigningRequest, ClusterRole or
+// ClusterRoleBinding.
 func NewEvent[T any](t EventType, obj *T) (WatchEvent, error) {
 	switch t {
 	case EventAdded, EventModified, EventDeleted:
@@ -55,8 +56,8 @@ type Event[T any] struct {
 	Object T
 }
 
-// Watch reads the events of a watch of Machines, Nodes, Leases or
-// CertificateSigningRequests.
+// Watch reads the events of a watch of Machines, Nodes, Leases,
+// CertificateSigningRequests, ClusterRoles or ClusterRoleBindings.
 type Watch[T any] struct {
 	kind string
 	body io.Closer
