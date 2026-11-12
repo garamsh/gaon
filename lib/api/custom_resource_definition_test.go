@@ -84,7 +84,7 @@ func TestCustomResourceDefinitionValidateRefusesAReservedGroup(t *testing.T) {
 		d.Metadata.Name = "widgets." + group
 		assert.NoError(t, d.Validate(), "control: %s is not served by the core", group)
 	}
-	for _, group := range []string{api.Group, api.RBACGroup, api.APIExtensionsGroup} {
+	for _, group := range []string{api.Group, api.RBACGroup, api.APIExtensionsGroup, api.AdmissionRegistrationGroup, api.AdmissionGroup} {
 		d := newCRD()
 		d.Spec.Group = group
 		d.Metadata.Name = "widgets." + group

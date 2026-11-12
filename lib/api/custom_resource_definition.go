@@ -19,7 +19,7 @@ const (
 )
 
 // reservedGroups are the groups the core serves. A definition cannot take one.
-var reservedGroups = []string{Group, RBACGroup, APIExtensionsGroup}
+var reservedGroups = []string{Group, RBACGroup, APIExtensionsGroup, AdmissionRegistrationGroup, AdmissionGroup}
 
 var (
 	dnsLabel     = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)

@@ -81,6 +81,18 @@ func newMemoryServer(t *testing.T) (*memoryServer, *api.Client) {
 	mux.HandleFunc("GET /customresourcedefinitions", listOrWatch(s, "customresourcedefinitions/", api.KindCustomResourceDefinition, func(items []api.CustomResourceDefinition, rv api.ResourceVersion) any {
 		return &api.CustomResourceDefinitionList{TypeMeta: api.TypeMeta{APIVersion: api.APIExtensionsGroupVersion, Kind: api.KindCustomResourceDefinitionList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
 	}))
+	mux.HandleFunc("PUT /mutatingwebhookconfigurations/{name}", putValidated(s, "mutatingwebhookconfigurations/", api.KindMutatingWebhookConfiguration, func(c *api.MutatingWebhookConfiguration) (*api.ObjectMeta, error) { return &c.Metadata, c.Validate() }))
+	mux.HandleFunc("DELETE /mutatingwebhookconfigurations/{name}", deleteObject[api.MutatingWebhookConfiguration](s, "mutatingwebhookconfigurations/", api.KindMutatingWebhookConfiguration, func(c *api.MutatingWebhookConfiguration) *api.ObjectMeta { return &c.Metadata }))
+	mux.HandleFunc("GET /mutatingwebhookconfigurations/{name}", getObject[api.MutatingWebhookConfiguration](s, "mutatingwebhookconfigurations/"))
+	mux.HandleFunc("GET /mutatingwebhookconfigurations", listOrWatch(s, "mutatingwebhookconfigurations/", api.KindMutatingWebhookConfiguration, func(items []api.MutatingWebhookConfiguration, rv api.ResourceVersion) any {
+		return &api.MutatingWebhookConfigurationList{TypeMeta: api.TypeMeta{APIVersion: api.AdmissionRegistrationGroupVersion, Kind: api.KindMutatingWebhookConfigurationList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
+	mux.HandleFunc("PUT /validatingwebhookconfigurations/{name}", putValidated(s, "validatingwebhookconfigurations/", api.KindValidatingWebhookConfiguration, func(c *api.ValidatingWebhookConfiguration) (*api.ObjectMeta, error) { return &c.Metadata, c.Validate() }))
+	mux.HandleFunc("DELETE /validatingwebhookconfigurations/{name}", deleteObject[api.ValidatingWebhookConfiguration](s, "validatingwebhookconfigurations/", api.KindValidatingWebhookConfiguration, func(c *api.ValidatingWebhookConfiguration) *api.ObjectMeta { return &c.Metadata }))
+	mux.HandleFunc("GET /validatingwebhookconfigurations/{name}", getObject[api.ValidatingWebhookConfiguration](s, "validatingwebhookconfigurations/"))
+	mux.HandleFunc("GET /validatingwebhookconfigurations", listOrWatch(s, "validatingwebhookconfigurations/", api.KindValidatingWebhookConfiguration, func(items []api.ValidatingWebhookConfiguration, rv api.ResourceVersion) any {
+		return &api.ValidatingWebhookConfigurationList{TypeMeta: api.TypeMeta{APIVersion: api.AdmissionRegistrationGroupVersion, Kind: api.KindValidatingWebhookConfigurationList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
 	for _, ct := range []api.CustomResourceType{widgetType, gadgetType} {
 		s.customRoutes(mux, ct)
 	}
