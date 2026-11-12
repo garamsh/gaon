@@ -47,12 +47,33 @@ func TestParseConfig_Refuses(t *testing.T) {
 		"only the CA":      {"-tls-client-ca", "ca.pem"},
 		"no key":           {"-tls-client-ca", "ca.pem", "-tls-cert", "cert.pem"},
 		"no CA":            {"-tls-cert", "cert.pem", "-tls-key", "key.pem"},
+		"issuer, no key":   {"-service-account-issuer", "https://gaon"},
+		"key, no issuer":   {"-service-account-signing-key-file", "key.pem"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := apiserver.ParseConfig(args)
 			assert.Error(t, err)
 		})
 	}
+}
+
+func TestParseConfig_TokenSigningFlags(t *testing.T) {
+	cfg, err := apiserver.ParseConfig([]string{"-service-account-issuer", "https://gaon", "-service-account-signing-key-file", "key.pem"})
+	require.NoError(t, err)
+	assert.Equal(t, "https://gaon", cfg.ServiceAccountIssuer)
+	assert.Equal(t, "key.pem", cfg.ServiceAccountSigningKeyFile)
+}
+
+func TestRun_RefusesATokenSigningKeyThatIsNotAnECKey(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	bad := writeFile(t, "bad.pem", []byte("not a key"))
+	cfg := apiserver.Config{Endpoints: []string{"http://127.0.0.1:1"}, DialTimeout: time.Second, ServiceAccountIssuer: "https://gaon", ServiceAccountSigningKeyFile: bad}
+
+	err = apiserver.Run(context.Background(), cfg, ln, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	assert.ErrorContains(t, err, "token signing key")
 }
 
 func TestRun_RefusesANonLoopbackListener(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"github.com/garamsh/gaon/apiserver/internal/authorization"
 	"github.com/garamsh/gaon/apiserver/internal/resourceapi"
 	"github.com/garamsh/gaon/apiserver/internal/resourceapi/etcdstore"
+	"github.com/garamsh/gaon/apiserver/internal/token"
 )
 
 const shutdownTimeout = 5 * time.Second
@@ -32,6 +33,17 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 	if err := cfg.validateAuthorization(); err != nil {
 		return err
 	}
+	if err := cfg.validateTokenSigning(); err != nil {
+		return err
+	}
+	var signer resourceapi.TokenSigner
+	if cfg.ServiceAccountSigningKeyFile != "" {
+		sg, err := token.LoadSigner(cfg.ServiceAccountIssuer, cfg.ServiceAccountSigningKeyFile)
+		if err != nil {
+			return err
+		}
+		signer = sg
+	}
 	if addr, ok := ln.Addr().(*net.TCPAddr); tlsCfg == nil && (!ok || !addr.IP.IsLoopback()) {
 		return fmt.Errorf("listener %s is not a loopback address and no TLS files are given", ln.Addr())
 	}
@@ -40,7 +52,7 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 		return err
 	}
 	defer st.Close()
-	svc := resourceapi.NewService(st, time.Now)
+	svc := resourceapi.NewService(st, time.Now, signer)
 	az := authorization.AlwaysAllow()
 	if cfg.AuthorizationMode == ModeRBAC {
 		if err := authorization.Bootstrap(ctx, svc); err != nil {

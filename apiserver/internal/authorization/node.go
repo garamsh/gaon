@@ -46,6 +46,18 @@ func (a *rbac) node(ctx context.Context, user string, r Request) (bool, error) {
 			}
 			return a.uses(ctx, user, r.Name)
 		}
+	case "secrets":
+		if r.Verb == api.VerbGet {
+			return a.references(ctx, user, func(m *api.MicroVM) bool { return m.ReferencesSecret(r.Name) })
+		}
+	case "configmaps":
+		if r.Verb == api.VerbGet {
+			return a.references(ctx, user, func(m *api.MicroVM) bool { return m.ReferencesConfigMap(r.Name) })
+		}
+	case "serviceaccounts/token":
+		if r.Verb == api.VerbCreate {
+			return a.tokenFor(ctx, user, r.Name, r.BoundMicroVM)
+		}
 	case "certificatesigningrequests":
 		switch r.Verb {
 		case api.VerbCreate:
@@ -99,6 +111,32 @@ func (a *rbac) uses(ctx context.Context, user, name string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// references reports whether a MicroVM bound to the Node user satisfies
+// match, which tells that it references the Secret or the ConfigMap asked for.
+func (a *rbac) references(ctx context.Context, user string, match func(*api.MicroVM) bool) (bool, error) {
+	ms, err := a.src.ListMicroVMs(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	for i := range ms.Items {
+		if ms.Items[i].Spec.NodeName == user && match(&ms.Items[i]) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// tokenFor reports whether the Node user may request a token of the
+// ServiceAccount account bound to b: b names a MicroVM bound to the Node, with
+// that uid, that names the account.
+func (a *rbac) tokenFor(ctx context.Context, user, account string, b api.BoundObject) (bool, error) {
+	m, err := a.src.GetMicroVM(ctx, b.Name)
+	if ok, err := found(err); !ok || err != nil {
+		return false, err
+	}
+	return m.Spec.NodeName == user && m.Metadata.UID == b.UID && m.Spec.ServiceAccountName == account, nil
 }
 
 // created reports whether the Node user created the request name.

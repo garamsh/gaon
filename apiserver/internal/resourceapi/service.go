@@ -87,6 +87,29 @@ type Service interface {
 	ListClusterEvents(ctx context.Context, sel api.Selector) (*api.ClusterEventList, error)
 	WatchClusterEvents(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
+	PutSecret(ctx context.Context, name string, o *api.Secret) (*api.Secret, error)
+	DeleteSecret(ctx context.Context, name string, rv api.ResourceVersion) (*api.Secret, error)
+	GetSecret(ctx context.Context, name string) (*api.Secret, error)
+	ListSecrets(ctx context.Context, sel api.Selector) (*api.SecretList, error)
+	WatchSecrets(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
+	PutConfigMap(ctx context.Context, name string, o *api.ConfigMap) (*api.ConfigMap, error)
+	DeleteConfigMap(ctx context.Context, name string, rv api.ResourceVersion) (*api.ConfigMap, error)
+	GetConfigMap(ctx context.Context, name string) (*api.ConfigMap, error)
+	ListConfigMaps(ctx context.Context, sel api.Selector) (*api.ConfigMapList, error)
+	WatchConfigMaps(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
+	PutServiceAccount(ctx context.Context, name string, o *api.ServiceAccount) (*api.ServiceAccount, error)
+	DeleteServiceAccount(ctx context.Context, name string, rv api.ResourceVersion) (*api.ServiceAccount, error)
+	GetServiceAccount(ctx context.Context, name string) (*api.ServiceAccount, error)
+	ListServiceAccounts(ctx context.Context, sel api.Selector) (*api.ServiceAccountList, error)
+	WatchServiceAccounts(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
+	// CreateServiceAccountToken signs a token of the ServiceAccount name for
+	// req.Spec.BoundMicroVM and returns req with the token in its status. The
+	// request is not stored and is not sent to a webhook.
+	CreateServiceAccountToken(ctx context.Context, name string, req *api.TokenRequest) (*api.TokenRequest, error)
+
 	// Labels returns the labels of the object named name of the resource in
 	// group, built-in or custom, or nil where there is no such object. The
 	// authorizer judges a label selector rule on them.
@@ -111,6 +134,10 @@ var (
 	coordinationLeases = kind[api.CoordinationLease]{"leases." + api.CoordinationGroup, func(l *api.CoordinationLease) *api.ObjectMeta { return &l.Metadata }, func(l *api.CoordinationLease) any { return l.Spec }, gvk(api.CoordinationGroup, api.KindCoordinationLease)}
 	clusterEvents      = kind[api.ClusterEvent]{"events", func(e *api.ClusterEvent) *api.ObjectMeta { return &e.Metadata }, func(e *api.ClusterEvent) any { return e.Spec }, gvk(api.Group, api.KindEvent)}
 
+	secrets         = kind[api.Secret]{"secrets", func(o *api.Secret) *api.ObjectMeta { return &o.Metadata }, func(o *api.Secret) any { return o.Data }, gvk(api.Group, api.KindSecret)}
+	configMaps      = kind[api.ConfigMap]{"configmaps", func(o *api.ConfigMap) *api.ObjectMeta { return &o.Metadata }, func(o *api.ConfigMap) any { return o.Data }, gvk(api.Group, api.KindConfigMap)}
+	serviceAccounts = kind[api.ServiceAccount]{"serviceaccounts", func(o *api.ServiceAccount) *api.ObjectMeta { return &o.Metadata }, func(*api.ServiceAccount) any { return nil }, gvk(api.Group, api.KindServiceAccount)}
+
 	certificateSigningRequests = kind[api.CertificateSigningRequest]{"certificatesigningrequests", func(r *api.CertificateSigningRequest) *api.ObjectMeta { return &r.Metadata }, func(r *api.CertificateSigningRequest) any { return r.Spec }, gvk(api.Group, api.KindCertificateSigningRequest)}
 
 	clusterRoles        = kind[api.ClusterRole]{"clusterroles", func(r *api.ClusterRole) *api.ObjectMeta { return &r.Metadata }, func(r *api.ClusterRole) any { return r.Rules }, gvk(api.RBACGroup, api.KindClusterRole)}
@@ -128,15 +155,17 @@ func gvk(group, kind string) api.GroupVersionKind {
 }
 
 type service struct {
-	st    Store
-	now   func() time.Time
-	hooks *admission.Caller
+	st     Store
+	now    func() time.Time
+	hooks  *admission.Caller
+	signer TokenSigner
 }
 
 // NewService returns the Service over st. now is the clock that stamps a
-// deletion.
-func NewService(st Store, now func() time.Time) Service {
-	return &service{st: st, now: now, hooks: &admission.Caller{Source: webhookSource{st}}}
+// deletion and a token. signer signs service account tokens and is nil where
+// the server has no signing key, which refuses every token request.
+func NewService(st Store, now func() time.Time, signer TokenSigner) Service {
+	return &service{st: st, now: now, hooks: &admission.Caller{Source: webhookSource{st}}, signer: signer}
 }
 
 func (s *service) GetMicroVM(ctx context.Context, name string) (*api.MicroVM, error) {

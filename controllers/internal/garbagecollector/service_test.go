@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/controllers/internal/garbagecollector"
+	"github.com/garamsh/gaon/lib/api"
 )
 
 // start runs the collector against f until the test ends and returns once its
@@ -179,4 +180,20 @@ func TestRun_SweepsAgainAndToleratesAnObjectChangedSinceTheList(t *testing.T) {
 	clock.sweepDone(t)
 
 	assert.Equal(t, []string{"Volume/busy"}, f.deleted(), "the next sweep reads the new version and deletes")
+}
+
+func TestRun_CollectsASecretAConfigMapAndAServiceAccountWhoseOwnerIsGone(t *testing.T) {
+	secretType := api.CustomResourceType{Group: api.Group, Version: api.Version, Kind: api.KindSecret, Plural: "secrets"}
+	configMapType := api.CustomResourceType{Group: api.Group, Version: api.Version, Kind: api.KindConfigMap, Plural: "configmaps"}
+	accountType := api.CustomResourceType{Group: api.Group, Version: api.Version, Kind: api.KindServiceAccount, Plural: "serviceaccounts"}
+	f := newFakeAPI(t)
+	f.add(mvmType, "alive", "uid-alive")
+	for _, typ := range []api.CustomResourceType{secretType, configMapType, accountType} {
+		f.add(typ, "orphan", "uid-o", ownerOf(mvmType, "gone", "uid-gone"))
+		f.add(typ, "owned", "uid-k", ownerOf(mvmType, "alive", "uid-alive"))
+	}
+
+	start(t, f)
+
+	assert.ElementsMatch(t, []string{"Secret/orphan", "ConfigMap/orphan", "ServiceAccount/orphan"}, f.deleted())
 }

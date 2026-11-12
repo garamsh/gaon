@@ -37,6 +37,18 @@ type env struct {
 // The server stops when the test ends.
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	return newEnvWith(t, envOptions{})
+}
+
+// envOptions changes what newEnvWith starts: the server's log goes to log
+// where it is set, and signing is the token signing key and issuer.
+type envOptions struct {
+	log     io.Writer
+	signing *signingKey
+}
+
+func newEnvWith(t *testing.T, opts envOptions) *env {
+	t.Helper()
 	endpoint := startEtcd(t)
 	etcd, err := clientv3.New(clientv3.Config{Endpoints: []string{endpoint}, DialTimeout: 5 * time.Second})
 	require.NoError(t, err)
@@ -47,7 +59,14 @@ func newEnv(t *testing.T) *env {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	cfg := apiserver.Config{Endpoints: []string{endpoint}, DialTimeout: 5 * time.Second}
-	go func() { done <- apiserver.Run(ctx, cfg, ln, slog.New(slog.NewTextHandler(io.Discard, nil))) }()
+	if opts.signing != nil {
+		cfg.ServiceAccountIssuer, cfg.ServiceAccountSigningKeyFile = opts.signing.issuer, opts.signing.file
+	}
+	logTo := opts.log
+	if logTo == nil {
+		logTo = io.Discard
+	}
+	go func() { done <- apiserver.Run(ctx, cfg, ln, slog.New(slog.NewTextHandler(logTo, nil))) }()
 	stopped := false
 	stop := func() error {
 		if stopped {

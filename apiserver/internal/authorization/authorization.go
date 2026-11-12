@@ -29,6 +29,9 @@ type Request struct {
 	Name        string
 	Labels      map[string]string
 	Selector    api.Selector
+	// BoundMicroVM is the MicroVM the body of a token request binds, set for
+	// the create of serviceaccounts/token and for no other request.
+	BoundMicroVM api.BoundObject
 }
 
 // Authorizer allows a request or refuses it with a Forbidden error. Any other
