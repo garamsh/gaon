@@ -1,4 +1,4 @@
-// Package token signs service account tokens: JWTs of the claims
+// Package token signs and verifies service account tokens: JWTs of the claims
 // api.NewTokenClaims builds, signed with ES256 by one configured key.
 package token
 
@@ -40,12 +40,22 @@ func NewSigner(issuer string, key *ecdsa.PrivateKey) (*Signer, error) {
 	if key.Curve != elliptic.P256() {
 		return nil, fmt.Errorf("the token signing key is on curve %s, want P-256", key.Curve.Params().Name)
 	}
-	der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	kid, err := keyID(&key.PublicKey)
 	if err != nil {
 		return nil, err
 	}
+	return &Signer{key: key, issuer: issuer, kid: kid}, nil
+}
+
+// keyID is the "kid" of a key: the SHA-256 of its PKIX encoding, so that every
+// API server holding the key names it alike.
+func keyID(pub *ecdsa.PublicKey) (string, error) {
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return "", err
+	}
 	sum := sha256.Sum256(der)
-	return &Signer{key: key, issuer: issuer, kid: base64.RawURLEncoding.EncodeToString(sum[:])}, nil
+	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
 }
 
 // LoadSigner reads the PEM private key in file, an EC key in SEC 1 or PKCS #8
@@ -83,6 +93,9 @@ func LoadSigner(issuer, file string) (*Signer, error) {
 
 // Issuer is the "iss" of the tokens s signs.
 func (s *Signer) Issuer() string { return s.issuer }
+
+// Public is the verification key of the tokens s signs.
+func (s *Signer) Public() *ecdsa.PublicKey { return &s.key.PublicKey }
 
 // Sign returns the compact JWT of c.
 func (s *Signer) Sign(c *api.TokenClaims) (string, error) {
