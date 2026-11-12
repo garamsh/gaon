@@ -24,6 +24,35 @@ type Config struct {
 	// BootstrapTokenFile is the path of the file of valid bootstrap tokens,
 	// one per line. It needs the TLS files.
 	BootstrapTokenFile string
+	// AuthorizationMode is AlwaysAllow, the default where it is empty, or
+	// RBAC. RBAC needs the TLS files.
+	AuthorizationMode string
+}
+
+// The authorization modes of ADR 0008, Decision 2.
+const (
+	ModeAlwaysAllow = "AlwaysAllow"
+	ModeRBAC        = "RBAC"
+)
+
+// validateAuthorization refuses a mode that is not one of the two, and RBAC
+// without the TLS files, because a request with no client certificate has no
+// identity to authorize.
+func (c Config) validateAuthorization() error {
+	switch c.AuthorizationMode {
+	case "", ModeAlwaysAllow:
+		return nil
+	case ModeRBAC:
+		given, err := c.tlsGiven()
+		if err != nil {
+			return err
+		}
+		if !given {
+			return errors.New("authorization-mode RBAC needs tls-client-ca, tls-cert and tls-key: a request with no client certificate has no identity to authorize")
+		}
+		return nil
+	}
+	return fmt.Errorf("authorization-mode %q is not %s or %s", c.AuthorizationMode, ModeAlwaysAllow, ModeRBAC)
 }
 
 // ParseConfig reads the flags in args.
@@ -36,6 +65,7 @@ func ParseConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.TLSCert, "tls-cert", "", "PEM file of the server certificate")
 	fs.StringVar(&cfg.TLSKey, "tls-key", "", "PEM file of the server certificate's key")
 	fs.StringVar(&cfg.BootstrapTokenFile, "bootstrap-token-file", "", "file of valid bootstrap tokens, one per line; needs the tls flags")
+	fs.StringVar(&cfg.AuthorizationMode, "authorization-mode", ModeAlwaysAllow, "AlwaysAllow, or RBAC: the Node authorizer, then cluster roles and bindings; RBAC needs the tls flags")
 	fs.DurationVar(&cfg.DialTimeout, "etcd-dial-timeout", 5*time.Second, "time allowed to reach etcd at start")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -52,6 +82,9 @@ func ParseConfig(args []string) (Config, error) {
 		return Config{}, fmt.Errorf("etcd dial timeout %s is not positive", cfg.DialTimeout)
 	}
 	if err := cfg.tokenFileNeedsTLS(); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.validateAuthorization(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil

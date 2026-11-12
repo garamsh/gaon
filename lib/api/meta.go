@@ -42,6 +42,7 @@ const (
 	KindMachine     = "Machine"
 	KindMachineList = "MachineList"
 	KindVolume      = "Volume"
+	KindVolumeList  = "VolumeList"
 	KindNode        = "Node"
 	KindNodeList    = "NodeList"
 	KindLease       = "Lease"

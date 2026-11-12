@@ -45,6 +45,12 @@ func newMemoryServer(t *testing.T) (*memoryServer, *api.Client) {
 	mux.HandleFunc("GET /machines", listOrWatch(s, "machines/", api.KindMachine, func(items []api.Machine, rv api.ResourceVersion) any {
 		return &api.MachineList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachineList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
 	}))
+	mux.HandleFunc("PUT /volumes/{name}", putValidated(s, "volumes/", api.KindVolume, func(v *api.Volume) (*api.ObjectMeta, error) { return &v.Metadata, v.Validate() }))
+	mux.HandleFunc("DELETE /volumes/{name}", s.deleteVolume)
+	mux.HandleFunc("GET /volumes/{name}", getObject[api.Volume](s, "volumes/"))
+	mux.HandleFunc("GET /volumes", listOrWatch(s, "volumes/", api.KindVolume, func(items []api.Volume, rv api.ResourceVersion) any {
+		return &api.VolumeList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindVolumeList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
 	mux.HandleFunc("PUT /volumes/{name}/status", s.putVolumeStatus)
 	mux.HandleFunc("PUT /nodes/{name}", s.putNode)
 	mux.HandleFunc("PUT /nodes/{name}/status", s.putNodeStatus)
@@ -423,6 +429,30 @@ func (s *memoryServer) watch(w http.ResponseWriter, r *http.Request, kind string
 			return
 		}
 	}
+}
+
+// deleteVolume answers DELETE of a Volume as deleteMachine does: a Volume with
+// a finalizer gets a deletionTimestamp and stays.
+func (s *memoryServer) deleteVolume(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, found := load[api.Volume](s, "volumes/"+name)
+	if err := s.requireVersion(found, v.Metadata.ResourceVersion, api.ResourceVersion(r.URL.Query().Get("resourceVersion")), name); err != nil {
+		writeError(w, err)
+		return
+	}
+	now := time.Now().UTC()
+	v.Metadata.DeletionTimestamp = &now
+	if len(v.Metadata.Finalizers) > 0 {
+		store(s, w, "volumes/"+name, api.KindVolume, &v.Metadata, &v, api.EventModified)
+		return
+	}
+	delete(s.objects, "volumes/"+name)
+	s.rev++
+	v.Metadata.ResourceVersion = api.ResourceVersion(strconv.FormatInt(s.rev, 10))
+	record(s, api.KindVolume, &v, api.EventDeleted)
+	writeJSON(w, http.StatusOK, &v)
 }
 
 func (s *memoryServer) putVolumeStatus(w http.ResponseWriter, r *http.Request) {
