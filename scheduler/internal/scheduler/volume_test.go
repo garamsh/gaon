@@ -34,6 +34,12 @@ func TestVolumeNode_KeepsOnlyTheNodeTheLocalVolumesArePinnedTo(t *testing.T) {
 			wantOn:  "b",
 		},
 		{
+			name:    "one pinned to b before one unpinned",
+			volumes: []*api.Volume{volume("p", api.StorageClassLocal, "b"), volume("u", api.StorageClassLocal, "")},
+			uses:    []string{"p", "u"},
+			wantOn:  "b",
+		},
+		{
 			name:    "two pinned to b",
 			volumes: []*api.Volume{volume("p", api.StorageClassLocal, "b"), volume("q", api.StorageClassLocal, "b")},
 			uses:    []string{"p", "q"},
