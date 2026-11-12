@@ -53,6 +53,7 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 ### Registration
 
 - The agent creates its Node with an empty `spec`, by a `PUT` without a version, when the API has none, and never writes `spec` again.
+- The Node comes first. Until the API has it, the agent retries the create every resync period and makes no other request that needs it: not the Machine list or watch, not a Lease write, not a Node status write. A restarted agent whose Node exists reads it and starts the rest at once. The certificate renewal does not need the Node and runs throughout. Under `RBAC` the Node authorizer allows a Node's Machine reads only once a Node of its name exists, and a Lease named as no Node is `Invalid` ([resource-api.md](./resource-api.md) §Authorization), so a request made earlier is refused.
 - It writes the Node's `status` by compare-and-swap on every resync: `state` is `Admitted` when a user has set `spec.admitted` and `Discovered` otherwise, `capacity` comes from mvmd's runtime info (cpus as a whole number, memory and storage in bytes, storage being mvmd's state total), and the `Ready` condition is true while mvmd answers. When mvmd's runtime info fails, the agent writes `Ready` false with reason `RuntimeUnreachable` and the error as the message, keeps the stored `capacity`, and keeps the condition's transition time while its status and reason are unchanged.
 - It creates the Lease named as the Node on its first round and renews it by compare-and-swap, writing the node as holder.
 

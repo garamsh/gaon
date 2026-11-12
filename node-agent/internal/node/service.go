@@ -20,6 +20,10 @@ type Service interface {
 	// with the error as its message, the stored capacity is kept, and Sync
 	// returns the error.
 	Sync(ctx context.Context) error
+	// Register returns once the API has the Node, creating it when it has
+	// none and trying again every period when that fails. It returns the
+	// context's error when ctx ends first.
+	Register(ctx context.Context, period time.Duration) error
 	// Run calls Sync every period until ctx ends, whether or not a call
 	// succeeded.
 	Run(ctx context.Context, period time.Duration)
@@ -36,6 +40,21 @@ type service struct {
 // NewService returns a Service for the Node named name.
 func NewService(name string, nodes Nodes, runtime Runtime, clk clock.Clock, log *slog.Logger) Service {
 	return &service{name: name, nodes: nodes, runtime: runtime, clock: clk, log: log}
+}
+
+func (s *service) Register(ctx context.Context, period time.Duration) error {
+	for {
+		_, err := s.register(ctx)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() == nil {
+			s.log.Warn("node registration", "node", s.name, "error", err)
+		}
+		if err := s.clock.Sleep(ctx, period); err != nil {
+			return err
+		}
+	}
 }
 
 func (s *service) Run(ctx context.Context, period time.Duration) {

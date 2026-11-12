@@ -18,6 +18,7 @@ import (
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
 	"github.com/garamsh/gaon/node-agent/internal/liveness"
+	"github.com/garamsh/gaon/node-agent/internal/machines"
 	"github.com/garamsh/gaon/node-agent/internal/machines/network"
 	"github.com/garamsh/gaon/node-agent/internal/machines/storage"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
@@ -229,6 +230,99 @@ func TestRun_CreatesAMachineWithThePolicyOfTheFlags(t *testing.T) {
 	require.Len(t, policy.GetIngress(), 1)
 	assert.Equal(t, "192.168.0.0/16", policy.GetIngress()[0].GetPrefix())
 	assert.EqualValues(t, 8080, policy.GetIngress()[0].GetPorts()[0].GetFirst())
+}
+
+// runAgent runs the agent against gaon and mvmd with fast periods until the
+// test ends.
+func runAgent(t *testing.T, gaon *fakegaon.Server, mvmd *fakemvmd.Server) {
+	t.Helper()
+	clk := clock.System{}
+	cfg := nodeagent.Config{
+		Network: mustNetwork(t), Storage: storage.None{},
+		APIServer: gaon.URL, NodeName: "n1", MvmdSocket: mvmd.Socket, ResyncPeriod: 20 * time.Millisecond,
+		Liveness: liveness.Params{LeaseDuration: 30 * time.Second, RenewPeriod: 20 * time.Millisecond, DeadlineLength: 5 * time.Second, Delta: time.Second, RPCTimeout: time.Second},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- nodeagent.Run(ctx, cfg, clk, slog.New(slog.NewTextHandler(io.Discard, nil))) }()
+	t.Cleanup(func() { cancel(); <-done })
+}
+
+func mustNetwork(t *testing.T) machines.Network {
+	t.Helper()
+	n, err := network.NewDefault(nil, nil)
+	require.NoError(t, err)
+	return n
+}
+
+func statusCode(t *testing.T, method, url string) int {
+	t.Helper()
+	req, err := http.NewRequest(method, url, strings.NewReader("{}"))
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	return resp.StatusCode
+}
+
+func TestRun_MakesNoRequestThatNeedsItsNodeBeforeTheNodeExists(t *testing.T) {
+	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clock.System{})
+	gaon.RequireNode("n1")
+	gaon.HoldNodeCreation(true)
+	assert.Equal(t, http.StatusForbidden, statusCode(t, http.MethodGet, gaon.URL+"/machines"), "control: the server refuses a Machine list while the Node is absent")
+	assert.Equal(t, http.StatusUnprocessableEntity, statusCode(t, http.MethodPut, gaon.URL+"/leases/n1"), "control: and a Lease write")
+	require.Len(t, gaon.Refused(), 2, "the controls were refused for the Node's absence")
+	_, ok := gaon.Node("n1")
+	require.False(t, ok, "the Node is absent")
+
+	runAgent(t, gaon, mvmd)
+	require.Eventually(t, func() bool { return gaon.NodeCreations() >= 3 }, 5*time.Second, 5*time.Millisecond, "the agent keeps asking for its Node")
+	time.Sleep(100 * time.Millisecond)
+	assert.Len(t, gaon.Refused(), 2, "nothing but the controls was refused")
+	assert.Empty(t, gaon.LeaseWrites())
+
+	gaon.HoldNodeCreation(false)
+	gaon.SetMachine(api.Machine{
+		Metadata: api.ObjectMeta{Name: "m1"},
+		Spec: api.MachineSpec{
+			Image:        "registry.example/app@sha256:" + strings.Repeat("b", 64),
+			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "1", Memory: "512Mi"}},
+			RunStrategy:  api.RunAlways,
+			NodeName:     "n1",
+			BindingEpoch: 1,
+		},
+	})
+	require.Eventually(t, func() bool {
+		_, leased := gaon.Lease("n1")
+		return leased && gaon.Machine("m1").Status.Phase == api.MachineRunning
+	}, 5*time.Second, 10*time.Millisecond, "once the Node exists the Lease is written and the Machine runs")
+	assert.Len(t, gaon.Refused(), 2, "no request of the agent's was refused")
+}
+
+func TestRun_StartsAtOnceWhenItsNodeAlreadyExists(t *testing.T) {
+	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clock.System{})
+	gaon.RequireNode("n1")
+	gaon.HoldNodeCreation(true)
+	gaon.SetNode(api.Node{Metadata: api.ObjectMeta{Name: "n1"}})
+	assert.Equal(t, http.StatusOK, statusCode(t, http.MethodGet, gaon.URL+"/machines"), "control: with the Node present the server answers")
+
+	runAgent(t, gaon, mvmd)
+	gaon.SetMachine(api.Machine{
+		Metadata: api.ObjectMeta{Name: "m1"},
+		Spec: api.MachineSpec{
+			Image:        "registry.example/app@sha256:" + strings.Repeat("b", 64),
+			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "1", Memory: "512Mi"}},
+			RunStrategy:  api.RunAlways,
+			NodeName:     "n1",
+			BindingEpoch: 1,
+		},
+	})
+	require.Eventually(t, func() bool {
+		_, leased := gaon.Lease("n1")
+		return leased && gaon.Machine("m1").Status.Phase == api.MachineRunning
+	}, 5*time.Second, 10*time.Millisecond, "the Lease is written and the Machine runs with Node creation held")
+	assert.Zero(t, gaon.NodeCreations(), "no create was asked for")
+	assert.Empty(t, gaon.Refused())
 }
 
 func mustMachine(t *testing.T, m *fakemvmd.Server, id string) *v1alpha2.Machine {
