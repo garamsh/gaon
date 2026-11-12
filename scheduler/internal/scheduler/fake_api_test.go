@@ -14,7 +14,7 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// fakeAPI serves the four endpoints the Scheduler calls over httptest, with
+// fakeAPI serves the five endpoints the Scheduler calls over httptest, with
 // the compare-and-swap the resource API specifies. A request to any other
 // path fails the test, so a Lease read or a Machine PUT cannot go unseen.
 type fakeAPI struct {
@@ -24,6 +24,9 @@ type fakeAPI struct {
 
 	machines map[string]*api.Machine
 	nodes    map[string]*api.Node
+	volumes  map[string]*api.Volume
+
+	volumesFail *api.APIError // GET /volumes answers it when set
 
 	bindings      []api.Binding // every binding request, applied or not
 	statusPuts    int
@@ -33,10 +36,11 @@ type fakeAPI struct {
 }
 
 func newFakeAPI(t *testing.T) (*fakeAPI, *api.Client) {
-	f := &fakeAPI{t: t, machines: map[string]*api.Machine{}, nodes: map[string]*api.Node{}}
+	f := &fakeAPI{t: t, machines: map[string]*api.Machine{}, nodes: map[string]*api.Node{}, volumes: map[string]*api.Volume{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /machines", f.listMachines)
 	mux.HandleFunc("GET /nodes", f.listNodes)
+	mux.HandleFunc("GET /volumes", f.listVolumes)
 	mux.HandleFunc("POST /machines/{name}/binding", f.bind)
 	mux.HandleFunc("PUT /machines/{name}/status", f.putStatus)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +66,15 @@ func (f *fakeAPI) addNode(n *api.Node) {
 	n.TypeMeta = api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindNode}
 	n.Metadata.ResourceVersion = api.ResourceVersion(strconv.Itoa(f.rev))
 	f.nodes[n.Metadata.Name] = n
+}
+
+func (f *fakeAPI) addVolume(v *api.Volume) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rev++
+	v.TypeMeta = api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindVolume}
+	v.Metadata.ResourceVersion = api.ResourceVersion(strconv.Itoa(f.rev))
+	f.volumes[v.Metadata.Name] = v
 }
 
 func (f *fakeAPI) addMachine(m *api.Machine) {
@@ -106,6 +119,20 @@ func (f *fakeAPI) listMachines(w http.ResponseWriter, _ *http.Request) {
 	list := api.MachineList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachineList}, Metadata: api.ListMeta{ResourceVersion: api.ResourceVersion(strconv.Itoa(f.rev))}}
 	for _, name := range sortedKeys(f.machines) {
 		list.Items = append(list.Items, *f.machines[name])
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (f *fakeAPI) listVolumes(w http.ResponseWriter, _ *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.volumesFail != nil {
+		writeError(w, f.volumesFail)
+		return
+	}
+	list := api.VolumeList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindVolumeList}, Metadata: api.ListMeta{ResourceVersion: api.ResourceVersion(strconv.Itoa(f.rev))}}
+	for _, name := range sortedKeys(f.volumes) {
+		list.Items = append(list.Items, *f.volumes[name])
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -240,6 +267,22 @@ func withCondition(n *api.Node, t string, s api.ConditionStatus) *api.Node {
 	n.Status.Conditions = slices.DeleteFunc(n.Status.Conditions, func(c api.Condition) bool { return c.Type == t })
 	n.Status.Conditions = append(n.Status.Conditions, api.Condition{Type: t, Status: s})
 	return n
+}
+
+// volume returns a Volume of the class given, pinned to nodeName when it is not empty.
+func volume(name, class, nodeName string) *api.Volume {
+	return &api.Volume{
+		Metadata: api.ObjectMeta{Name: name},
+		Spec:     api.VolumeSpec{StorageClass: class, NodeName: nodeName},
+	}
+}
+
+// withVolumes makes m name the Volumes given.
+func withVolumes(m *api.Machine, names ...string) *api.Machine {
+	for _, n := range names {
+		m.Spec.Volumes = append(m.Spec.Volumes, api.MachineVolume{Name: n, MountPath: "/mnt/" + n})
+	}
+	return m
 }
 
 // newMachine returns an unbound Machine requesting cpu and memory.
