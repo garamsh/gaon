@@ -107,17 +107,15 @@ func run(t *testing.T, svc certificate.Service) {
 func (r *rig) seed(t *testing.T, certPEM, keyPEM []byte) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(r.dir, 0o700))
-	if certPEM != nil {
-		require.NoError(t, os.WriteFile(filepath.Join(r.dir, certificate.CertFile), certPEM, 0o644))
-	}
-	if keyPEM != nil {
-		require.NoError(t, os.WriteFile(filepath.Join(r.dir, certificate.KeyFile), keyPEM, 0o600))
+	if certPEM != nil || keyPEM != nil {
+		data := append(append([]byte{}, certPEM...), keyPEM...)
+		require.NoError(t, os.WriteFile(filepath.Join(r.dir, certificate.PairFile), data, 0o600))
 	}
 }
 
 func readLeaf(t *testing.T, dir string) *x509.Certificate {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(dir, certificate.CertFile))
+	b, err := os.ReadFile(filepath.Join(dir, certificate.PairFile))
 	require.NoError(t, err)
 	block, _ := pem.Decode(b)
 	require.NotNil(t, block)
@@ -148,12 +146,12 @@ func TestStart_BootstrapsWithTheTokenAndKeepsTheIssuedPairOnDisk(t *testing.T) {
 	dir, err := os.Stat(r.dir)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o700), dir.Mode().Perm(), "the directory is created with mode 0700")
-	key, err := os.Stat(filepath.Join(r.dir, certificate.KeyFile))
+	pair, err := os.Stat(filepath.Join(r.dir, certificate.PairFile))
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), key.Mode().Perm(), "the key is written with mode 0600")
+	assert.Equal(t, os.FileMode(0o600), pair.Mode().Perm(), "the pair is written with mode 0600")
 	entries, err := os.ReadDir(r.dir)
 	require.NoError(t, err)
-	assert.Len(t, entries, 2, "the pair is all the directory holds: no temporary file is left")
+	assert.Len(t, entries, 1, "the pair file is all the directory holds: no temporary file is left")
 
 	creates := r.gaon.CSRCreates()
 	require.Len(t, creates, 1)
@@ -196,11 +194,11 @@ func TestStart_RefusesAnInvalidPairWithoutATokenAndBootstrapsWithOne(t *testing.
 		pair    func(r *rig) (certPEM, keyPEM []byte)
 		wantErr string
 	}{
-		{"no files", func(*rig) ([]byte, []byte) { return nil, nil }, "read certificate"},
+		{"no files", func(*rig) ([]byte, []byte) { return nil, nil }, "read pair"},
 		{"no key", func(r *rig) ([]byte, []byte) {
 			c, _ := r.gaon.Issue(t, "n1", r.now.Add(-time.Hour), r.now.Add(time.Hour))
 			return c, nil
-		}, "read key"},
+		}, "certificate and key"},
 		{"unparsable files", func(*rig) ([]byte, []byte) { return []byte("x"), []byte("y") }, "certificate and key"},
 		{"a key that is not the certificate's", func(r *rig) ([]byte, []byte) {
 			c, _ := r.gaon.Issue(t, "n1", r.now.Add(-time.Hour), r.now.Add(time.Hour))
@@ -240,8 +238,7 @@ func TestStart_ADeniedRequestStopsTheStartAndWritesNothing(t *testing.T) {
 	assert.Contains(t, err.Error(), "denied")
 	assert.Contains(t, err.Error(), "NotANode", "the reason is in the error")
 	assert.Nil(t, r.presented(t))
-	assert.NoFileExists(t, filepath.Join(r.dir, certificate.CertFile))
-	assert.NoFileExists(t, filepath.Join(r.dir, certificate.KeyFile))
+	assert.NoFileExists(t, filepath.Join(r.dir, certificate.PairFile))
 }
 
 func TestStart_WaitsForTheSignersDecisionReadingTheRequestEverySecond(t *testing.T) {
@@ -309,9 +306,7 @@ func TestRun_ADeniedRenewalKeepsThePairAndTriesAgainAfterAMinute(t *testing.T) {
 	svc := r.service(t, true)
 	require.NoError(t, svc.Start(context.Background()))
 	first := r.presented(t)
-	keyBefore, err := os.ReadFile(filepath.Join(r.dir, certificate.KeyFile))
-	require.NoError(t, err)
-	certBefore, err := os.ReadFile(filepath.Join(r.dir, certificate.CertFile))
+	before, err := os.ReadFile(filepath.Join(r.dir, certificate.PairFile))
 	require.NoError(t, err)
 	run(t, svc)
 
@@ -322,12 +317,9 @@ func TestRun_ADeniedRenewalKeepsThePairAndTriesAgainAfterAMinute(t *testing.T) {
 	assert.Equal(t, time.Minute, r.clock.waitSleep(t), "a failed renewal is retried after a minute")
 	require.Len(t, r.gaon.CSRCreates(), 2, "the renewal was asked for")
 	assert.Equal(t, first.SerialNumber, r.presented(t).SerialNumber, "the pair in use stays")
-	keyAfter, err := os.ReadFile(filepath.Join(r.dir, certificate.KeyFile))
+	after, err := os.ReadFile(filepath.Join(r.dir, certificate.PairFile))
 	require.NoError(t, err)
-	certAfter, err := os.ReadFile(filepath.Join(r.dir, certificate.CertFile))
-	require.NoError(t, err)
-	assert.Equal(t, keyBefore, keyAfter, "the key on disk is the old one")
-	assert.Equal(t, certBefore, certAfter, "and so is the certificate")
+	assert.Equal(t, before, after, "the pair on disk is the old one")
 
 	r.gaon.SetSigning(9 * time.Hour)
 	r.clock.proceed()
@@ -362,15 +354,15 @@ func TestRun_DoesNotRenewBeforeTwoThirds(t *testing.T) {
 	assert.Empty(t, r.gaon.CSRCreates())
 }
 
-func TestRun_ReplacesTheFilesByRenameSoAFileInUseIsNeverRewritten(t *testing.T) {
+func TestRun_ReplacesThePairFileByRenameSoAFileInUseIsNeverRewritten(t *testing.T) {
 	r := newRig(t)
 	r.gaon.SetSigning(9 * time.Hour)
 	svc := r.service(t, true)
 	require.NoError(t, svc.Start(context.Background()))
-	oldKey, err := os.Open(filepath.Join(r.dir, certificate.KeyFile))
+	oldPair, err := os.Open(filepath.Join(r.dir, certificate.PairFile))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = oldKey.Close() })
-	before, err := os.ReadFile(filepath.Join(r.dir, certificate.KeyFile))
+	t.Cleanup(func() { _ = oldPair.Close() })
+	before, err := os.ReadFile(filepath.Join(r.dir, certificate.PairFile))
 	require.NoError(t, err)
 	run(t, svc)
 
@@ -378,13 +370,13 @@ func TestRun_ReplacesTheFilesByRenameSoAFileInUseIsNeverRewritten(t *testing.T) 
 	r.clock.proceed()
 	r.clock.waitSleep(t)
 
-	after, err := os.ReadFile(filepath.Join(r.dir, certificate.KeyFile))
+	after, err := os.ReadFile(filepath.Join(r.dir, certificate.PairFile))
 	require.NoError(t, err)
-	require.NotEqual(t, before, after, "setup: the key on disk was replaced")
-	held, err := io.ReadAll(oldKey)
+	require.NotEqual(t, before, after, "setup: the pair on disk was replaced")
+	held, err := io.ReadAll(oldPair)
 	require.NoError(t, err)
-	assert.Equal(t, before, held, "a handle opened before the renewal still reads the old key: the file was renamed over, not written in place")
+	assert.Equal(t, before, held, "a handle opened before the renewal still reads the old pair: the file was renamed over, not written in place")
 	entries, err := os.ReadDir(r.dir)
 	require.NoError(t, err)
-	assert.Len(t, entries, 2, "no temporary file is left")
+	assert.Len(t, entries, 1, "no temporary file is left")
 }

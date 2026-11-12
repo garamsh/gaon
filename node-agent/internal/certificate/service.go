@@ -88,7 +88,7 @@ func (s *service) replace(ctx context.Context, reqs Requests) error {
 	if err != nil {
 		return err
 	}
-	pair, err := parsePair(certPEM, keyPEM, s.params.NodeName, s.clock.Now())
+	pair, err := parsePair(joinPair(certPEM, keyPEM), s.params.NodeName, s.clock.Now())
 	if err != nil {
 		return fmt.Errorf("issued certificate: %w", err)
 	}

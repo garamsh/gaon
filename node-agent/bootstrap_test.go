@@ -91,7 +91,7 @@ func TestParseConfig_TakesTheBootstrapFlagsFromTheEnvironment(t *testing.T) {
 
 func leafOf(t *testing.T, dir string) *x509.Certificate {
 	t.Helper()
-	b, err := os.ReadFile(filepath.Join(dir, certificate.CertFile))
+	b, err := os.ReadFile(filepath.Join(dir, certificate.PairFile))
 	require.NoError(t, err)
 	block, _ := pem.Decode(b)
 	require.NotNil(t, block)
@@ -135,7 +135,7 @@ func TestRun_BootstrapsRegistersOverTheCertificateRenewsAndUsesTheNewPairWithout
 	info, err := os.Stat(dir)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
-	info, err = os.Stat(filepath.Join(dir, certificate.KeyFile))
+	info, err = os.Stat(filepath.Join(dir, certificate.PairFile))
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 
@@ -170,8 +170,7 @@ func TestRun_UsesAValidPairInTheDirectoryWithoutAToken(t *testing.T) {
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 	now := time.Now()
 	certPEM, keyPEM := gaon.Issue(t, "n1", now.Add(-time.Minute), now.Add(time.Hour))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, certificate.CertFile), certPEM, 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, certificate.KeyFile), keyPEM, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, certificate.PairFile), append(certPEM, keyPEM...), 0o600))
 	args := []string{"--api-server", gaon.URL, "--mvmd-socket", mvmd.Socket, "--tls-ca", gaon.CAFile(), "--cert-dir", dir}
 	cfg, err := nodeagent.ParseConfig(args, env(required), io.Discard)
 	require.NoError(t, err)

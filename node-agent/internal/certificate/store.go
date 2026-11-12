@@ -23,23 +23,21 @@ func ensureDir(dir string) error {
 	return nil
 }
 
-// loadPair reads the pair in dir and checks it is a valid one for node at now.
+// loadPair reads the pair file in dir and checks it is a valid one for node at
+// now.
 func loadPair(dir, node string, now time.Time) (*tls.Certificate, error) {
-	certPEM, err := os.ReadFile(filepath.Join(dir, CertFile))
+	data, err := os.ReadFile(filepath.Join(dir, PairFile))
 	if err != nil {
-		return nil, fmt.Errorf("read certificate: %w", err)
+		return nil, fmt.Errorf("read pair: %w", err)
 	}
-	keyPEM, err := os.ReadFile(filepath.Join(dir, KeyFile))
-	if err != nil {
-		return nil, fmt.Errorf("read key: %w", err)
-	}
-	return parsePair(certPEM, keyPEM, node, now)
+	return parsePair(data, node, now)
 }
 
-// parsePair returns the pair the PEM files hold when the key matches the
-// certificate and the certificate is one for node at now.
-func parsePair(certPEM, keyPEM []byte, node string, now time.Time) (*tls.Certificate, error) {
-	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+// parsePair returns the pair the PEM data holds, the certificate block and the
+// key block in either order, when the key matches the certificate and the
+// certificate is one for node at now.
+func parsePair(data []byte, node string, now time.Time) (*tls.Certificate, error) {
+	pair, err := tls.X509KeyPair(data, data)
 	if err != nil {
 		return nil, fmt.Errorf("certificate and key: %w", err)
 	}
@@ -53,33 +51,22 @@ func parsePair(certPEM, keyPEM []byte, node string, now time.Time) (*tls.Certifi
 	return &pair, nil
 }
 
-// writePair puts the key, mode 0600, and the certificate in dir. Each is
-// written to a temporary file in dir first and both are then renamed into
-// place, so a crash leaves each file whole.
+// joinPair returns the certificate block followed by the key block.
+func joinPair(certPEM, keyPEM []byte) []byte {
+	return append(append([]byte{}, certPEM...), keyPEM...)
+}
+
+// writePair puts the certificate block and then the key block in the pair file
+// in dir, mode 0600. It writes a temporary file in dir and renames it into
+// place, so a crash leaves the old pair or the new one whole.
 func writePair(dir string, keyPEM, certPEM []byte) error {
-	files := []struct {
-		name string
-		data []byte
-		mode os.FileMode
-	}{{KeyFile, keyPEM, 0o600}, {CertFile, certPEM, 0o644}}
-	var temps []string
-	defer func() {
-		for _, t := range temps {
-			_ = os.Remove(t)
-		}
-	}()
-	for _, f := range files {
-		tmp, err := writeTemp(dir, f.name, f.data, f.mode)
-		if err != nil {
-			return err
-		}
-		temps = append(temps, tmp)
+	tmp, err := writeTemp(dir, PairFile, joinPair(certPEM, keyPEM), 0o600)
+	if err != nil {
+		return err
 	}
-	for i, f := range files {
-		if err := os.Rename(temps[i], filepath.Join(dir, f.name)); err != nil {
-			return fmt.Errorf("replace %s: %w", f.name, err)
-		}
-		temps[i] = ""
+	if err := os.Rename(tmp, filepath.Join(dir, PairFile)); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("replace %s: %w", PairFile, err)
 	}
 	return nil
 }

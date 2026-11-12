@@ -8,11 +8,9 @@ import (
 	"time"
 )
 
-// The names of the files the agent keeps in its certificate directory.
-const (
-	KeyFile  = "node-agent.key"
-	CertFile = "node-agent.crt"
-)
+// PairFile is the name of the file the agent keeps in its certificate
+// directory: the certificate block followed by the key block.
+const PairFile = "node-agent.pem"
 
 const (
 	// pollPeriod is the time between two reads of a request awaiting its decision.
