@@ -89,6 +89,9 @@ func (s *service) remove(ctx context.Context, id string) error {
 	if _, err := s.runtime.DeleteMachine(ctx, &v1alpha2.DeleteMachineRequest{MachineId: id}); err != nil && !notFound(err) {
 		return fmt.Errorf("delete %s: %w", id, err)
 	}
+	if err := s.storage.Release(ctx, id); err != nil {
+		return fmt.Errorf("release %s: %w", id, err)
+	}
 	s.log.Info("removed machine", "id", id)
 	return nil
 }
@@ -146,19 +149,30 @@ func (s *service) ensure(ctx context.Context, m *api.Machine) (outcome, error) {
 	return outcome{runtime: r}, nil
 }
 
-// create pulls the image and creates the Machine in mvmd, then starts it.
+// create asks the network for the policy, pulls the image, readies the
+// volumes and creates the Machine in mvmd with both, then starts it. A
+// plugin's refusal is the Machine's failure.
 func (s *service) create(ctx context.Context, m *api.Machine) (outcome, error) {
 	req, image, err := createRequest(m)
 	if err != nil {
 		return outcome{failure: err, failReason: ReasonInvalidSpec}, nil
 	}
+	if req.NetworkPolicy, err = s.network.Policy(ctx, m); err != nil {
+		return refused("network", err)
+	}
 	if _, err := s.runtime.PullImage(ctx, &v1alpha2.PullImageRequest{Image: image}); err != nil {
 		return outcome{}, fmt.Errorf("pull %s: %w", image.GetDigest(), err)
+	}
+	if req.Disks, err = s.storage.Attach(ctx, m); err != nil {
+		return refused("storage", err)
 	}
 	created, err := s.runtime.CreateMachine(ctx, req)
 	switch {
 	case err == nil:
 	case v1alpha2.KindOf(err) == v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED:
+		if err := s.storage.Release(ctx, req.GetMachineId()); err != nil {
+			s.log.Warn("release after a rejected create", "id", req.GetMachineId(), "error", err)
+		}
 		return outcome{failure: rejection{err}, failReason: ReasonRejected}, nil
 	default:
 		return outcome{}, fmt.Errorf("create %s: %w", req.GetMachineId(), err)
@@ -168,6 +182,16 @@ func (s *service) create(ctx context.Context, m *api.Machine) (outcome, error) {
 		return outcome{runtime: created.GetMachine()}, err
 	}
 	return outcome{runtime: started}, nil
+}
+
+// refused makes the outcome of a plugin's error: a *Refusal is the Machine's
+// failure, any other error is returned to be retried.
+func refused(plugin string, err error) (outcome, error) {
+	var r *Refusal
+	if errors.As(err, &r) {
+		return outcome{failure: r, failReason: r.Reason}, nil
+	}
+	return outcome{}, fmt.Errorf("%s plugin: %w", plugin, err)
 }
 
 // rejection is mvmd's refusal of a create, reported as the Machine's failure.

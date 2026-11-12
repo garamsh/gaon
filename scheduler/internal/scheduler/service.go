@@ -16,6 +16,7 @@ import (
 const (
 	ConditionScheduled  = "Scheduled"
 	ReasonUnschedulable = "Unschedulable"
+	ReasonExtenderError = "ExtenderError"
 )
 
 // Service binds Machines to Nodes.
@@ -30,13 +31,28 @@ type Service interface {
 }
 
 type service struct {
-	client API
-	log    *slog.Logger
+	client    API
+	log       *slog.Logger
+	scores    []weightedScore
+	extenders []*extender
 }
 
-// NewService returns a Service that reads and writes through client.
-func NewService(client API, log *slog.Logger) Service {
-	return &service{client: client, log: log}
+// Option configures a Service.
+type Option func(*service)
+
+// WithConfig enables the score plugins and extenders cfg holds.
+func WithConfig(cfg Config) Option {
+	return func(s *service) { s.scores, s.extenders = cfg.scores, cfg.extenders }
+}
+
+// NewService returns a Service that reads and writes through client. With no
+// option it enables no score plugin and no extender.
+func NewService(client API, log *slog.Logger, opts ...Option) Service {
+	s := &service{client: client, log: log}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 func (s *service) Run(ctx context.Context, interval time.Duration) {
@@ -92,20 +108,29 @@ func (s *service) Reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// place binds m to the first Node that fits it. An unbound m that fits none
-// gets a Scheduled condition saying why; a rebound m keeps the status of its
-// dead Node's epoch, which nobody rewrites.
+// place binds m to the Node choose picks. An unbound m that fits none, or whose
+// placement failed on an extender, gets a Scheduled condition saying why; a
+// rebound m keeps the status of its dead Node's epoch, which nobody rewrites.
 func (s *service) place(ctx context.Context, book *ledger, m *api.Machine, rebinding bool) error {
 	r, err := requests(m)
 	if err != nil {
 		return err
 	}
-	node, ok := book.choose(r)
-	if !ok {
+	node, refused, err := s.choose(ctx, book, m, r)
+	if err != nil {
+		s.log.Warn("not placed", "machine", m.Metadata.Name, "err", err)
 		if rebinding {
 			return nil
 		}
-		return s.reportUnschedulable(ctx, book, m)
+		return s.report(ctx, m, ReasonExtenderError, err.Error())
+	}
+	if node == "" {
+		if rebinding {
+			return nil
+		}
+		return s.report(ctx, m, ReasonUnschedulable, fmt.Sprintf(
+			"no Node fits: %d of %d Nodes are Admitted, Ready and not LeaseExpired; requests cpu %q, memory %q; %s",
+			book.eligible, len(book.names), m.Spec.Resources.Requests.CPU, m.Spec.Resources.Requests.Memory, refused))
 	}
 	_, err = s.client.BindMachine(ctx, m.Metadata.Name, api.Binding{
 		ResourceVersion: m.Metadata.ResourceVersion,
@@ -123,14 +148,10 @@ func (s *service) place(ctx context.Context, book *ledger, m *api.Machine, rebin
 	return nil
 }
 
-func (s *service) reportUnschedulable(ctx context.Context, book *ledger, m *api.Machine) error {
-	want := api.Condition{
-		Type:   ConditionScheduled,
-		Status: api.ConditionFalse,
-		Reason: ReasonUnschedulable,
-		Message: fmt.Sprintf("no Node fits: %d of %d Nodes are Admitted, Ready and not LeaseExpired, and none of them has free cpu and memory for the requests (cpu %q, memory %q)",
-			len(book.names), book.nodes, m.Spec.Resources.Requests.CPU, m.Spec.Resources.Requests.Memory),
-	}
+// report writes m's Scheduled condition as false with the reason and message
+// given, unless it already says that.
+func (s *service) report(ctx context.Context, m *api.Machine, reason, message string) error {
+	want := api.Condition{Type: ConditionScheduled, Status: api.ConditionFalse, Reason: reason, Message: message}
 	next := *m
 	next.Status.Conditions = slices.Clone(m.Status.Conditions)
 	i := slices.IndexFunc(next.Status.Conditions, func(c api.Condition) bool { return c.Type == ConditionScheduled })
@@ -150,7 +171,7 @@ func (s *service) reportUnschedulable(ctx context.Context, book *ledger, m *api.
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("report machine %s unschedulable: %w", m.Metadata.Name, err)
+		return fmt.Errorf("report machine %s as %s: %w", m.Metadata.Name, reason, err)
 	}
 	return nil
 }

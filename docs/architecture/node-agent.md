@@ -2,7 +2,7 @@
 
 What `gaon-node-agent` does on a node: it registers the node, keeps its Lease and mvmd's fencing deadline renewed, runs the Machines bound to it on mvmd, and reports their status.
 
-Basis: [resource-api.md](./resource-api.md) for the contract it keeps, [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md) for the boundary. The mvmd statements below hold for garamsh/mvmd at commit `3b37892f303a4d4dbd8e5360906d0f9c036b562e`, runtime API `v1alpha2`, which the agent reaches only through mvmd's `lib/runtimeapi` module over mvmd's Unix socket.
+Basis: [resource-api.md](./resource-api.md) for the contract it keeps, [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md) for the boundary. The mvmd statements below hold for garamsh/mvmd at commit `3b37892f303a4d4dbd8e5360906d0f9c036b562e`, runtime API `v1alpha2`, which the agent reaches only through mvmd's `lib/runtimeapi` module over mvmd's Unix socket. The network policy and disk statements hold at `3f6e60567966819ba920709a1fe84e9a3848a523`, the same API version ([ADR 0012](./adr/0012-the-node-agent-asks-a-network-plugin-and-a-storage-plugin-compiled-into-it-before-it-creates-a-machine.md)).
 
 ## Current decisions
 
@@ -29,6 +29,10 @@ Every value is a flag with an environment variable as its fallback. A flag given
 | `--restart-backoff` | `GAON_RESTART_BACKOFF` | 10s | wait before the first restart of a Machine, doubled for each restart after it |
 | `--restart-backoff-max` | `GAON_RESTART_BACKOFF_MAX` | 5m | cap on the wait between two restarts, not below the backoff |
 | `--restart-reset-after` | `GAON_RESTART_RESET_AFTER` | 10m | how long a Machine must have run for the wait to start over at the backoff |
+| `--network-plugin` | `GAON_NETWORK_PLUGIN` | `default` | the network plugin, from those compiled in; an unknown name refuses the start |
+| `--storage-plugin` | `GAON_STORAGE_PLUGIN` | `none` | the storage plugin, from those compiled in; an unknown name refuses the start |
+| `--egress-prefix` | `GAON_EGRESS_PREFIX` | none | repeatable; a CIDR a Machine may send to over any protocol, for the `default` network plugin; the variable is comma-separated and a flag replaces it |
+| `--ingress-prefix` | `GAON_INGRESS_PREFIX` | none | repeatable; a CIDR a Machine's ports accept TCP from, for the `default` network plugin; the variable is comma-separated and a flag replaces it |
 
 The three TLS values are given together or not at all. All three give a mutual TLS 1.3 client built by `lib/api` that trusts only the CA file; none gives plain HTTP, for a loopback API server; one or two refuse the start, naming the ones missing, as does a file that cannot be read or does not fit. The agent builds its client once at start, so a replaced file is read at the next start.
 
@@ -69,6 +73,16 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 - **The renewal number** sent to mvmd increases monotonically; the agent reads mvmd's last applied number once at start, so a restarted agent continues the sequence.
 - mvmd refuses to start or restore a Machine while its deadline is not armed or has expired; the agent treats that refusal as a failure to retry on the next resync, and the Machine stays `Pending`.
 
+### Plugins
+
+[ADR 0012](./adr/0012-the-node-agent-asks-a-network-plugin-and-a-storage-plugin-compiled-into-it-before-it-creates-a-machine.md) gives the agent a `Network` and a `Storage` plugin, compiled in and chosen by flag. Out-of-process plugins are not designed.
+
+- **Order:** for a Machine to create, the agent asks `Network` for the policy, pulls the image, asks `Storage` to attach the volumes, and creates the Machine in mvmd with the policy and disks in the one request, then starts it. No Machine is started without its policy, which keeps invariant 6.
+- **Refusal:** a plugin refuses a Machine with a reason and a message. The Machine is `Failed`, its `Ready` condition false with that reason and message, and mvmd is not asked to create it. Any other plugin error is retried at the next resync.
+- **Release:** `Storage.Release` is called with the mvmd identifier after the agent deletes a machine, and after mvmd rejects a create. It is repeatable and may be called for an identifier `Attach` never saw.
+- **`default` network:** a Machine naming no network or only `default` is served; any other network is refused with `UnknownNetwork`. Egress is one any-protocol rule for each `--egress-prefix`; ingress is a TCP rule for each port of `spec.ports` and each `--ingress-prefix`. With no prefixes the policy is empty, which mvmd reads as blocking all outside traffic. A prefix that is not an IPv4 or IPv6 CIDR refuses the start, and a port outside 1 to 65535 fails the Machine with `InvalidSpec`.
+- **`none` storage:** attaches no disk and refuses nothing.
+
 ### Machines
 
 - **Watched set:** the agent lists the Machines, watches from the list's version and reconciles on every change and every resync. A failed or expired watch is followed by a new list.
@@ -95,13 +109,13 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 | stopped, other | `Pending` | false, started again once the restart wait is over |
 | faulted | `Failed` | false, the reason is mvmd's last failure reason; stopped and started again once the restart wait is over |
 
-- **Failures the agent settles itself** go to `Failed` with the `Ready` condition false and a reason: `InvalidSpec` for an image that is not `<repository>@sha256:<digest>` or resources it cannot convert, and `Rejected` for a create mvmd refuses, such as one above a Driver's `max_vcpus` or one naming a kernel the node does not offer, with mvmd's reason as the message. The Driver's limit is not on the Node's status.
+- **Failures the agent settles itself** go to `Failed` with the `Ready` condition false and a reason: `InvalidSpec` for an image that is not `<repository>@sha256:<digest>` or resources it cannot convert, and `Rejected` for a create mvmd refuses, such as one above a Driver's `max_vcpus` or one naming a kernel the node does not offer, with mvmd's reason as the message. The Driver's limit is not on the Node's status. A network or storage plugin's refusal of a Machine fails it with the plugin's own reason and message.
 - **Outcome kind `IN_PROGRESS`** is treated as never produced by mvmd (garamsh/mvmd#307).
 
 ### What the agent does not do yet
 
 - `OnDemand` Machines, wake and suspend.
-- Volumes and attachment, and the network policy: a Machine is created with none, so invariant 6 is not kept by the agent.
+- Volumes beyond the plugin's interface: the only storage plugin is `none`, so no Machine has a disk.
 - The Node's `addresses`.
 - Calling naru.
 
@@ -112,6 +126,7 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 - The restart state is in memory because nothing the contract defines can hold it, and losing it costs one backoff, not a missed restart.
 - A clean record equal to the previous one counts as a failure because the cost of a wrong restart is one backoff, and of a wrong stop is a Machine that never runs again.
 - The exit is read once, at the first sight of the stopped state, so a log that changes afterwards cannot change the verdict.
+- The plugins are compiled in because a protocol to out-of-process ones has no design and nothing yet needs it; the policy is in the create request because mvmd takes it there, so it cannot be applied late.
 - The restart settings are flags with the recorded defaults because the contract fixes no values and a node's operator is the one who knows its workloads.
 - The epoch in the mvmd identifier makes rebinding to the same node a replacement rather than a reuse, so state of an older epoch cannot carry into a newer one.
 
@@ -119,3 +134,4 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 
 - **Entrypoint record across a start:** mvmd's documents do not say whether the console log an entrypoint's record is answered from is cleared when a Machine starts. The agent treats a clean record equal to the one it read at the Machine's previous exit as a failure, so a stale record cannot end the restarts; a Machine switched from `Always` to `RerunOnFailure` whose entrypoint keeps exiting cleanly is therefore restarted, at the backoff.
 - **Node addresses:** which addresses the agent reports.
+- **Leaked volumes:** a volume `Attach` readied is given back only when the agent removes the machine or mvmd rejects the create; one readied before the agent stopped and never created again is not found. A `Release` that fails after a rejected create is logged and not retried; the volume is given back only if the agent later removes that machine.

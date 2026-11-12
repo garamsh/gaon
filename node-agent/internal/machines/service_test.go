@@ -18,6 +18,8 @@ import (
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
 	"github.com/garamsh/gaon/node-agent/internal/machines"
+	"github.com/garamsh/gaon/node-agent/internal/machines/network"
+	"github.com/garamsh/gaon/node-agent/internal/machines/storage"
 	"github.com/garamsh/mvmd/lib/runtimeapi"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
@@ -30,6 +32,10 @@ type env struct {
 	gaon *fakegaon.Server
 	mvmd *fakemvmd.Server
 	rt   v1alpha2.RuntimeServiceClient
+	// network and storage are the plugins the service runs with; a setup
+	// function may replace them, and they default to the built-ins.
+	network machines.Network
+	storage machines.Storage
 }
 
 // start runs the service against fakes, with the fencing deadline armed
@@ -40,6 +46,14 @@ func start(t *testing.T, armed bool, wrap func(machines.API) machines.API, setup
 	e := &env{gaon: fakegaon.New(t), mvmd: fakemvmd.New(t, clk)}
 	for _, f := range setup {
 		f(e)
+	}
+	if e.network == nil {
+		def, err := network.NewDefault(nil, nil)
+		require.NoError(t, err)
+		e.network = def
+	}
+	if e.storage == nil {
+		e.storage = storage.None{}
 	}
 	conn, err := runtimeapi.Dial(context.Background(), e.mvmd.Socket)
 	require.NoError(t, err)
@@ -56,7 +70,7 @@ func start(t *testing.T, armed bool, wrap func(machines.API) machines.API, setup
 		Resync: 20 * time.Millisecond, Retry: 20 * time.Millisecond, ReadTimeout: time.Second,
 		RestartBackoff: time.Hour, RestartBackoffMax: time.Hour, RestartResetAfter: time.Hour,
 	},
-		client, e.rt, clk, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		client, e.rt, e.network, e.storage, clk, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { svc.Run(ctx); close(done) }()

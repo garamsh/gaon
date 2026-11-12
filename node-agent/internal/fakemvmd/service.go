@@ -61,6 +61,9 @@ func (s *Server) CreateMachine(_ context.Context, r *v1alpha2.CreateMachineReque
 		Resources: r.GetResources(),
 		Kernel:    r.GetKernel(),
 		Addresses: []string{"10.0.0.2"},
+
+		Disks:         r.GetDisks(),
+		NetworkPolicy: r.GetNetworkPolicy(),
 	}
 	s.machines[m.Id] = m
 	return &v1alpha2.CreateMachineResponse{Machine: proto.Clone(m).(*v1alpha2.Machine)}, nil
