@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/lib/plugin/plugintest"
 )
 
 const (
@@ -89,9 +90,7 @@ func TestExtensions(t *testing.T) {
 // and two Node Agents over fake mvmds.
 func startCluster(t *testing.T, binDir string) *cluster {
 	t.Helper()
-	dir, err := os.MkdirTemp("", runTag+"-")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := plugintest.SocketDir(t)
 
 	ca := newAuthority(t, dir)
 	serverID := ca.server(t, "apiserver")
@@ -122,7 +121,7 @@ func startCluster(t *testing.T, binDir string) *cluster {
 		startService(t, dir, binDir, "scheduler", "gaon-scheduler", append([]string{"-api", c.root, "-interval", "1s", "-config", c.schedulerConfig(t, dir)}, tlsFlags(schedulerID)...)...),
 	)
 	// A socket path is limited to about 100 bytes, so the sockets sit in dir,
-	// which is short.
+	// which SocketDir keeps short.
 	for _, n := range []struct {
 		name   string
 		cpus   uint32
