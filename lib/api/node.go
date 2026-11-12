@@ -16,6 +16,11 @@ const (
 	NodeLeaseExpired = "LeaseExpired"
 )
 
+// NodeGroup is the Organization of a Node Agent's client certificate: the
+// signer requires it in a Node's request, and a verifier outside gaon reads it
+// to tell a Node from any other identity the cluster CA signs.
+const NodeGroup = "gaon:nodes"
+
 // Node is a physical machine.
 type Node struct {
 	TypeMeta

@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/controllers/internal/csrsigner"
+	"github.com/garamsh/gaon/lib/api"
 )
 
 // testCA is a CA generated for a test: its certificate, and the files
@@ -96,6 +97,11 @@ func withTwoCNs(first, second string) csrOption {
 	}
 }
 
+// withOrganizations replaces the subject's Organization values.
+func withOrganizations(orgs ...string) csrOption {
+	return func(r *x509.CertificateRequest) { r.Subject.Organization = orgs }
+}
+
 func withDNSName(name string) csrOption {
 	return func(r *x509.CertificateRequest) { r.DNSNames = append(r.DNSNames, name) }
 }
@@ -108,6 +114,7 @@ func withOtherExtension() csrOption {
 }
 
 // newCSR returns a PEM PKCS#10 request for cn and the public key it asks for.
+// Its subject is a Node's: the CN and the Organization gaon:nodes.
 func newCSR(t *testing.T, cn string, opts ...csrOption) (pemRequest string, pub *ecdsa.PublicKey) {
 	t.Helper()
 	der, pub := newCSRDER(t, cn, opts...)
@@ -118,7 +125,7 @@ func newCSRDER(t *testing.T, cn string, opts ...csrOption) ([]byte, *ecdsa.Publi
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	tmpl := &x509.CertificateRequest{Subject: pkix.Name{CommonName: cn}}
+	tmpl := &x509.CertificateRequest{Subject: pkix.Name{CommonName: cn, Organization: []string{api.NodeGroup}}}
 	for _, o := range opts {
 		o(tmpl)
 	}

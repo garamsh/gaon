@@ -40,8 +40,9 @@ var (
 	strangerID    = who{"stranger", []string{"gaon:strangers"}}
 )
 
-// nodeID is a Node Agent's certificate: the Node's name and no Organization.
-func nodeID(name string) who { return who{cn: name} }
+// nodeID is a Node Agent's certificate: the Node's name and the Organization
+// gaon:nodes, as the signer issues it (ADR 0022).
+func nodeID(name string) who { return who{cn: name, orgs: []string{api.NodeGroup}} }
 
 // issueFor signs a client certificate whose subject is w, and returns it with
 // its key, both PEM.

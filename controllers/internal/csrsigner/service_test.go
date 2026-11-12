@@ -3,7 +3,6 @@ package csrsigner_test
 import (
 	"context"
 	"crypto/x509"
-	"encoding/asn1"
 	"encoding/pem"
 	"io"
 	"log/slog"
@@ -94,6 +93,7 @@ func TestRun_ApprovesABootstrapRequestAndSignsAClientCertificate(t *testing.T) {
 	_, err := cert.Verify(x509.VerifyOptions{Roots: roots, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}})
 	assert.NoError(t, err, "the certificate verifies against the CA as a client certificate")
 	assert.Equal(t, "node-1", cert.Subject.CommonName)
+	assert.Equal(t, []string{api.NodeGroup}, cert.Subject.Organization, "the certificate names a Node by its Organization")
 	assert.Equal(t, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, cert.ExtKeyUsage)
 	assert.Equal(t, x509.KeyUsageDigitalSignature, cert.KeyUsage)
 	assert.True(t, pub.Equal(cert.PublicKey), "the certificate carries the requested key")
@@ -129,6 +129,7 @@ func TestRun_ApprovesARenewalByTheNodesOwnCertificate(t *testing.T) {
 
 	assert.Equal(t, api.CSRApproved, condition(t, r).Type)
 	assert.Equal(t, "node-1", issued(t, r).Subject.CommonName)
+	assert.Equal(t, []string{api.NodeGroup}, issued(t, r).Subject.Organization)
 	assert.Equal(t, now.Add(signingDuration), issued(t, r).NotAfter)
 }
 
@@ -155,6 +156,8 @@ func TestRun_DeniesEachFailureOfTheApprovalRuleWithItsOwnReason(t *testing.T) {
 	badSignature := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}))
 	node1, _ := newCSR(t, "node-1")
 	empty, _ := newCSR(t, "")
+	noOrg, _ := newCSR(t, "node-1", withOrganizations())
+	otherOrg, _ := newCSR(t, "node-1", withOrganizations("gaon:admins"))
 	tokenName, _ := newCSR(t, "bootstrap:abcdef")
 	san, _ := newCSR(t, "node-1", withDNSName("node-1.example"))
 	other, _ := newCSR(t, "node-1", withOtherExtension())
@@ -174,6 +177,10 @@ func TestRun_DeniesEachFailureOfTheApprovalRuleWithItsOwnReason(t *testing.T) {
 		{"not a certificate request", "bootstrap:abcdef", garbage, false, "InvalidRequest"},
 		{"signature does not verify", "bootstrap:abcdef", badSignature, false, "InvalidRequest"},
 		{"empty CN", "bootstrap:abcdef", empty, false, "InvalidSubject"},
+		{"no Organization", "bootstrap:abcdef", noOrg, false, "InvalidSubject"},
+		{"another Organization", "bootstrap:abcdef", otherOrg, false, "InvalidSubject"},
+		{"no Organization, as the Node's renewal", "node-1", noOrg, false, "InvalidSubject"},
+		{"control: the Node's renewal", "node-1", node1, true, ""},
 		{"CN of a token", "bootstrap:abcdef", tokenName, false, "InvalidSubject"},
 		{"subject alternative name", "bootstrap:abcdef", san, false, "DisallowedExtension"},
 		{"other extension", "bootstrap:abcdef", other, false, "DisallowedExtension"},
@@ -206,7 +213,7 @@ func TestRun_DeniesEachFailureOfTheApprovalRuleWithItsOwnReason(t *testing.T) {
 	}
 }
 
-func TestRun_DeniesASubjectThatIsNotExactlyOneCN(t *testing.T) {
+func TestRun_DeniesASubjectThatIsNotExactlyOneCNAndTheNodeOrganization(t *testing.T) {
 	ca := newTestCA(t, now.Add(24*365*time.Hour))
 	f := newFakeAPI(t)
 
@@ -214,25 +221,27 @@ func TestRun_DeniesASubjectThatIsNotExactlyOneCN(t *testing.T) {
 		name           string
 		request        string
 		attrs, cnAttrs int
+		orgs           []string
 	}
-	oneCN, _ := newCSR(t, "node-1")
-	tests := []subjectCase{{"control: one CN", oneCN, 1, 1}}
-	for _, extra := range []struct {
+	control, _ := newCSR(t, "node-1")
+	tests := []subjectCase{{"control: one CN and O=gaon:nodes", control, 2, 1, []string{api.NodeGroup}}}
+	for _, c := range []struct {
 		name    string
-		typ     asn1.ObjectIdentifier
+		opt     csrOption
+		attrs   int
 		cnAttrs int
+		orgs    []string
 	}{
-		{"Organization", oidOrganization, 1},
-		{"Organizational Unit", oidOrganizationalUnit, 1},
-		{"second CN", oidCommonName, 2},
-		{"Country", oidCountry, 1},
+		{"no Organization", withOrganizations(), 1, 1, nil},
+		{"another Organization", withOrganizations("gaon:admins"), 2, 1, []string{"gaon:admins"}},
+		{"the Node Organization and another", withOrganizations(api.NodeGroup, "gaon:admins"), 3, 1, []string{api.NodeGroup, "gaon:admins"}},
+		{"the Node Organization twice", withOrganizations(api.NodeGroup, api.NodeGroup), 3, 1, []string{api.NodeGroup, api.NodeGroup}},
+		{"Organizational Unit", withSubjectAttribute(oidOrganizationalUnit, "gaon:admins"), 3, 1, []string{api.NodeGroup}},
+		{"second CN", withTwoCNs("node-1", "node-2"), 3, 2, []string{api.NodeGroup}},
+		{"Country", withSubjectAttribute(oidCountry, "KR"), 3, 1, []string{api.NodeGroup}},
 	} {
-		opt := withSubjectAttribute(extra.typ, "gaon:admins")
-		if extra.typ.Equal(oidCommonName) {
-			opt = withTwoCNs("node-1", "node-2")
-		}
-		request, _ := newCSR(t, "node-1", opt)
-		tests = append(tests, subjectCase{extra.name, request, 2, extra.cnAttrs})
+		request, _ := newCSR(t, "node-1", c.opt)
+		tests = append(tests, subjectCase{c.name, request, c.attrs, c.cnAttrs, c.orgs})
 	}
 	for i, tt := range tests {
 		block, _ := pem.Decode([]byte(tt.request))
@@ -246,6 +255,7 @@ func TestRun_DeniesASubjectThatIsNotExactlyOneCN(t *testing.T) {
 		}
 		require.Len(t, parsed.Subject.Names, tt.attrs, "%s: subject attributes", tt.name)
 		require.Equal(t, tt.cnAttrs, cns, "%s: CN attributes", tt.name)
+		require.Equal(t, tt.orgs, parsed.Subject.Organization, "%s: Organization values", tt.name)
 		f.add(newRequest(requestName(i), "bootstrap:abcdef", tt.request))
 	}
 	start(t, f, ca.load(t), signingDuration)
@@ -257,7 +267,10 @@ func TestRun_DeniesASubjectThatIsNotExactlyOneCN(t *testing.T) {
 			c := condition(t, r)
 			if i == 0 {
 				assert.Equal(t, api.CSRApproved, c.Type)
-				assert.Equal(t, "CN=node-1", issued(t, r).Subject.String())
+				cert := issued(t, r)
+				assert.Equal(t, "node-1", cert.Subject.CommonName)
+				assert.Equal(t, []string{api.NodeGroup}, cert.Subject.Organization)
+				assert.Len(t, cert.Subject.Names, 2)
 				return
 			}
 			assert.Equal(t, api.CSRDenied, c.Type)

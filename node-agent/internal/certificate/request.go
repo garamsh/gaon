@@ -24,7 +24,7 @@ func (s *service) obtain(ctx context.Context, reqs Requests) (keyPEM, certPEM []
 		return nil, nil, fmt.Errorf("generate key: %w", err)
 	}
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
-		Subject: pkix.Name{CommonName: s.params.NodeName},
+		Subject: pkix.Name{CommonName: s.params.NodeName, Organization: []string{api.NodeGroup}},
 	}, key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create certificate request: %w", err)
