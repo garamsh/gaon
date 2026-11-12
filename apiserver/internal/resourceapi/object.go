@@ -18,6 +18,8 @@ type kind[T any] struct {
 	plural string
 	meta   func(*T) *api.ObjectMeta
 	spec   func(*T) any
+	// gvk is the kind a webhook is told the write is of.
+	gvk api.GroupVersionKind
 }
 
 func (k kind[T]) prefix() string {

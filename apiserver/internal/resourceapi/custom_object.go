@@ -16,7 +16,8 @@ type CustomPath struct {
 // customKind is the kind of the objects a definition registers. It is stored
 // under the definition's name, which holds a dot where no core plural does.
 func customKind(d *api.CustomResourceDefinition) kind[api.CustomObject] {
-	return kind[api.CustomObject]{d.Metadata.Name, func(o *api.CustomObject) *api.ObjectMeta { return &o.Metadata }, func(o *api.CustomObject) any { return o.Spec }}
+	return kind[api.CustomObject]{d.Metadata.Name, func(o *api.CustomObject) *api.ObjectMeta { return &o.Metadata }, func(o *api.CustomObject) any { return o.Spec },
+		api.GroupVersionKind{Group: d.Spec.Group, Version: d.Spec.Versions[0].Name, Kind: d.Spec.Names.Kind}}
 }
 
 func pathOf(d *api.CustomResourceDefinition) CustomPath {
@@ -68,10 +69,13 @@ func (s *service) putCustomObject(ctx context.Context, p CustomPath, name string
 	if err := checkName(name, o.Metadata.Name); err != nil {
 		return nil, nil, false, err
 	}
+	k := customKind(d)
+	if err := mutate(ctx, s, k, "", operationOf(o.Metadata.ResourceVersion), o); err != nil {
+		return nil, nil, false, err
+	}
 	if err := o.Validate(typeOf(d)); err != nil {
 		return nil, nil, false, err
 	}
-	k := customKind(d)
 	root := d.Spec.Versions[0].Schema.OpenAPIV3Schema
 	statusInBody := !hasStatusSubresource(d)
 	if o.Spec, err = fitSection(root, "spec", o.Spec); err != nil {
@@ -90,6 +94,9 @@ func (s *service) putCustomObject(ctx context.Context, p CustomPath, name string
 		if !statusInBody {
 			o.Status = nil
 		}
+		if err := validate(ctx, s, k, "", api.OperationCreate, o, nil); err != nil {
+			return nil, nil, false, err
+		}
 		return d, o, false, k.create(ctx, s.st, o)
 	}
 	old, rev, err := k.get(ctx, s.st, name)
@@ -104,6 +111,9 @@ func (s *service) putCustomObject(ctx context.Context, p CustomPath, name string
 		return nil, nil, false, api.NewAPIError(api.ReasonInvalid, "a finalizer cannot be added to an object being deleted")
 	}
 	if deleting && len(o.Metadata.Finalizers) == 0 {
+		if err := validate(ctx, s, k, "", api.OperationUpdate, o, old); err != nil {
+			return nil, nil, false, err
+		}
 		old.Metadata.Finalizers = nil
 		return d, old, true, k.remove(ctx, s.st, old, rev)
 	}
@@ -112,6 +122,9 @@ func (s *service) putCustomObject(ctx context.Context, p CustomPath, name string
 	}
 	o.Metadata.DeletionTimestamp = old.Metadata.DeletionTimestamp
 	o.Metadata.Generation = nextGeneration(old.Metadata.Generation, old.Spec, o.Spec)
+	if err := validate(ctx, s, k, "", api.OperationUpdate, o, old); err != nil {
+		return nil, nil, false, err
+	}
 	return d, o, false, k.update(ctx, s.st, o, rev)
 }
 
@@ -131,10 +144,13 @@ func (s *service) PutCustomObjectStatus(ctx context.Context, p CustomPath, name 
 	if err := checkName(name, next.Metadata.Name); err != nil {
 		return nil, err
 	}
+	k := customKind(d)
+	if err := mutate(ctx, s, k, "status", api.OperationUpdate, next); err != nil {
+		return nil, err
+	}
 	if err := next.Validate(typeOf(d)); err != nil {
 		return nil, err
 	}
-	k := customKind(d)
 	o, rev, err := k.get(ctx, s.st, name)
 	if err != nil {
 		return nil, err
@@ -142,7 +158,11 @@ func (s *service) PutCustomObjectStatus(ctx context.Context, p CustomPath, name 
 	if err := checkVersion(k.plural, name, next.Metadata.ResourceVersion, o.Metadata.ResourceVersion); err != nil {
 		return nil, err
 	}
+	old := *o
 	if o.Status, err = fitSection(d.Spec.Versions[0].Schema.OpenAPIV3Schema, "status", next.Status); err != nil {
+		return nil, err
+	}
+	if err := validate(ctx, s, k, "status", api.OperationUpdate, o, &old); err != nil {
 		return nil, err
 	}
 	return o, k.update(ctx, s.st, o, rev)
@@ -176,6 +196,9 @@ func (s *service) deleteCustomObject(ctx context.Context, p CustomPath, name str
 	}
 	if o.Metadata.DeletionTimestamp != nil {
 		return d, o, false, nil
+	}
+	if err := admitDelete(ctx, s, k, o); err != nil {
+		return nil, nil, false, err
 	}
 	now := s.now().UTC()
 	o.Metadata.DeletionTimestamp = &now

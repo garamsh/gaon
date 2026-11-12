@@ -15,6 +15,9 @@ func (s *service) PutCustomResourceDefinition(ctx context.Context, name string, 
 	if err := checkName(name, d.Metadata.Name); err != nil {
 		return nil, err
 	}
+	if err := mutate(ctx, s, customResourceDefinitions, "", operationOf(d.Metadata.ResourceVersion), d); err != nil {
+		return nil, err
+	}
 	if err := d.Validate(); err != nil {
 		return nil, err
 	}
@@ -23,7 +26,7 @@ func (s *service) PutCustomResourceDefinition(ctx context.Context, name string, 
 	}
 	s.defs.Lock()
 	defer s.defs.Unlock()
-	return customResourceDefinitions.put(ctx, s.st, d,
+	return admittedPut(ctx, s, customResourceDefinitions, d,
 		func() error {
 			conditions, err := s.creationConditions(ctx, d)
 			d.Status.Conditions = conditions
@@ -116,6 +119,9 @@ func (s *service) markDefinitionDeleted(ctx context.Context, name string, rv api
 		return d, nil
 	}
 	if err := checkVersion(customResourceDefinitions.plural, name, rv, d.Metadata.ResourceVersion); err != nil {
+		return nil, err
+	}
+	if err := admitDelete(ctx, s, customResourceDefinitions, d); err != nil {
 		return nil, err
 	}
 	now := s.now().UTC()

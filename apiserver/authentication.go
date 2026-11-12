@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/garamsh/gaon/apiserver/internal/resourceapi"
 	"github.com/garamsh/gaon/lib/api"
 )
 
@@ -119,6 +120,8 @@ func (h *handler) authenticate(mux *http.ServeMux, tokens tokenSet) http.Handler
 				return
 			}
 		}
-		mux.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, id)))
+		ctx := context.WithValue(r.Context(), identityKey{}, id)
+		ctx = resourceapi.WithUser(ctx, api.UserInfo{Username: id.name, Groups: id.groups})
+		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

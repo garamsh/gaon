@@ -13,6 +13,9 @@ func (s *service) PutLease(ctx context.Context, name string, l *api.Lease) (*api
 	if err := checkName(name, l.Metadata.Name); err != nil {
 		return nil, err
 	}
+	if err := mutate(ctx, s, leases, "", operationOf(l.Metadata.ResourceVersion), l); err != nil {
+		return nil, err
+	}
 	if err := l.Validate(); err != nil {
 		return nil, err
 	}
@@ -22,5 +25,5 @@ func (s *service) PutLease(ctx context.Context, name string, l *api.Lease) (*api
 		}
 		return nil, err
 	}
-	return leases.put(ctx, s.st, l, func() error { return nil }, func(*api.Lease) error { return nil })
+	return admittedPut(ctx, s, leases, l, func() error { return nil }, func(*api.Lease) error { return nil })
 }

@@ -14,6 +14,9 @@ func (s *service) PutMachine(ctx context.Context, name string, m *api.Machine) (
 	if err := checkName(name, m.Metadata.Name); err != nil {
 		return nil, err
 	}
+	if err := mutate(ctx, s, machines, "", operationOf(m.Metadata.ResourceVersion), m); err != nil {
+		return nil, err
+	}
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
@@ -25,6 +28,9 @@ func (s *service) PutMachine(ctx context.Context, name string, m *api.Machine) (
 	}
 	m.Metadata.Generation, m.Metadata.DeletionTimestamp = 1, nil
 	m.Status = api.MachineStatus{Phase: api.MachinePending}
+	if err := validate(ctx, s, machines, "", api.OperationCreate, m, nil); err != nil {
+		return nil, err
+	}
 	return m, machines.create(ctx, s.st, m)
 }
 
@@ -44,18 +50,27 @@ func (s *service) updateMachine(ctx context.Context, m *api.Machine) (*api.Machi
 		return nil, api.NewAPIError(api.ReasonInvalid, "a finalizer cannot be added to a machine being deleted")
 	}
 	if deleting && len(m.Metadata.Finalizers) == 0 {
+		if err := validate(ctx, s, machines, "", api.OperationUpdate, m, old); err != nil {
+			return nil, err
+		}
 		old.Metadata.Finalizers = nil
 		return old, machines.remove(ctx, s.st, old, rev)
 	}
 	m.Status = old.Status
 	m.Metadata.DeletionTimestamp = old.Metadata.DeletionTimestamp
 	m.Metadata.Generation = nextGeneration(old.Metadata.Generation, old.Spec, m.Spec)
+	if err := validate(ctx, s, machines, "", api.OperationUpdate, m, old); err != nil {
+		return nil, err
+	}
 	return m, machines.update(ctx, s.st, m, rev)
 }
 
 // BindMachine sets the node and the epoch of the Machine if b carries its
 // current version and the epoch after its current one.
 func (s *service) BindMachine(ctx context.Context, name string, b api.Binding) (*api.Machine, error) {
+	if err := s.mutateBinding(ctx, name, &b); err != nil {
+		return nil, err
+	}
 	m, rev, err := machines.get(ctx, s.st, name)
 	if err != nil {
 		return nil, err
@@ -67,6 +82,9 @@ func (s *service) BindMachine(ctx context.Context, name string, b api.Binding) (
 		return nil, err
 	}
 	m.Metadata.Generation++
+	if err := s.validateBinding(ctx, name, b); err != nil {
+		return nil, err
+	}
 	return m, machines.update(ctx, s.st, m, rev)
 }
 
@@ -74,6 +92,9 @@ func (s *service) BindMachine(ctx context.Context, name string, b api.Binding) (
 // if m's status carries the epoch of the stored spec.
 func (s *service) PutMachineStatus(ctx context.Context, name string, next *api.Machine) (*api.Machine, error) {
 	if err := checkName(name, next.Metadata.Name); err != nil {
+		return nil, err
+	}
+	if err := mutate(ctx, s, machines, "status", api.OperationUpdate, next); err != nil {
 		return nil, err
 	}
 	m, rev, err := machines.get(ctx, s.st, name)
@@ -86,7 +107,11 @@ func (s *service) PutMachineStatus(ctx context.Context, name string, next *api.M
 	if err := next.ValidateStatusUpdate(m); err != nil {
 		return nil, err
 	}
+	old := *m
 	m.Status = next.Status
+	if err := validate(ctx, s, machines, "status", api.OperationUpdate, m, &old); err != nil {
+		return nil, err
+	}
 	return m, machines.update(ctx, s.st, m, rev)
 }
 
@@ -103,6 +128,9 @@ func (s *service) DeleteMachine(ctx context.Context, name string, rv api.Resourc
 	}
 	if m.Metadata.DeletionTimestamp != nil {
 		return m, nil
+	}
+	if err := admitDelete(ctx, s, machines, m); err != nil {
+		return nil, err
 	}
 	now := s.now().UTC()
 	m.Metadata.DeletionTimestamp = &now

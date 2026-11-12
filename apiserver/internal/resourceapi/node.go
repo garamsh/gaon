@@ -12,10 +12,13 @@ func (s *service) PutNode(ctx context.Context, name string, n *api.Node) (*api.N
 	if err := checkName(name, n.Metadata.Name); err != nil {
 		return nil, err
 	}
+	if err := mutate(ctx, s, nodes, "", operationOf(n.Metadata.ResourceVersion), n); err != nil {
+		return nil, err
+	}
 	if err := n.Validate(); err != nil {
 		return nil, err
 	}
-	return nodes.put(ctx, s.st, n, func() error {
+	return admittedPut(ctx, s, nodes, n, func() error {
 		n.Status = api.NodeStatus{State: api.NodeStateDiscovered}
 		return nil
 	}, func(old *api.Node) error {
@@ -28,6 +31,9 @@ func (s *service) PutNode(ctx context.Context, name string, n *api.Node) (*api.N
 // state agrees with the stored spec.admitted.
 func (s *service) PutNodeStatus(ctx context.Context, name string, next *api.Node) (*api.Node, error) {
 	if err := checkName(name, next.Metadata.Name); err != nil {
+		return nil, err
+	}
+	if err := mutate(ctx, s, nodes, "status", api.OperationUpdate, next); err != nil {
 		return nil, err
 	}
 	n, rev, err := nodes.get(ctx, s.st, name)
@@ -43,7 +49,11 @@ func (s *service) PutNodeStatus(ctx context.Context, name string, next *api.Node
 	if want := stateFor(n.Spec.Admitted); next.Status.State != n.Status.State && next.Status.State != want {
 		return nil, api.NewAPIError(api.ReasonInvalid, "status.state is %q, want %q while spec.admitted is %t", next.Status.State, want, n.Spec.Admitted)
 	}
+	old := *n
 	n.Status = next.Status
+	if err := validate(ctx, s, nodes, "status", api.OperationUpdate, n, &old); err != nil {
+		return nil, err
+	}
 	return n, nodes.update(ctx, s.st, n, rev)
 }
 

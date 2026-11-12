@@ -29,6 +29,9 @@ const rbacRoot = "/apis/" + api.RBACGroupVersion
 // extensionsRoot is the root of the paths of CustomResourceDefinitions.
 const extensionsRoot = "/apis/" + api.APIExtensionsGroupVersion
 
+// admissionRoot is the root of the paths of the webhook configurations.
+const admissionRoot = "/apis/" + api.AdmissionRegistrationGroupVersion
+
 // customRoot is the collection path of the objects of a registered kind: the
 // group, the version and the plural come from the request, and the definition
 // that matches them decides whether it is served.
@@ -82,6 +85,15 @@ func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tok
 	custom := func(sub string) func(*http.Request) (string, string) {
 		return func(r *http.Request) (string, string) { return r.PathValue("group"), r.PathValue("plural") + sub }
 	}
+	mux.HandleFunc("PUT "+admissionRoot+"/mutatingwebhookconfigurations/{name}", h.guard(api.AdmissionRegistrationGroup, "mutatingwebhookconfigurations", putVerb, put(h, svc.PutMutatingWebhookConfiguration)))
+	mux.HandleFunc("DELETE "+admissionRoot+"/mutatingwebhookconfigurations/{name}", h.guard(api.AdmissionRegistrationGroup, "mutatingwebhookconfigurations", fixed(api.VerbDelete), deleteObject(h, svc.DeleteMutatingWebhookConfiguration)))
+	mux.HandleFunc("GET "+admissionRoot+"/mutatingwebhookconfigurations/{name}", h.guard(api.AdmissionRegistrationGroup, "mutatingwebhookconfigurations", fixed(api.VerbGet), get(h, svc.GetMutatingWebhookConfiguration)))
+	mux.HandleFunc("GET "+admissionRoot+"/mutatingwebhookconfigurations", h.guard(api.AdmissionRegistrationGroup, "mutatingwebhookconfigurations", readVerb, listOrWatch(h, svc.ListMutatingWebhookConfigurations, svc.WatchMutatingWebhookConfigurations)))
+	mux.HandleFunc("PUT "+admissionRoot+"/validatingwebhookconfigurations/{name}", h.guard(api.AdmissionRegistrationGroup, "validatingwebhookconfigurations", putVerb, put(h, svc.PutValidatingWebhookConfiguration)))
+	mux.HandleFunc("DELETE "+admissionRoot+"/validatingwebhookconfigurations/{name}", h.guard(api.AdmissionRegistrationGroup, "validatingwebhookconfigurations", fixed(api.VerbDelete), deleteObject(h, svc.DeleteValidatingWebhookConfiguration)))
+	mux.HandleFunc("GET "+admissionRoot+"/validatingwebhookconfigurations/{name}", h.guard(api.AdmissionRegistrationGroup, "validatingwebhookconfigurations", fixed(api.VerbGet), get(h, svc.GetValidatingWebhookConfiguration)))
+	mux.HandleFunc("GET "+admissionRoot+"/validatingwebhookconfigurations", h.guard(api.AdmissionRegistrationGroup, "validatingwebhookconfigurations", readVerb, listOrWatch(h, svc.ListValidatingWebhookConfigurations, svc.WatchValidatingWebhookConfigurations)))
+
 	mux.HandleFunc("PUT "+customRoot+"/{name}", h.guardBy(custom(""), putVerb, h.putCustomObject(svc.PutCustomObject)))
 	mux.HandleFunc("PUT "+customRoot+"/{name}/status", h.guardBy(custom("/status"), fixed(api.VerbUpdate), h.putCustomObject(svc.PutCustomObjectStatus)))
 	mux.HandleFunc("DELETE "+customRoot+"/{name}", h.guardBy(custom(""), fixed(api.VerbDelete), h.deleteCustomObject(svc)))

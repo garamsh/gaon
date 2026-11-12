@@ -12,10 +12,13 @@ func (s *service) PutClusterRoleBinding(ctx context.Context, name string, b *api
 	if err := checkName(name, b.Metadata.Name); err != nil {
 		return nil, err
 	}
+	if err := mutate(ctx, s, clusterRoleBindings, "", operationOf(b.Metadata.ResourceVersion), b); err != nil {
+		return nil, err
+	}
 	if err := b.Validate(); err != nil {
 		return nil, err
 	}
-	return clusterRoleBindings.put(ctx, s.st, b, func() error { return nil }, func(old *api.ClusterRoleBinding) error {
+	return admittedPut(ctx, s, clusterRoleBindings, b, func() error { return nil }, func(old *api.ClusterRoleBinding) error {
 		if b.RoleRef != old.RoleRef {
 			return api.NewAPIError(api.ReasonInvalid, "roleRef of clusterrolebinding %q cannot change", name)
 		}
@@ -31,6 +34,9 @@ func (s *service) DeleteClusterRoleBinding(ctx context.Context, name string, rv 
 		return nil, err
 	}
 	if err := checkVersion(clusterRoleBindings.plural, name, rv, b.Metadata.ResourceVersion); err != nil {
+		return nil, err
+	}
+	if err := admitDelete(ctx, s, clusterRoleBindings, b); err != nil {
 		return nil, err
 	}
 	return b, clusterRoleBindings.remove(ctx, s.st, b, rev)

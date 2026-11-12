@@ -13,13 +13,18 @@ func (s *service) PutCertificateSigningRequest(ctx context.Context, name, userna
 	if err := checkName(name, r.Metadata.Name); err != nil {
 		return nil, err
 	}
+	if r.Metadata.ResourceVersion != "" {
+		// Refused first because no stored request is read for a write that
+		// is never accepted; a patch cannot change the version.
+		return nil, api.NewAPIError(api.ReasonInvalid, "the spec of certificatesigningrequest %q is immutable", name)
+	}
+	if err := mutate(ctx, s, certificateSigningRequests, "", api.OperationCreate, r); err != nil {
+		return nil, err
+	}
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
-	if r.Metadata.ResourceVersion != "" {
-		return nil, api.NewAPIError(api.ReasonInvalid, "the spec of certificatesigningrequest %q is immutable", name)
-	}
-	return certificateSigningRequests.put(ctx, s.st, r, func() error {
+	return admittedPut(ctx, s, certificateSigningRequests, r, func() error {
 		r.Spec.Username = username
 		r.Status = api.CertificateSigningRequestStatus{}
 		return nil
@@ -32,6 +37,9 @@ func (s *service) PutCertificateSigningRequestStatus(ctx context.Context, name s
 	if err := checkName(name, next.Metadata.Name); err != nil {
 		return nil, err
 	}
+	if err := mutate(ctx, s, certificateSigningRequests, "status", api.OperationUpdate, next); err != nil {
+		return nil, err
+	}
 	r, rev, err := certificateSigningRequests.get(ctx, s.st, name)
 	if err != nil {
 		return nil, err
@@ -42,6 +50,10 @@ func (s *service) PutCertificateSigningRequestStatus(ctx context.Context, name s
 	if err := next.ValidateStatus(); err != nil {
 		return nil, err
 	}
+	old := *r
 	r.Status = next.Status
+	if err := validate(ctx, s, certificateSigningRequests, "status", api.OperationUpdate, r, &old); err != nil {
+		return nil, err
+	}
 	return r, certificateSigningRequests.update(ctx, s.st, r, rev)
 }
