@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/lib/plugin"
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
@@ -64,16 +65,16 @@ func newRig(t *testing.T, wrap func(API) API) *rig {
 }
 
 // emptyNetwork and noStorage are plugins that add nothing, so the rig tests
-// restarts alone; this package cannot import the built-ins, which import it.
+// restarts alone.
 type emptyNetwork struct{}
 
-func (emptyNetwork) Policy(context.Context, *api.MicroVM) (*v1alpha2.NetworkPolicy, error) {
-	return &v1alpha2.NetworkPolicy{}, nil
+func (emptyNetwork) Policy(context.Context, *api.MicroVM) (*plugin.NetworkPolicy, error) {
+	return &plugin.NetworkPolicy{}, nil
 }
 
 type noStorage struct{}
 
-func (noStorage) Attach(context.Context, *api.MicroVM) ([]*v1alpha2.DiskAttachment, error) {
+func (noStorage) Attach(context.Context, *api.MicroVM) ([]plugin.DiskAttachment, error) {
 	return nil, nil
 }
 func (noStorage) Release(context.Context, string) error { return nil }

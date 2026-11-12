@@ -18,12 +18,17 @@ import (
 const (
 	ReasonInvalidSpec = "InvalidSpec"
 	ReasonRejected    = "Rejected"
-	ReasonCreated     = "Created"
-	ReasonRunning     = "Running"
-	ReasonStopped     = "Stopped"
-	ReasonFaulted     = "Faulted"
-	ReasonExitFailed  = "ExitFailed"
-	ReasonSuspended   = "Suspended"
+	// ReasonNetworkPluginUnavailable and ReasonStoragePluginUnavailable are
+	// the Ready reasons of a MicroVM not created because the plugin did not
+	// answer. The MicroVM stays Pending and the call is retried.
+	ReasonNetworkPluginUnavailable = "NetworkPluginUnavailable"
+	ReasonStoragePluginUnavailable = "StoragePluginUnavailable"
+	ReasonCreated                  = "Created"
+	ReasonRunning                  = "Running"
+	ReasonStopped                  = "Stopped"
+	ReasonFaulted                  = "Faulted"
+	ReasonExitFailed               = "ExitFailed"
+	ReasonSuspended                = "Suspended"
 )
 
 // ConditionReady is the type of the condition that names why a MicroVM is in
@@ -111,6 +116,9 @@ type outcome struct {
 	// failure, when set, is a failure the agent met and the reason for it.
 	failure    error
 	failReason string
+	// waitReason, when set, is why the MicroVM is not created yet: a plugin
+	// did not answer. waitMessage says what was called.
+	waitReason, waitMessage string
 	// clean is set when the entrypoint exited cleanly and the run strategy
 	// does not start the MicroVM again.
 	clean bool
@@ -133,6 +141,9 @@ func microvmStatus(m *api.MicroVM, o outcome, now time.Time, restarts int32) api
 	case o.runtime == nil:
 		next.Phase = api.MicroVMPending
 		ready = api.Condition{Type: ConditionReady, Status: api.ConditionFalse, Reason: ReasonCreated}
+		if o.waitReason != "" {
+			ready.Reason, ready.Message = o.waitReason, o.waitMessage
+		}
 		if m.Spec.RunStrategy == api.RunHalted {
 			next.Phase = api.MicroVMStopped
 			ready.Reason = ReasonStopped

@@ -17,6 +17,9 @@ The units of milestone M1, each created by the pull request of the issue that ow
 - **`scheduler/`**: binds unbound MicroVMs to Nodes, binary `gaon-scheduler`. Issue 5.
 - **`controllers/`**: the controllers, the node lifecycle controller among them. Issue 6.
 - **`node-agent/`**: runs bound MicroVMs on mvmd, binary `gaon-node-agent`. Issue 7.
+- **`lib/plugin/`**, a library module: the `gaon.plugin.v1alpha1` API the Node Agent calls its plugins through, with its Go client and server helpers. Issue 121.
+- **`network-default/`**: the network plugin `default`, binary `gaon-network-default`. Issue 121.
+- **`storage-local/`**: the storage plugin `local`, binary `gaon-storage-local`. Issue 121.
 - **`gaon-cli/`**: the client CLI, binary `gaon`. Issue 8.
 - **`tooling/e2e/`**: the end-to-end test of M1 on QEMU nodes. Issue 9.
 
@@ -52,6 +55,7 @@ Each executable unit has its own site: its `cmd/<binary>/main.go`, or the packag
 ## Decisions this rests on
 
 - [ADR 0001](./adr/0001-the-repository-is-a-go-workspace-of-executable-units-partitioned-by-responsibility.md): the repository is a Go workspace of executable units, each its own module, partitioned by responsibility. It records the structure taken, the candidates read, and the signs that it was wrong.
+- [ADR 0019](./adr/0019-the-node-agent-reaches-its-network-and-storage-plugins-as-separate-processes-through-a-versioned-grpc-api-on-unix-sockets.md): the Node Agent's network and storage plugins are units of their own, binaries reached through the `lib/plugin` API and not compiled into `node-agent/`.
 
 ## Open questions
 

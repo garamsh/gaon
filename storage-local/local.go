@@ -1,4 +1,7 @@
-package storage
+// Package storagelocal is the storage plugin "local": it serves the Volumes of
+// class local pinned to its Node as disks on mvmd. It is built on lib/plugin
+// and lib/api, and on mvmd's runtime API client for the disks.
+package storagelocal
 
 import (
 	"context"
@@ -10,14 +13,15 @@ import (
 	"strconv"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/garamsh/gaon/lib/api"
-	"github.com/garamsh/gaon/node-agent/internal/clock"
-	"github.com/garamsh/gaon/node-agent/internal/microvms"
+	"github.com/garamsh/gaon/lib/plugin"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
-// LocalName is the name that selects the Local plugin.
-const LocalName = "local"
+// Name is the name the plugin is served under, and --storage-plugin selects it by.
+const Name = "local"
 
 // The reasons a MicroVM fails with when Local refuses it.
 const (
@@ -50,6 +54,35 @@ type Volumes interface {
 	PutVolumeStatus(ctx context.Context, v *api.Volume) (*api.Volume, error)
 }
 
+// Disks is the part of mvmd's runtime API Local uses.
+type Disks interface {
+	CreateDisk(ctx context.Context, in *v1alpha2.CreateDiskRequest, opts ...grpc.CallOption) (*v1alpha2.CreateDiskResponse, error)
+	ListDisks(ctx context.Context, in *v1alpha2.ListDisksRequest, opts ...grpc.CallOption) (*v1alpha2.ListDisksResponse, error)
+	DeleteDisk(ctx context.Context, in *v1alpha2.DeleteDiskRequest, opts ...grpc.CallOption) (*v1alpha2.DeleteDiskResponse, error)
+}
+
+// Sleeper waits, for the loop's period.
+type Sleeper interface {
+	// Sleep waits for d or until ctx ends, and returns the context's error in
+	// that case.
+	Sleep(ctx context.Context, d time.Duration) error
+}
+
+// SystemSleeper waits on a timer.
+type SystemSleeper struct{}
+
+// Sleep waits on a timer.
+func (SystemSleeper) Sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Local serves the Volumes of class local pinned to its Node as disks on
 // mvmd, named after the Volume. Attach makes the disk of each Volume a
 // MicroVM names and writes the Volume's attachment; Run keeps each Volume's
@@ -59,13 +92,13 @@ type Local struct {
 	node    string
 	resync  time.Duration
 	volumes Volumes
-	runtime microvms.Runtime
-	clk     clock.Clock
+	runtime Disks
+	clk     Sleeper
 	log     *slog.Logger
 }
 
 // NewLocal returns a Local for the Node node, reconciling every resync.
-func NewLocal(node string, resync time.Duration, volumes Volumes, runtime microvms.Runtime, clk clock.Clock, log *slog.Logger) *Local {
+func NewLocal(node string, resync time.Duration, volumes Volumes, runtime Disks, clk Sleeper, log *slog.Logger) *Local {
 	return &Local{node: node, resync: resync, volumes: volumes, runtime: runtime, clk: clk, log: log}
 }
 
@@ -76,7 +109,7 @@ func diskID(volume string) string { return "volume-" + volume }
 // Volume that is missing, of another class, being deleted, pinned elsewhere,
 // attached to another MicroVM or whose disk cannot be made. It writes nothing
 // of the Volumes before every one has passed the checks.
-func (l *Local) Attach(ctx context.Context, m *api.MicroVM) ([]*v1alpha2.DiskAttachment, error) {
+func (l *Local) Attach(ctx context.Context, m *api.MicroVM) ([]plugin.DiskAttachment, error) {
 	var names []string
 	for _, mv := range m.Spec.Volumes {
 		if !slices.Contains(names, mv.Name) {
@@ -88,12 +121,12 @@ func (l *Local) Attach(ctx context.Context, m *api.MicroVM) ([]*v1alpha2.DiskAtt
 			return nil, err
 		}
 	}
-	disks := make([]*v1alpha2.DiskAttachment, 0, len(names))
+	disks := make([]plugin.DiskAttachment, 0, len(names))
 	for _, name := range names {
 		if err := l.bind(ctx, m, name); err != nil {
 			return nil, err
 		}
-		disks = append(disks, &v1alpha2.DiskAttachment{DiskId: diskID(name)})
+		disks = append(disks, plugin.DiskAttachment{DiskID: diskID(name)})
 	}
 	return disks, nil
 }
@@ -102,22 +135,22 @@ func (l *Local) Attach(ctx context.Context, m *api.MicroVM) ([]*v1alpha2.DiskAtt
 func (l *Local) inspect(ctx context.Context, m *api.MicroVM, name string) (*api.Volume, error) {
 	v, err := l.volumes.GetVolume(ctx, name)
 	if errors.Is(err, api.ErrNotFound) {
-		return nil, &microvms.Refusal{Reason: ReasonVolumeNotFound, Message: fmt.Sprintf("volume %q does not exist", name)}
+		return nil, &plugin.Refusal{Reason: ReasonVolumeNotFound, Message: fmt.Sprintf("volume %q does not exist", name)}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read volume %s: %w", name, err)
 	}
 	switch {
 	case v.Spec.StorageClass != api.StorageClassLocal:
-		return nil, &microvms.Refusal{Reason: ReasonUnsupportedStorageClass, Message: fmt.Sprintf("volume %q is of class %q, which the local plugin does not serve", name, v.Spec.StorageClass)}
+		return nil, &plugin.Refusal{Reason: ReasonUnsupportedStorageClass, Message: fmt.Sprintf("volume %q is of class %q, which the local plugin does not serve", name, v.Spec.StorageClass)}
 	case v.Metadata.DeletionTimestamp != nil:
-		return nil, &microvms.Refusal{Reason: ReasonVolumeNotUsable, Message: fmt.Sprintf("volume %q is being deleted", name)}
+		return nil, &plugin.Refusal{Reason: ReasonVolumeNotUsable, Message: fmt.Sprintf("volume %q is being deleted", name)}
 	case v.Spec.NodeName != l.node:
-		return nil, &microvms.Refusal{Reason: ReasonVolumeNotUsable, Message: fmt.Sprintf("volume %q is pinned to node %q, not %q", name, v.Spec.NodeName, l.node)}
+		return nil, &plugin.Refusal{Reason: ReasonVolumeNotUsable, Message: fmt.Sprintf("volume %q is pinned to node %q, not %q", name, v.Spec.NodeName, l.node)}
 	}
 	if a := v.Status.Attachment; a != nil && *a != attachmentOf(m) {
 		if err := (&api.Volume{Metadata: v.Metadata, Status: v.Status}).Attach(m.Metadata.Name, m.Spec.BindingEpoch); err != nil {
-			return nil, &microvms.Refusal{Reason: ReasonVolumeInUse, Message: err.Error()}
+			return nil, &plugin.Refusal{Reason: ReasonVolumeInUse, Message: err.Error()}
 		}
 	}
 	return v, nil
@@ -198,7 +231,7 @@ func (l *Local) fail(ctx context.Context, v *api.Volume, cause error) error {
 			l.log.Warn("write volume status Failed", "volume", v.Metadata.Name, "err", err)
 		}
 	}
-	return &microvms.Refusal{Reason: ReasonVolumeFailed, Message: fmt.Sprintf("the disk of volume %q cannot be made: %v", v.Metadata.Name, cause)}
+	return &plugin.Refusal{Reason: ReasonVolumeFailed, Message: fmt.Sprintf("the disk of volume %q cannot be made: %v", v.Metadata.Name, cause)}
 }
 
 func (l *Local) listDisks(ctx context.Context) (map[string]*v1alpha2.Disk, error) {
@@ -254,7 +287,7 @@ func (l *Local) reconcile(ctx context.Context) error {
 			err = l.sync(ctx, v, disks)
 		}
 		if err != nil {
-			var refusal *microvms.Refusal
+			var refusal *plugin.Refusal
 			if !errors.As(err, &refusal) {
 				errs = append(errs, fmt.Errorf("volume %s: %w", v.Metadata.Name, err))
 			}
