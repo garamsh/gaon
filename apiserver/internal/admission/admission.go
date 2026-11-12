@@ -108,17 +108,14 @@ func refusal(h Hook, resp *api.AdmissionResponse) error {
 }
 
 // consume returns the object the allowing response leaves, or nil where it
-// leaves the object as it was. Only a mutating webhook may patch, and not the
-// delete of an object, which has no new object to patch.
+// leaves the object as it was. Only a mutating webhook may patch; the delete of
+// an object has no new object, so a patch to it does not apply.
 func consume(resp *api.AdmissionResponse, req Request, mutating bool, check func(json.RawMessage) error) (json.RawMessage, error) {
 	if len(resp.Patch) == 0 {
 		return nil, nil
 	}
 	if !mutating {
 		return nil, errors.New("a validating webhook answered with a patch")
-	}
-	if req.Operation == api.OperationDelete {
-		return nil, errors.New("the webhook answered a DELETE with a patch, which has no object to apply to")
 	}
 	return applyPatch(req.Object, resp.Patch, check)
 }

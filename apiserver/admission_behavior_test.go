@@ -1,6 +1,7 @@
 package apiserver_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -245,6 +246,24 @@ func faults() map[string]fault {
 			})
 		}},
 		"an undecodable body": badBody(http.StatusOK, "this is not json"),
+		// The target of the redirect is a webhook that answers well, which a
+		// client that followed the redirect would take.
+		"a redirect": {serve: func(w http.ResponseWriter, r *http.Request, c call) {
+			if r.URL.Path == "/target" {
+				reply(w, patch(c, setImage))
+				return
+			}
+			http.Redirect(w, r, "/target", http.StatusTemporaryRedirect)
+		}},
+		// A valid answer behind more whitespace than the server reads.
+		"an answer over 16 MiB": {serve: func(w http.ResponseWriter, r *http.Request, c call) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(bytes.Repeat([]byte(" "), 17<<20))
+			_ = json.NewEncoder(w).Encode(api.AdmissionReview{
+				TypeMeta: api.TypeMeta{APIVersion: api.AdmissionGroupVersion, Kind: api.KindAdmissionReview},
+				Response: patch(c, setImage),
+			})
+		}},
 		"a wrong uid": {answer: func(c call) *api.AdmissionResponse {
 			resp := patch(c, setImage)
 			resp.UID = "someone-else"
