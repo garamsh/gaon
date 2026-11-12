@@ -26,7 +26,7 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 - Each section has one writer: `spec` users and controllers, `/binding` the Scheduler, `/status` the Node Agent for what runs on its node and controllers for the rest.
 - Every write is a compare-and-swap on `resourceVersion`. A change of `spec` is tracked by `generation` and `observedGeneration`.
 - Deletion sets `deletionTimestamp`; the owner of each finalizer removes it when its work is done. Ownership and garbage collection use `ownerReferences`.
-- **A finalizer's owner adds and removes it through `PUT /machines/{name}`**, by compare-and-swap, changing only its own entry of `metadata.finalizers`. The Node Agent's finalizer is `compute.gaon.garam.sh/node-agent`: it adds it before it first starts a Machine bound to its Node, and removes it once a Machine with `deletionTimestamp` set is released on mvmd. The API server removes a Machine on the write that clears its last finalizer.
+- **A finalizer's owner adds and removes it through `PUT /machines/{name}`**, by compare-and-swap, changing only its own entry of `metadata.finalizers`. The Node Agent's finalizer is `compute.gaon.garam.sh/node-agent`: it adds it before it first starts a Machine bound to its Node, and removes it once a Machine with `deletionTimestamp` set is released on mvmd. The API server removes a Machine on the write that clears its last finalizer. A Volume's finalizer is added and removed the same way through `PUT /volumes/{name}` (§Volume).
 - A `PUT` without `metadata.resourceVersion` creates the object and answers `AlreadyExists` if it exists; a `PUT` with one is the compare-and-swap. A `DELETE` carries the version in the query `resourceVersion`.
 - Enum values are PascalCase, fields camelCase, quantities in `500m` and `4Gi` form, and detail is carried in `conditions`.
 
@@ -65,10 +65,17 @@ Every transition below is decided and written by the Node Agent except the rebin
 
 ### Volume
 
-- **`spec`:** storage class, access modes, requested storage, data source, `nodeName` (node-local classes only, set by `/binding`).
-- **`status`:** `phase` (`Pending`, `Available`, `Bound`, `Released`, `Failed`), `attachment` (machine name and binding epoch), capacity.
-- **Attachment is a compare-and-swap by the Node Agent** on `status.attachment`. It succeeds only if `attachment` is empty or its epoch is lower than the Machine's current epoch.
-- A node-local volume pins its Machine to that node; moving between nodes is out of the first scope.
+A Volume is a disk a Machine names in its `spec.volumes`. Its semantics follow Kubernetes' PersistentVolume and StorageClass, without a claim, and the rules below are gaon's own ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)).
+
+- **`spec`, written by users at creation:** storage class (required), access modes, requested storage, data source, and `nodeName` (node-local classes only, set by `/binding`).
+- **`spec` is immutable after creation.** A `PUT` that changes any field of it, `nodeName` included, is `Invalid`, and so is a create that carries a `nodeName`. Resizing is not designed.
+- **`status`, written by the Node Agent of the Volume's Node:** `phase` (`Pending`, `Available`, `Bound`, `Released`, `Failed`), `attachment` (machine name and binding epoch), capacity. The API server starts a Volume `Pending`.
+  - `Available` with `capacity` once the disk exists; `Bound`, with the attachment, while a Machine has it attached; `Released` once no Machine holds it, keeping the last attachment; `Failed` when the disk cannot be made.
+- **Attachment is a compare-and-swap by the Node Agent** on `status.attachment`. It succeeds only if the Volume is not being deleted and `attachment` is empty or its epoch is lower than the Machine's current epoch.
+- **Class `local`** is a disk of `spec.storage` bytes on one Node, which that Node's agent creates through mvmd and formats ext4. Its `accessModes` is exactly `ReadWriteOnce`, `storage` is positive and `dataSource` is empty; any other value is `Invalid`. A Volume of another class waits `Pending` for a plugin that serves it.
+- **Pinning.** `/binding` reads each Volume the Machine uses and, in the same write, sets `spec.nodeName` of a `local` Volume that has none to the Machine's Node and adds the finalizer `compute.gaon.garam.sh/node-agent` to it. A binding to a Node other than a used Volume's `nodeName`, or of a Machine that uses a Volume that is being deleted, is `Conflict`, and of a Machine that names a Volume that does not exist `Invalid`; nothing is written. A Machine whose `local` Volume is pinned to an expired Node is not rebound elsewhere; moving between nodes is out of the first scope.
+- **Deletion.** `DELETE` sets `deletionTimestamp`. The Node Agent of the Volume's Node removes its finalizer through `PUT /volumes/{name}`, changing only its own entry, once no Machine has the Volume attached and the disk is deleted. A Volume with no `nodeName` has no finalizer, and `DELETE` removes it at once.
+- The types are in `lib/api/`: `Volume`, `VolumeList`, `VolumeSpec` and `VolumeStatus`.
 
 ### Node
 
@@ -136,13 +143,18 @@ Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where
 | Path | Writer | Use |
 |---|---|---|
 | `PUT /machines/{name}` | users, controllers; the Node Agent for its finalizer only | create and change `spec`; add or remove a finalizer |
-| `POST /machines/{name}/binding` | Scheduler | bind and set the epoch |
+| `POST /machines/{name}/binding` | Scheduler | bind and set the epoch; pin the Machine's unpinned `local` Volumes to the Node (§Volume) |
 | `PUT /machines/{name}/status` | Node Agent, controllers | report status, epoch checked |
 | `DELETE /machines/{name}` | users | set `deletionTimestamp`; the Node Agent removes its finalizer after release |
 | `GET /machines` | all | list, with the `resourceVersion` to watch from |
 | `GET /machines/{name}` | all | read one Machine |
 | `GET /machines?watch=true` | all | subscribe to changes |
+| `PUT /volumes/{name}` | users; the Node Agent for its finalizer only | create a Volume; add or remove a finalizer; `spec` is immutable after creation |
 | `PUT /volumes/{name}/status` | Node Agent, controllers | attachment and volume status |
+| `DELETE /volumes/{name}` | users | set `deletionTimestamp`; the Node Agent removes its finalizer after the disk is deleted |
+| `GET /volumes` | all | list, with the `resourceVersion` to watch from |
+| `GET /volumes/{name}` | all | read one Volume |
+| `GET /volumes?watch=true` | all | subscribe to changes |
 | `PUT /nodes/{name}` | users, Node Agent | users create a Node and admit it; the Node Agent only creates it |
 | `PUT /nodes/{name}/status` | Node Agent, controllers | report state, capacity, addresses and conditions |
 | `GET /nodes` | all | list, with the `resourceVersion` to watch from |
@@ -211,10 +223,10 @@ The API server's `--authorization-mode` is `AlwaysAllow`, the default, which all
   - create its own Node, read it and write its `status`;
   - read and write its own Lease;
   - read Machines; write the `status` of a Machine whose `spec.nodeName` is that Node, and its own finalizer through `PUT /machines/{name}` on such a Machine (the API server checks that only the finalizer entry changed, invariant 3);
-  - write `status.attachment` of a Volume a Machine bound to it uses;
+  - read Volumes, for the reason it reads Machines; write the `status` of a Volume whose `spec.nodeName` is that Node, or that a Machine bound to it uses; and its own finalizer through `PUT /volumes/{name}` on a Volume whose `spec.nodeName` is that Node (the API server checks that only the finalizer entry changed, invariant 3);
   - create CertificateSigningRequests and read one it created.
 
-  Reads of Machines are open to a Node because a list cannot be filtered by Node.
+  Reads of Machines and Volumes are open to a Node because a list cannot be filtered by Node.
 - **Escalation.** A caller creates or updates a ClusterRole only if it holds every permission the role grants, and a ClusterRoleBinding only if it holds every permission of the role it names. The Node authorizer's permissions do not count.
 
 ### RBAC
@@ -227,10 +239,11 @@ The group `rbac.gaon.garam.sh/v1alpha1` has the root `/apis/rbac.gaon.garam.sh/v
 
   | Role (group bound) | Rules |
   |---|---|
-  | `gaon:scheduler` (`gaon:schedulers`) | `machines`, `nodes`: `get`, `list`, `watch`; `machines/binding`: `create`; `machines/status`: `update` |
+  | `gaon:scheduler` (`gaon:schedulers`) | `machines`, `nodes`, `volumes`: `get`, `list`, `watch`; `machines/binding`: `create`; `machines/status`: `update` |
   | `gaon:controllers` (`gaon:controllers`) | `machines`, `nodes`, `leases`, `certificatesigningrequests`: `get`, `list`, `watch`; `machines`: `create`, `update`; `machines/status`, `nodes/status`, `volumes/status`, `certificatesigningrequests/status`: `update` |
   | `gaon:admin` (`gaon:admins`) | `*` on `*` for every API group |
 
+- **An existing cluster** keeps the roles it has, so its `gaon:scheduler` lacks `volumes` and the scheduler's list of Volumes is `Forbidden` until an administrator adds the rule to the role, or deletes the role so the next API server start creates it ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)).
 - The types are in `lib/api/`: `ClusterRole`, `PolicyRule`, `ClusterRoleBinding`, `RoleRef` and `Subject`.
 
 ### CustomResourceDefinition
@@ -276,7 +289,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required.
 - Each line of the stream is one JSON event with a `type` and an `object`.
 - Event types, PascalCase as every enum is:
-  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Node, a Lease, a CertificateSigningRequest, a ClusterRole, a ClusterRoleBinding, a CustomResourceDefinition, a MutatingWebhookConfiguration, a ValidatingWebhookConfiguration or an object of a registered kind) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
+  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Volume, a Node, a Lease, a CertificateSigningRequest, a ClusterRole, a ClusterRoleBinding, a CustomResourceDefinition, a MutatingWebhookConfiguration, a ValidatingWebhookConfiguration or an object of a registered kind) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
   - `Error` carries the error object, and is the last event of its stream.
 - The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422, `Expired` 410, `Unauthorized` 401, `Forbidden` 403 and `InternalError` 500. `Unauthorized` is a request with no client certificate and a missing or invalid bearer token; `Forbidden` is a valid token on any request other than creating a CertificateSigningRequest or reading one it created, and, in the `RBAC` mode, a request by certificate that neither the Node authorizer nor a bound role allows (§Authorization), or a validating or mutating webhook refuses (§Admission webhooks); `InternalError` is a write refused because a call to a webhook whose `failurePolicy` is `Fail` failed.
 - An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
@@ -289,6 +302,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - Authorization, the `rbac` group, the Node authorizer and the bootstrap roles: [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md), which amends ADR 0005, Decision 4.
 - Resource definitions, custom resources, their schema, the deletion order and the client: [ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md), which uses ADR 0008's rules for authorization.
 - Webhook configurations, `AdmissionReview`, the order of a write and the failure of a call: [ADR 0010](./adr/0010-a-user-registers-admission-webhooks-with-webhook-configurations-the-api-server-calls-them-on-every-accepted-write.md), which places the webhooks after ADR 0008's authorization and around ADR 0009's schema.
+- Volume creation, the `local` class, pinning at the binding, deletion and the Volume's writers: [ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md), which adds `volumes` to ADR 0008's `gaon:scheduler` role and widens its Node authorizer.
 - Bearer-token access and the CertificateSigningRequest: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), which amends ADR 0005.
 - How `resourceVersion`, compare-and-swap and watch map onto the Store: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
 - The Lease validity is measured by the observer because a renew time written by one machine cannot be compared with another machine's clock, which can be stepped.

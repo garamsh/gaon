@@ -135,6 +135,39 @@ func (c *Client) WatchLeases(ctx context.Context, rv ResourceVersion) (*Watch[Le
 	return watch[Lease](ctx, c, "/leases", KindLease, rv)
 }
 
+// PutVolume creates v, or changes it when v carries the ResourceVersion it
+// was read at (PUT /volumes/{name}). A Volume's spec is immutable after
+// creation, so a change is for its finalizers.
+func (c *Client) PutVolume(ctx context.Context, v *Volume) (*Volume, error) {
+	return put(ctx, c, "/volumes/"+url.PathEscape(v.Metadata.Name), v)
+}
+
+// DeleteVolume sets the deletionTimestamp of a Volume, or removes one with no
+// finalizer, if it is still at version rv (DELETE /volumes/{name}).
+func (c *Client) DeleteVolume(ctx context.Context, name string, rv ResourceVersion) (*Volume, error) {
+	if rv == "" {
+		return nil, errors.New("delete volume: resource version is empty")
+	}
+	return call[Volume](ctx, c, http.MethodDelete, "/volumes/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetVolume returns the named Volume (GET /volumes/{name}).
+func (c *Client) GetVolume(ctx context.Context, name string) (*Volume, error) {
+	return call[Volume](ctx, c, http.MethodGet, "/volumes/"+url.PathEscape(name), nil, nil)
+}
+
+// ListVolumes returns every Volume and the version to watch from
+// (GET /volumes).
+func (c *Client) ListVolumes(ctx context.Context) (*VolumeList, error) {
+	return call[VolumeList](ctx, c, http.MethodGet, "/volumes", nil, nil)
+}
+
+// WatchVolumes streams the changes made after version rv
+// (GET /volumes?watch=true), as WatchMachines does.
+func (c *Client) WatchVolumes(ctx context.Context, rv ResourceVersion) (*Watch[Volume], error) {
+	return watch[Volume](ctx, c, "/volumes", KindVolume, rv)
+}
+
 // PutVolumeStatus writes v's status (PUT /volumes/{name}/status).
 func (c *Client) PutVolumeStatus(ctx context.Context, v *Volume) (*Volume, error) {
 	return put(ctx, c, "/volumes/"+url.PathEscape(v.Metadata.Name)+"/status", v)
