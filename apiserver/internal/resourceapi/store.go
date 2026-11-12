@@ -31,6 +31,14 @@ type Event struct {
 	Err   error
 }
 
+// Write is one write of a Transact: Value replaces what is under Key if it is
+// at Revision. A nil Value writes nothing and only holds the condition.
+type Write struct {
+	Key      string
+	Value    []byte
+	Revision int64
+}
+
 // Store holds the serialised objects, each at the revision it was last
 // modified at. Every write is conditioned on a revision.
 type Store interface {
@@ -47,6 +55,11 @@ type Store interface {
 	// with the revision of the deletion. It returns ErrNotFound or ErrStale
 	// otherwise.
 	Delete(ctx context.Context, key string, revision int64) (Entry, error)
+	// Transact makes every write of writes in one step, if each key is at the
+	// revision its write names, and returns the revision they all got. It
+	// writes nothing and returns ErrStale if any key is at another revision,
+	// or is absent.
+	Transact(ctx context.Context, writes []Write) (int64, error)
 	// Watch sends the changes under prefix made after revision, until ctx ends
 	// or an event with Err set closes the channel. ErrCompacted means revision
 	// is older than the Store keeps.

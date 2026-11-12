@@ -1,8 +1,6 @@
 package apiserver_test
 
 import (
-	"encoding/json"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,21 +9,25 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// seedVolume stores a Volume the way the controller that creates Volumes
-// would. The contract has no create path for one, so the test writes etcd.
-func (e *env) seedVolume(t *testing.T, name string) *api.Volume {
-	t.Helper()
-	v := &api.Volume{
+// volume is a valid local Volume of 1Gi.
+func volume(name string) *api.Volume {
+	return &api.Volume{
 		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindVolume},
 		Metadata: api.ObjectMeta{Name: name},
-		Status:   api.VolumeStatus{Phase: api.VolumeAvailable},
+		Spec: api.VolumeSpec{
+			StorageClass: api.StorageClassLocal,
+			AccessModes:  []string{api.AccessReadWriteOnce},
+			Storage:      "1Gi",
+		},
 	}
-	raw, err := json.Marshal(v)
+}
+
+// createVolume creates a Volume and fails the test if that does not work.
+func (e *env) createVolume(t *testing.T, name string) *api.Volume {
+	t.Helper()
+	created, err := e.api.PutVolume(ctx(t), volume(name))
 	require.NoError(t, err)
-	resp, err := e.etcd.Put(ctx(t), "/registry/volumes/"+name, string(raw))
-	require.NoError(t, err)
-	v.Metadata.ResourceVersion = api.ResourceVersion(strconv.FormatInt(resp.Header.Revision, 10))
-	return v
+	return created
 }
 
 // boundMachine creates a Machine bound to a node at the given epoch.
@@ -53,7 +55,7 @@ func TestPutVolumeStatus_AbsentVolumeIsNotFound(t *testing.T) {
 
 func TestPutVolumeStatus_IsCompareAndSwapAndValidated(t *testing.T) {
 	e := newEnv(t)
-	v := e.seedVolume(t, "v1")
+	v := e.createVolume(t, "v1")
 
 	bogus := *v
 	bogus.Status.Phase = "Soggy"
@@ -76,7 +78,7 @@ func TestPutVolumeStatus_IsCompareAndSwapAndValidated(t *testing.T) {
 func TestPutVolumeStatus_AttachesAtTheMachinesEpoch(t *testing.T) {
 	e := newEnv(t)
 	e.boundMachine(t, "m1", 1)
-	v := e.seedVolume(t, "v1")
+	v := e.createVolume(t, "v1")
 
 	got, err := e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 1))
 	require.NoError(t, err)
@@ -87,7 +89,7 @@ func TestPutVolumeStatus_AttachesAtTheMachinesEpoch(t *testing.T) {
 func TestPutVolumeStatus_AttachmentNamesCurrentEpochOfAnExistingMachine(t *testing.T) {
 	e := newEnv(t)
 	e.boundMachine(t, "m1", 2)
-	v := e.seedVolume(t, "v1")
+	v := e.createVolume(t, "v1")
 
 	_, err := e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 1))
 	assert.ErrorIs(t, err, api.ErrInvalid, "an epoch that is not the machine's current one")
@@ -101,7 +103,7 @@ func TestPutVolumeStatus_AttachedAtAnEqualOrHigherEpochIsAConflict(t *testing.T)
 	e := newEnv(t)
 	e.boundMachine(t, "m1", 1)
 	e.boundMachine(t, "m2", 1)
-	v := e.seedVolume(t, "v1")
+	v := e.createVolume(t, "v1")
 	held, err := e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 1))
 	require.NoError(t, err)
 
@@ -128,7 +130,7 @@ func mustGet(t *testing.T, e *env, name string) *api.Machine {
 func TestPutVolumeStatus_UnchangedAttachmentIsNotReattached(t *testing.T) {
 	e := newEnv(t)
 	e.boundMachine(t, "m1", 1)
-	v := e.seedVolume(t, "v1")
+	v := e.createVolume(t, "v1")
 	held, err := e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 1))
 	require.NoError(t, err)
 

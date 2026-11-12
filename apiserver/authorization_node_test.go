@@ -32,15 +32,19 @@ func newNodeFixture(t *testing.T) *nodeFixture {
 		_, err := f.admin.PutNode(ctx(t), node(n))
 		require.NoError(t, err)
 	}
-	e := &env{etcd: c.etcd}
-	f.v1 = e.seedVolume(t, "v1")
-	f.v2 = e.seedVolume(t, "v2")
+	var err error
+	f.v1, err = f.admin.PutVolume(ctx(t), volume("v1"))
+	require.NoError(t, err)
+	f.v2, err = f.admin.PutVolume(ctx(t), volume("v2"))
+	require.NoError(t, err)
 	m := machine("m1")
 	m.Spec.Volumes = []api.MachineVolume{{Name: "v1", MountPath: "/data"}}
-	m, err := f.admin.PutMachine(ctx(t), m)
+	m, err = f.admin.PutMachine(ctx(t), m)
 	require.NoError(t, err)
 	_, err = f.admin.BindMachine(ctx(t), "m1", api.Binding{ResourceVersion: m.Metadata.ResourceVersion, NodeName: "node-1", BindingEpoch: 1})
 	require.NoError(t, err)
+	f.v1, err = f.admin.GetVolume(ctx(t), "v1")
+	require.NoError(t, err, "the binding pinned v1 to node-1")
 	return f
 }
 

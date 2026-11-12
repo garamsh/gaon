@@ -35,6 +35,15 @@ func discard[T any](o *T, err error) error { return err }
 
 const holdFinalizer = "example.com/hold"
 
+// webhookResources narrows the webhooks of a write that makes more than one
+// call to the resources named here, so a refusal can come only from the call
+// the row is about. A write not named here is matched on every resource.
+var webhookResources = map[string][]string{
+	// The binding is also a write of the Machine; only the Volume's own
+	// update is sent to these webhooks.
+	"volume pin at a binding": {"volumes"},
+}
+
 func writePaths() []writePath {
 	return []writePath{
 		{"machine create", func(t *testing.T, e *env) (func() error, func() any) {
@@ -107,17 +116,44 @@ func writePaths() []writePath {
 				stored(t, func() (*api.Lease, error) { return e.api.GetLease(ctx(t), "n1") })
 		}},
 
+		{"volume create", func(t *testing.T, e *env) (func() error, func() any) {
+			return func() error { return discard(e.api.PutVolume(ctx(t), volume("v1"))) },
+				stored(t, func() (*api.Volume, error) { return e.api.GetVolume(ctx(t), "v1") })
+		}},
+		{"volume update", func(t *testing.T, e *env) (func() error, func() any) {
+			v := e.createVolume(t, "v1")
+			v.Metadata.Finalizers = []string{holdFinalizer}
+			return func() error { return discard(e.api.PutVolume(ctx(t), v)) },
+				stored(t, func() (*api.Volume, error) { return e.api.GetVolume(ctx(t), "v1") })
+		}},
+		{"volume delete", func(t *testing.T, e *env) (func() error, func() any) {
+			v := e.createVolume(t, "v1")
+			return func() error { return discard(e.api.DeleteVolume(ctx(t), "v1", v.Metadata.ResourceVersion)) },
+				stored(t, func() (*api.Volume, error) { return e.api.GetVolume(ctx(t), "v1") })
+		}},
+		{"volume finalizer removal", func(t *testing.T, e *env) (func() error, func() any) {
+			held := volume("v1")
+			held.Metadata.Finalizers = []string{holdFinalizer}
+			v, err := e.api.PutVolume(ctx(t), held)
+			require.NoError(t, err)
+			deleting, err := e.api.DeleteVolume(ctx(t), "v1", v.Metadata.ResourceVersion)
+			require.NoError(t, err)
+			require.NotNil(t, deleting.Metadata.DeletionTimestamp)
+			deleting.Metadata.Finalizers = nil
+			return func() error { return discard(e.api.PutVolume(ctx(t), deleting)) },
+				stored(t, func() (*api.Volume, error) { return e.api.GetVolume(ctx(t), "v1") })
+		}},
+		{"volume pin at a binding", func(t *testing.T, e *env) (func() error, func() any) {
+			e.createVolume(t, "v1")
+			m := e.machineUsing(t, "m1", "v1")
+			return func() error { return discard(e.api.BindMachine(ctx(t), "m1", binding(m, "n1", 1))) },
+				stored(t, func() (*api.Volume, error) { return e.api.GetVolume(ctx(t), "v1") })
+		}},
 		{"volume status", func(t *testing.T, e *env) (func() error, func() any) {
-			v := e.seedVolume(t, "v1")
+			v := e.createVolume(t, "v1")
 			e.boundMachine(t, "m1", 1)
 			return func() error { return discard(e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 1))) },
-				// The contract serves no read of a Volume, so the test reads etcd.
-				func() any {
-					resp, err := e.etcd.Get(ctx(t), "/registry/volumes/v1")
-					require.NoError(t, err)
-					require.Len(t, resp.Kvs, 1)
-					return string(resp.Kvs[0].Value)
-				}
+				stored(t, func() (*api.Volume, error) { return e.api.GetVolume(ctx(t), "v1") })
 		}},
 
 		{"certificate signing request create", func(t *testing.T, e *env) (func() error, func() any) {
@@ -288,8 +324,12 @@ func TestAdmission_EveryWriteIsSentToBothStages(t *testing.T) {
 					}
 					return allow(c)
 				}
-				e.mutating(t, "mutate", w.hook("mutate.hooks.example", mutatingPath, "*", "*/*"))
-				e.validating(t, "validate", w.hook("validate.hooks.example", validatingPath, "*", "*/*"))
+				resources := []string{"*", "*/*"}
+				if only, ok := webhookResources[wp.name]; ok {
+					resources = only
+				}
+				e.mutating(t, "mutate", w.hook("mutate.hooks.example", mutatingPath, resources...))
+				e.validating(t, "validate", w.hook("validate.hooks.example", validatingPath, resources...))
 
 				before := held()
 				err := write()

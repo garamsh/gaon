@@ -3,6 +3,7 @@ package resourceapi
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/garamsh/gaon/lib/api"
 )
@@ -52,4 +53,102 @@ func (s *service) checkAttachment(ctx context.Context, v *api.Volume, a *api.Att
 		return api.NewAPIError(api.ReasonInvalid, "attachment epoch is %d, want the machine's current %d", a.BindingEpoch, m.Spec.BindingEpoch)
 	}
 	return v.Attach(a.MachineName, a.BindingEpoch)
+}
+
+// PutVolume creates v with phase Pending, or changes the finalizers of the
+// stored Volume v was read at. Neither takes the status or the node from v: a
+// Volume's spec is immutable, and only the binding of a Machine pins it. An
+// update that clears the last finalizer of a Volume being deleted removes it.
+func (s *service) PutVolume(ctx context.Context, name string, v *api.Volume) (*api.Volume, error) {
+	if err := checkName(name, v.Metadata.Name); err != nil {
+		return nil, err
+	}
+	if err := mutate(ctx, s, volumes, "", operationOf(v.Metadata.ResourceVersion), v); err != nil {
+		return nil, err
+	}
+	if v.Metadata.ResourceVersion != "" {
+		return s.updateVolume(ctx, v)
+	}
+	if err := v.ValidateCreate(); err != nil {
+		return nil, err
+	}
+	v.Metadata.Generation, v.Metadata.DeletionTimestamp = 1, nil
+	v.Status = api.VolumeStatus{Phase: api.VolumePending}
+	if err := validate(ctx, s, volumes, "", api.OperationCreate, v, nil); err != nil {
+		return nil, err
+	}
+	return v, volumes.create(ctx, s.st, v)
+}
+
+func (s *service) updateVolume(ctx context.Context, v *api.Volume) (*api.Volume, error) {
+	old, rev, err := volumes.get(ctx, s.st, v.Metadata.Name)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkVersion(volumes.plural, v.Metadata.Name, v.Metadata.ResourceVersion, old.Metadata.ResourceVersion); err != nil {
+		return nil, err
+	}
+	if err := v.ValidateUpdate(old); err != nil {
+		return nil, err
+	}
+	deleting := old.Metadata.DeletionTimestamp != nil
+	if deleting && slices.ContainsFunc(v.Metadata.Finalizers, func(f string) bool { return !slices.Contains(old.Metadata.Finalizers, f) }) {
+		return nil, api.NewAPIError(api.ReasonInvalid, "a finalizer cannot be added to a volume being deleted")
+	}
+	if deleting && len(v.Metadata.Finalizers) == 0 {
+		if err := validate(ctx, s, volumes, "", api.OperationUpdate, v, old); err != nil {
+			return nil, err
+		}
+		old.Metadata.Finalizers = nil
+		return old, volumes.remove(ctx, s.st, old, rev)
+	}
+	v.Status = old.Status
+	v.Metadata.DeletionTimestamp = old.Metadata.DeletionTimestamp
+	v.Metadata.Generation = old.Metadata.Generation
+	if err := validate(ctx, s, volumes, "", api.OperationUpdate, v, old); err != nil {
+		return nil, err
+	}
+	return v, volumes.update(ctx, s.st, v, rev)
+}
+
+// DeleteVolume sets the deletion time of the Volume if rv is its current
+// version, and removes it when it holds no finalizer. A Volume already being
+// deleted is returned as it is.
+func (s *service) DeleteVolume(ctx context.Context, name string, rv api.ResourceVersion) (*api.Volume, error) {
+	v, rev, err := volumes.get(ctx, s.st, name)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkVersion(volumes.plural, name, rv, v.Metadata.ResourceVersion); err != nil {
+		return nil, err
+	}
+	if v.Metadata.DeletionTimestamp != nil {
+		return v, nil
+	}
+	if err := admitDelete(ctx, s, volumes, v); err != nil {
+		return nil, err
+	}
+	now := s.now().UTC()
+	v.Metadata.DeletionTimestamp = &now
+	if len(v.Metadata.Finalizers) > 0 {
+		return v, volumes.update(ctx, s.st, v, rev)
+	}
+	return v, volumes.remove(ctx, s.st, v, rev)
+}
+
+func (s *service) GetVolume(ctx context.Context, name string) (*api.Volume, error) {
+	v, _, err := volumes.get(ctx, s.st, name)
+	return v, err
+}
+
+func (s *service) ListVolumes(ctx context.Context) (*api.VolumeList, error) {
+	items, rv, err := volumes.list(ctx, s.st)
+	if err != nil {
+		return nil, err
+	}
+	return &api.VolumeList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindVolumeList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
+}
+
+func (s *service) WatchVolumes(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
+	return volumes.watch(ctx, s.st, rv)
 }

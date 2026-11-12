@@ -110,6 +110,11 @@ func mutate[T any](ctx context.Context, s *service, k kind[T], sub string, op ap
 			return err
 		}
 	}
+	return mutateAgainst(ctx, s, k, sub, op, obj, old)
+}
+
+// mutateAgainst is mutate for a caller that holds the stored object old.
+func mutateAgainst[T any](ctx context.Context, s *service, k kind[T], sub string, op api.Operation, obj, old *T) error {
 	req, err := request(ctx, k, sub, op, obj, old)
 	if err != nil {
 		return err

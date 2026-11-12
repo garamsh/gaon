@@ -40,7 +40,7 @@ var bootstrapRoles = []struct {
 	rules       []api.PolicyRule
 }{
 	{RoleScheduler, GroupSchedulers, []api.PolicyRule{
-		{APIGroups: compute, Resources: []string{"machines", "nodes"}, Verbs: readVerbs},
+		{APIGroups: compute, Resources: []string{"machines", "nodes", "volumes"}, Verbs: readVerbs},
 		{APIGroups: compute, Resources: []string{"machines/binding"}, Verbs: []api.Verb{api.VerbCreate}},
 		{APIGroups: compute, Resources: []string{"machines/status"}, Verbs: updateVerb},
 	}},

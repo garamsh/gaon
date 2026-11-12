@@ -22,7 +22,12 @@ type Service interface {
 	ListMachines(ctx context.Context) (*api.MachineList, error)
 	WatchMachines(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
 
+	PutVolume(ctx context.Context, name string, v *api.Volume) (*api.Volume, error)
 	PutVolumeStatus(ctx context.Context, name string, v *api.Volume) (*api.Volume, error)
+	DeleteVolume(ctx context.Context, name string, rv api.ResourceVersion) (*api.Volume, error)
+	GetVolume(ctx context.Context, name string) (*api.Volume, error)
+	ListVolumes(ctx context.Context) (*api.VolumeList, error)
+	WatchVolumes(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
 
 	PutNode(ctx context.Context, name string, n *api.Node) (*api.Node, error)
 	PutNodeStatus(ctx context.Context, name string, n *api.Node) (*api.Node, error)

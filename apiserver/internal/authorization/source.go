@@ -13,6 +13,7 @@ type Source interface {
 	GetNode(ctx context.Context, name string) (*api.Node, error)
 	GetMachine(ctx context.Context, name string) (*api.Machine, error)
 	ListMachines(ctx context.Context) (*api.MachineList, error)
+	GetVolume(ctx context.Context, name string) (*api.Volume, error)
 	GetCertificateSigningRequest(ctx context.Context, name string) (*api.CertificateSigningRequest, error)
 	GetClusterRole(ctx context.Context, name string) (*api.ClusterRole, error)
 	ListClusterRoleBindings(ctx context.Context) (*api.ClusterRoleBindingList, error)
