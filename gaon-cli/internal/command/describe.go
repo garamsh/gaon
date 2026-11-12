@@ -85,10 +85,13 @@ func volumeMounts(vs []api.MicroVMVolume) []string {
 	return out
 }
 
-func ports(ps []int32) []string {
+func ports(ps []api.MicroVMPort) []string {
 	out := make([]string, len(ps))
 	for i, p := range ps {
-		out[i] = strconv.FormatInt(int64(p), 10)
+		out[i] = strconv.FormatInt(int64(p.Port), 10) + "/" + string(p.Protocol)
+		if p.Name != "" {
+			out[i] = p.Name + ":" + out[i]
+		}
 	}
 	return out
 }

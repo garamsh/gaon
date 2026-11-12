@@ -10,7 +10,7 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 
 - **`MicroVM` is the microVM.** A physical machine is the core resource `Node`. A machine naru has discovered but gaon has not admitted is a `Node` whose state is `Discovered`. There is no Host resource. The `Node` schema is in §Node.
 - **API group suffix `gaon.garam.sh`:** `compute.gaon.garam.sh/v1alpha1` holds the core resources named here, `rbac.gaon.garam.sh/v1alpha1` the roles and bindings, `apps.gaon.garam.sh` the default extensions, `apiextensions.gaon.garam.sh` the resource definitions, `admissionregistration.gaon.garam.sh` the webhook configurations, `admission.gaon.garam.sh` the `AdmissionReview` a webhook receives (§Admission webhooks), `coordination.gaon.garam.sh` the `Lease` a controller holds for leader election (§Metadata, §Coordination Lease and Event).
-- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Event, MicroVM, Volume, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions (`CustomResourceDefinition`, in `apiextensions.gaon.garam.sh`, §CustomResourceDefinition), webhook configurations (`MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration`, in `admissionregistration.gaon.garam.sh`, §Admission webhooks), the Driver interface. MicroVMSet, MicroVMDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no MicroVM runs before its network policy is applied, and the default network blocks all outside traffic.
+- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Event, MicroVM, Volume, Secret, ConfigMap, ServiceAccount, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions (`CustomResourceDefinition`, in `apiextensions.gaon.garam.sh`, §CustomResourceDefinition), webhook configurations (`MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration`, in `admissionregistration.gaon.garam.sh`, §Admission webhooks), the Driver interface. MicroVMSet, MicroVMDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no MicroVM runs before its network policy is applied, and the default network blocks all outside traffic.
 
 ### Transport
 
@@ -46,10 +46,19 @@ Every kind, the custom resources included, has the same `metadata` ([[ADR 0018](
 
 ### MicroVM
 
-- **`spec`:** image, kernel (the name of a kernel the node offers, empty for the node's default; the node agent fails a MicroVM naming one the node does not offer, with reason `Rejected`), resources (requests and limits for cpu and memory), root disk size, volumes and mounts, networks, ports, `runStrategy`, `idleTimeoutSeconds`, `nodeSelector`, `requiredCapabilities`.
+- **`spec`:** image, kernel (the name of a kernel the node offers, empty for the node's default; the node agent fails a MicroVM naming one the node does not offer, with reason `Rejected`), resources (requests and limits for cpu and memory), root disk size, volumes and mounts, networks, ports, `runStrategy`, `idleTimeoutSeconds`, `nodeSelector`, `requiredCapabilities`, and the fields below, see [ADR 0020](./adr/0020-a-microvm-takes-a-process-ports-files-and-probes-secret-configmap-and-serviceaccount-are-kinds-and-a-token-request-returns-a-jwt-bound-to-a-microvm.md). Each is omitted when empty, so a MicroVM without them reads and writes as before.
+  - **`ports`** is a list of `{name, port, protocol}`. `port` is 1 to 65535 and `protocol` is `TCP` or `UDP`, required. `name` is optional, a DNS label of at most 15 characters, and unique; a port and protocol pair is unique. A MicroVM stored with numeric ports does not decode: the object is deleted and created again.
+  - **`command` and `args`** replace the image's entrypoint and default arguments. The first element of `command` is non-empty. There is no `$(VAR)` expansion.
+  - **`env`** is a list of `{name, value}` or `{name, valueFrom}`. A name has letters, digits, `-`, `_` and `.`, does not start with a digit, and is unique. `valueFrom` holds exactly one of `secretKeyRef` and `configMapKeyRef`, each `{name, key}`.
+  - **`user`** is `user` or `user:group`, each non-empty. **`workingDir`** is an absolute path.
+  - **`files`** is a list of `{path, mode, owner, content}` or `{path, mode, owner, valueFrom}`, `valueFrom` as in `env`. A path is absolute, clean, not `/`, and unique. `mode` is 0 to 0777, default 0644. `owner` is `{uid, gid}`, each 0 or more, default the MicroVM's `user`. `content` and `valueFrom` are exclusive. At most 64 files and 1 MiB of content: the API server checks the inline content, and the Node Agent the resolved content, refusing a MicroVM over the bound with a reason on its status.
+  - **References resolve when the MicroVM starts** and are not updated while it runs.
+  - **`readinessProbe` and `livenessProbe`** each have exactly one of `exec` (`command`), `tcpSocket` (`port`) and `httpGet` (`path` empty or beginning with `/`, `port`), and `initialDelaySeconds`, `periodSeconds`, `timeoutSeconds`, `successThreshold` and `failureThreshold`, none negative. A zero field takes the default: 0, 10, 1, 1 and 3. A liveness probe's `successThreshold` is 0 or 1. A `port` is a name `spec.ports` declares, or a number 1 to 65535. mvmd runs the probes in the guest; readiness sets the `Ready` condition and liveness failure restarts the MicroVM.
+  - **`terminationGracePeriodSeconds`** is 0 or more, and 30 when absent.
+  - **`serviceAccountName`** is a lowercase DNS subdomain, the ServiceAccount whose token the MicroVM may be given (§Secret, ConfigMap and ServiceAccount).
 - **`runStrategy`:** `Always`, `RerunOnFailure`, `Once`, `OnDemand`, `Halted`.
 - **Set by `/binding` only:** `spec.nodeName` and `spec.bindingEpoch`. The first binding sets the epoch to 1, and each binding sets it to the current epoch plus one.
-- **Mutable:** `runStrategy`, `idleTimeoutSeconds`, `resources` and `volumes`, as far as the Driver supports a change while running. Everything else is replaced by a new MicroVM; MicroVMDeployment does rolling updates.
+- **Mutable:** `runStrategy`, `idleTimeoutSeconds`, `resources` and `volumes`, as far as the Driver supports a change while running. Everything else, every field of the list above included, is replaced by a new MicroVM; MicroVMDeployment does rolling updates.
 - **`status`:** `phase` (`Pending`, `Running`, `Suspended`, `Succeeded`, `Failed`, `Stopped`), `bindingEpoch`, `observedGeneration`, `conditions`, `restartCount`, `addresses`, `lastActiveTime`, and the exit code and time of the last exit.
 - **A status whose `bindingEpoch` differs from `spec.bindingEpoch` is void** and read as `Pending`, so no one rewrites a dead node's status.
 
@@ -144,6 +153,17 @@ A request for a client certificate from the cluster CA, used by a Node Agent to 
 - **`Lease` of `coordination.gaon.garam.sh/v1alpha1`** is a lock any controller can hold, for leader election, with the root `/apis/coordination.gaon.garam.sh/v1alpha1`. It is a different kind from the Node's `Lease` (§Lease and fencing). `spec` has `holder` (empty for a released lease), `renewTime` and `durationSeconds`, positive. A candidate takes or renews it by compare-and-swap on the `resourceVersion` it read, and expiry is measured by the observer as for the Node's Lease. The group is reserved. The types are `CoordinationLease` and `CoordinationLeaseList`.
 - **`Event` of `compute.gaon.garam.sh/v1alpha1`** records that something happened to an object. It has `metadata` and `spec`, and no `status`. `spec` has `involvedObject` (`apiVersion`, `kind` and `name` required, `uid`), a required `reason`, a `message` of at most 1024 bytes, a `type` of `Normal` or `Warning`, a `count` of at least 1, and `firstTimestamp` and `lastTimestamp`, the last not before the first. A reporter that sees an event again raises `count` and moves `lastTimestamp`. An update keeps `involvedObject`, `reason` and `type`, and does not lower `count`. Nothing expires an Event. The types are `ClusterEvent`, `ClusterEventList` and `ObjectReference`.
 
+### Secret, ConfigMap and ServiceAccount
+
+All three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, with `apiVersion`, `kind` and `metadata`, and no `spec` or `status` ([ADR 0020](./adr/0020-a-microvm-takes-a-process-ports-files-and-probes-secret-configmap-and-serviceaccount-are-kinds-and-a-token-request-returns-a-jwt-bound-to-a-microvm.md)).
+
+- **`Secret`** has `data`, a map of keys to bytes, base64 in JSON. **`ConfigMap`** has `data`, a map of keys to strings. A key is 1 to 253 characters of alphanumerics, `-`, `_` and `.`, other than `.` and `..`. Keys and values together are at most 512 KiB, half of the client's answer bound, because of the base64. A name is a lowercase DNS subdomain of at most 253 characters. A change to `data` is an update by compare-and-swap.
+- **Secret values are never logged and never put in an Event.** A Secret formats and logs as its name, and a validation error names a key and never a value. A Secret is sent to admission webhooks as any write is.
+- **`ServiceAccount`** is the identity a MicroVM names in `spec.serviceAccountName`. Its name is a lowercase DNS subdomain, with no `:`, because it is part of a token's subject.
+- **`POST /serviceaccounts/{name}/token`** takes a `TokenRequest` and answers with it, `status` filled; it is not stored and not sent to webhooks. `spec` has `audiences`, at least one, each non-empty; `expirationSeconds`, 0 for 3600 or 600 to 86400; and `boundMicroVM`, the `name` and `uid` of the MicroVM. The API server answers `Invalid` for a request that does not validate, a MicroVM whose `serviceAccountName` is not the account's name, and an account or MicroVM with no uid; and `Conflict` for a MicroVM that is not the one bound, by name and uid, or that has `deletionTimestamp` set. `status` has `token` and `expirationTimestamp`. A token is never logged and never put in an Event.
+- **The claims** are `iss`, `sub` (`gaon:serviceaccount:<name>`), `aud`, `iat`, `exp` (after `iat` by at most 86400 seconds), and `gaon.garam.sh`, with `serviceaccount` and `microvm`, each `{name, uid}`. The token authenticates as the subject, and RBAC binds it like any user. The signing algorithm, keys, issuer URL, discovery document, JWKS and the authentication of a bearer token are not part of this contract yet.
+- **The types** are in `lib/api/`: `Secret`, `ConfigMap`, `ServiceAccount` and their lists, `TokenRequest`, `BoundObject`, `TokenClaims`, `NewTokenClaims`, and, on `MicroVM`, `ReferencesSecret` and `ReferencesConfigMap`. `Client` has `Put`, `Get`, `List`, `Watch` and `Delete` for each kind, and `CreateServiceAccountToken`.
+
 ### Invariants
 
 | # | Invariant | Writer it constrains |
@@ -193,6 +213,16 @@ Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where
 | `GET /events` | all | list, with the `resourceVersion` to watch from |
 | `GET /events/{name}` | all | read one Event |
 | `GET /events?watch=true` | all | subscribe to changes |
+| `PUT /secrets/{name}` | users | create a Secret, without a version; change its `data`, with one |
+| `DELETE /secrets/{name}` | users | delete it |
+| `GET /secrets`, `GET /secrets/{name}`, `GET /secrets?watch=true` | users; a Node only `GET /secrets/{name}` of a Secret a MicroVM bound to it references (§Authorization) | list, read one, subscribe |
+| `PUT /configmaps/{name}` | users | create a ConfigMap, without a version; change its `data`, with one |
+| `DELETE /configmaps/{name}` | users | delete it |
+| `GET /configmaps`, `GET /configmaps/{name}`, `GET /configmaps?watch=true` | users; a Node only `GET /configmaps/{name}` of a ConfigMap a MicroVM bound to it references (§Authorization) | list, read one, subscribe |
+| `PUT /serviceaccounts/{name}` | users | create a ServiceAccount, without a version; change its `metadata`, with one |
+| `DELETE /serviceaccounts/{name}` | users | delete it |
+| `GET /serviceaccounts`, `GET /serviceaccounts/{name}`, `GET /serviceaccounts?watch=true` | all | list, read one, subscribe |
+| `POST /serviceaccounts/{name}/token` | users, controllers; the Node Agent for a MicroVM bound to its Node | request a token bound to a MicroVM (§Secret, ConfigMap and ServiceAccount) |
 
 Every list and watch path in this section takes `labelSelector` (§Metadata).
 
@@ -258,7 +288,9 @@ The API server's `--authorization-mode` is `AlwaysAllow`, the default, which all
   - read and write its own Lease;
   - read MicroVMs; write the `status` of a MicroVM whose `spec.nodeName` is that Node, and its own finalizer through `PUT /microvms/{name}` on such a MicroVM (the API server checks that only the finalizer entry changed, invariant 3);
   - read Volumes, for the reason it reads MicroVMs; write the `status` of a Volume whose `spec.nodeName` is that Node, or that a MicroVM bound to it uses; and its own finalizer through `PUT /volumes/{name}` on a Volume whose `spec.nodeName` is that Node (the API server checks that only the finalizer entry changed, invariant 3);
-  - create CertificateSigningRequests and read one it created.
+  - create CertificateSigningRequests and read one it created;
+  - `get` one Secret or ConfigMap that a MicroVM whose `spec.nodeName` is that Node references in `env` or `files`, and no `list` or `watch` of either;
+  - `create` on `serviceaccounts/token` for a MicroVM whose `spec.nodeName` is that Node, whose `serviceAccountName` is the account in the path, and whose name and uid are the request's `boundMicroVM`.
 
   Reads of MicroVMs and Volumes are open to a Node because a list cannot be filtered by Node.
 - **Escalation.** A caller creates or updates a ClusterRole only if it holds every permission the role grants, and a ClusterRoleBinding only if it holds every permission of the role it names. The Node authorizer's permissions do not count.
@@ -319,7 +351,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
   - `failurePolicy`: `Fail`, the default, or `Ignore`. `timeoutSeconds`: 1 to 30, default 10.
   - There is no namespace selector, object selector, `sideEffects` or `reinvocationPolicy`.
 - **The call.** `POST` of an `AdmissionReview` (`admission.gaon.garam.sh/v1alpha1`) with `request`: `uid`, `kind`, `resource`, `subResource`, `name`, `operation`, `userInfo` (`username`, `groups`), `object` and `oldObject`. The webhook answers `200` with an `AdmissionReview` whose `response` has the same `uid`, `allowed`, optionally `status` (`code`, `message`), and, from a mutating webhook that allows, `patchType` `JSONPatch` and a base64 RFC 6902 `patch`. No path serves an `AdmissionReview`.
-- **Which writes are sent.** Every write accepted after authorization: a `PUT` without a version is `CREATE`, with one `UPDATE`; a write to `/status` is `UPDATE` with `subResource` `status`; `POST /microvms/{name}/binding` is `CREATE` on `microvms/binding`; `DELETE` is `DELETE`, with `oldObject` and no `object`. Writes to the two configuration kinds and every read are never sent.
+- **Which writes are sent.** Every write accepted after authorization: a `PUT` without a version is `CREATE`, with one `UPDATE`; a write to `/status` is `UPDATE` with `subResource` `status`; `POST /microvms/{name}/binding` is `CREATE` on `microvms/binding`; `DELETE` is `DELETE`, with `oldObject` and no `object`. Writes to the two configuration kinds, `POST /serviceaccounts/{name}/token` (its answer is a credential) and every read are never sent.
 - **Order of a write.** Authentication, authorization, the mutating webhooks, the API server's own validation (with a custom resource's schema and pruning), the validating webhooks, the Store. Configurations are called by name and the webhooks of one in their order; each mutating webhook sees the object as the previous patch left it. A patch that changes `apiVersion`, `kind`, `metadata.name` or `metadata.resourceVersion` is a failed call.
 - **Failure.** `allowed: false` is `Forbidden` whatever `status.code` says, with a message that names the webhook and carries `status.message`. A failed call is a timeout, a TLS or connection error, a status other than 200, a body that does not decode, a `uid` that is not the request's, or a bad patch; under `Fail` the write is refused as `InternalError`, and under `Ignore` the webhook is skipped.
 - **Types and client.** In `lib/api/`: `MutatingWebhookConfiguration`, `ValidatingWebhookConfiguration`, their lists, `Webhook`, `WebhookClientConfig`, `WebhookRule`, and `AdmissionReview` with `AdmissionRequest` and `AdmissionResponse`. `Client` has `Put`, `Get`, `List`, `Watch` and `Delete` for each kind.
@@ -338,6 +370,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 
 ## Rationale
 
+- A MicroVM's process, files, probes, ports and service account, the Secret, ConfigMap and ServiceAccount kinds, the token request and its claims, and the Node authorizer's rule for them: [ADR 0020](./adr/0020-a-microvm-takes-a-process-ports-files-and-probes-secret-configmap-and-serviceaccount-are-kinds-and-a-token-request-returns-a-jwt-bound-to-a-microvm.md), which changes `ports` in place as ADR 0017 changed a kind and adds to ADR 0008's Node authorizer.
 - Boundary, one-way dependencies and the fencing obligation: [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md).
 - Writers, Lease, watch, OnDemand, group, transport, naming: [ADR 0003](./adr/0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md).
 - Authorization, the `rbac` group, the Node authorizer and the bootstrap roles: [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md), which amends ADR 0005, Decision 4.

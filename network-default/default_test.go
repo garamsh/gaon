@@ -15,7 +15,9 @@ import (
 func microvm(ports []int32, networks ...string) *api.MicroVM {
 	m := &api.MicroVM{}
 	m.Metadata.Name = "web"
-	m.Spec.Ports = ports
+	for _, p := range ports {
+		m.Spec.Ports = append(m.Spec.Ports, api.MicroVMPort{Port: p, Protocol: api.ProtocolTCP})
+	}
 	m.Spec.Networks = networks
 	return m
 }

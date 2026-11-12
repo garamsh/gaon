@@ -199,7 +199,7 @@ func TestPlugins_TheDefaultNetworkBinaryGivesAMicroVMTheEgressAndIngressOfItsFla
 	w.networkDefault(t, "--egress-prefix=10.0.0.0/8", "--egress-prefix=2001:db8::/32", "--ingress-prefix=192.168.0.0/16")
 	w.agent(t, "default", "")
 	web := bound("web")
-	web.Spec.Ports = []int32{80, 443}
+	web.Spec.Ports = []api.MicroVMPort{{Port: 80, Protocol: api.ProtocolTCP}, {Port: 443, Protocol: api.ProtocolTCP}}
 	w.gaon.SetMicroVM(web)
 	w.gaon.SetMicroVM(bound("quiet"))
 

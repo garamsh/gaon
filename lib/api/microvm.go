@@ -73,13 +73,24 @@ type MicroVMSpec struct {
 	RootDiskSize         Quantity             `json:"rootDiskSize,omitempty"`
 	Volumes              []MicroVMVolume      `json:"volumes,omitempty"`
 	Networks             []string             `json:"networks,omitempty"`
-	Ports                []int32              `json:"ports,omitempty"`
+	Ports                []MicroVMPort        `json:"ports,omitempty"`
 	RunStrategy          RunStrategy          `json:"runStrategy"`
 	IdleTimeoutSeconds   int32                `json:"idleTimeoutSeconds,omitempty"`
 	NodeSelector         map[string]string    `json:"nodeSelector,omitempty"`
 	RequiredCapabilities []string             `json:"requiredCapabilities,omitempty"`
 	NodeName             string               `json:"nodeName,omitempty"`
 	BindingEpoch         Epoch                `json:"bindingEpoch,omitempty"`
+
+	Command                       []string      `json:"command,omitempty"`
+	Args                          []string      `json:"args,omitempty"`
+	Env                           []EnvVar      `json:"env,omitempty"`
+	User                          string        `json:"user,omitempty"`
+	WorkingDir                    string        `json:"workingDir,omitempty"`
+	Files                         []MicroVMFile `json:"files,omitempty"`
+	ReadinessProbe                *Probe        `json:"readinessProbe,omitempty"`
+	LivenessProbe                 *Probe        `json:"livenessProbe,omitempty"`
+	TerminationGracePeriodSeconds *int32        `json:"terminationGracePeriodSeconds,omitempty"`
+	ServiceAccountName            string        `json:"serviceAccountName,omitempty"`
 }
 
 // MicroVMStatus is the observed state of a MicroVM.
@@ -116,10 +127,34 @@ func (m *MicroVM) Validate() error {
 	}
 	switch m.Spec.RunStrategy {
 	case RunAlways, RunRerunOnFailure, RunOnce, RunOnDemand, RunHalted:
-		return nil
 	default:
 		return invalid("spec.runStrategy is %q, want Always, RerunOnFailure, Once, OnDemand or Halted", m.Spec.RunStrategy)
 	}
+	return m.Spec.validate()
+}
+
+// validate checks the ports, the process, the files, the probes, the grace
+// period and the service account name of s.
+func (s *MicroVMSpec) validate() error {
+	if err := validatePorts(s.Ports); err != nil {
+		return err
+	}
+	if err := validateProcess(s); err != nil {
+		return err
+	}
+	if err := s.ReadinessProbe.validate("spec.readinessProbe", s.Ports, false); err != nil {
+		return err
+	}
+	if err := s.LivenessProbe.validate("spec.livenessProbe", s.Ports, true); err != nil {
+		return err
+	}
+	if g := s.TerminationGracePeriodSeconds; g != nil && *g < 0 {
+		return invalid("spec.terminationGracePeriodSeconds is %d, want 0 or more", *g)
+	}
+	if s.ServiceAccountName != "" {
+		return validateObjectName("spec.serviceAccountName", s.ServiceAccountName)
+	}
+	return nil
 }
 
 // ValidateUpdate checks that m changes nothing of old's spec but runStrategy,

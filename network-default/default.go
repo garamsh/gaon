@@ -68,11 +68,11 @@ func (d *Default) Policy(_ context.Context, m *api.MicroVM) (*plugin.NetworkPoli
 			Message: fmt.Sprintf("spec.networks names %q; this node serves only %q", m.Spec.Networks[i], Name),
 		}
 	}
-	for _, port := range m.Spec.Ports {
-		if port < 1 || port > 65535 {
+	for _, p := range m.Spec.Ports {
+		if p.Port < 1 || p.Port > 65535 {
 			return nil, &plugin.Refusal{
 				Reason:  ReasonInvalidSpec,
-				Message: fmt.Sprintf("spec.ports holds %d, want 1 to 65535", port),
+				Message: fmt.Sprintf("spec.ports holds %d, want 1 to 65535", p.Port),
 			}
 		}
 	}
@@ -80,7 +80,8 @@ func (d *Default) Policy(_ context.Context, m *api.MicroVM) (*plugin.NetworkPoli
 	for _, p := range d.egress {
 		policy.Egress = append(policy.Egress, plugin.NetworkRule{Prefix: p.String(), Protocol: plugin.Any})
 	}
-	for _, port := range m.Spec.Ports {
+	for _, mp := range m.Spec.Ports {
+		port := mp.Port
 		for _, p := range d.ingress {
 			policy.Ingress = append(policy.Ingress, plugin.NetworkRule{
 				Prefix:   p.String(),

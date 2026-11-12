@@ -57,6 +57,14 @@ const (
 	KindEvent       = "Event"
 	KindEventList   = "EventList"
 
+	KindSecret             = "Secret"
+	KindSecretList         = "SecretList"
+	KindConfigMap          = "ConfigMap"
+	KindConfigMapList      = "ConfigMapList"
+	KindServiceAccount     = "ServiceAccount"
+	KindServiceAccountList = "ServiceAccountList"
+	KindTokenRequest       = "TokenRequest"
+
 	KindCertificateSigningRequest     = "CertificateSigningRequest"
 	KindCertificateSigningRequestList = "CertificateSigningRequestList"
 
