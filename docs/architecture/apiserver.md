@@ -41,10 +41,14 @@ Every write to an existing resource carries the version it was read at, and a wr
 
 ### Running
 
-`Run` takes a listener, a configuration and a context, and serves until the context ends, then stops accepting and drains for a short time. Without the TLS files the server serves plain HTTP and `Run` refuses a listener that is not on a loopback address. With them it serves mutual TLS on any address, loopback included: the server requires a client certificate that the client CA signed, and speaks TLS 1.3 or later ([ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md)). The binary reads the etcd endpoints, the listen address, the dial timeout and the TLS files from flags and defaults to loopback for the listener.
+`Run` takes a listener, a configuration and a context, and serves until the context ends, then stops accepting and drains for a short time. Without the TLS files the server serves plain HTTP and `Run` refuses a listener that is not on a loopback address. With them it serves mutual TLS on any address, loopback included: the server speaks TLS 1.3 or later and, as built, requires a client certificate that the client CA signed ([ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md)). [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) narrows the requirement; the list below states the decision, which the binary does not yet implement. The binary reads the etcd endpoints, the listen address, the dial timeout and the TLS files from flags and defaults to loopback for the listener.
 
 - `--tls-client-ca`, `--tls-cert` and `--tls-key` are the PEM files of the client CA and of the server's certificate and key. All three are given or none is, and a partial set, or a file that does not load, stops the server at start.
 - The certificate's subject CN is the caller's identity, a Node Agent's being its Node name. The server authenticates and does not yet act on the identity.
+- **Decided in [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), not yet implemented:**
+  - The listener verifies a client certificate when one is given and no longer requires one. A request with a verified certificate is authenticated as before.
+  - A request with no certificate and a valid bearer token may only create a CertificateSigningRequest and read one it created, with the identity `bootstrap:<id>`. Any other request without a certificate is refused, an invalid token included, and a token is honoured over TLS only.
+  - The server takes `--bootstrap-token-file`, a file of valid tokens, one per line, read once at start. Removing a token takes effect at the next start.
 - The server reads the files once at start. It dials etcd at start and fails if it cannot.
 
 ## Rationale

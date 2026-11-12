@@ -18,6 +18,9 @@ const (
 	KindNodeList    = "NodeList"
 	KindLease       = "Lease"
 	KindLeaseList   = "LeaseList"
+
+	KindCertificateSigningRequest     = "CertificateSigningRequest"
+	KindCertificateSigningRequestList = "CertificateSigningRequestList"
 )
 
 // ResourceVersion is the version of an object in the Store. Clients treat it

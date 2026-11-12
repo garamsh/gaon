@@ -36,3 +36,4 @@ Current architecture of the system and the decisions behind it. This file is the
   - [0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md): the Store is etcd, starting as one cell of one member.
   - [0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md): the API server serves beyond loopback only with mutual TLS.
   - [0006](./adr/0006-a-gaon-deployment-is-one-control-plane-node-configured-by-argv-and-files.md): a gaon deployment is one control-plane Node, its services configured by argv and files, pinned by commit.
+  - [0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md): a Node gets its client certificate from gaon's own CA through a CertificateSigningRequest, which a bootstrap token may create.

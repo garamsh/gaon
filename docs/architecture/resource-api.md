@@ -17,7 +17,8 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 - HTTP with JSON bodies on the paths in §Paths.
 - **The root is `/apis/compute.gaon.garam.sh/v1alpha1`** on the API server's address, the Kubernetes `/apis/<group>/<version>` form, which leaves room for the `apps` and `apiextensions` groups beside it. §Paths are relative to it. A client is configured with the full root URL.
 - A watch is a streaming HTTP response of newline-delimited JSON events.
-- Without TLS files the API server serves plain HTTP and refuses any address that is not loopback. With them it serves mutual TLS on any address, loopback included: the caller presents a client certificate that the API server's client CA signed, and a Node Agent's subject CN is its Node name ([ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md)).
+- Without TLS files the API server serves plain HTTP and refuses any address that is not loopback. With them it serves mutual TLS on any address, loopback included: the caller presents a client certificate that the API server's client CA signed, and a Node Agent's subject CN is its Node name ([ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md)), except for the bearer-token access in the next bullet.
+- **Bearer-token access.** A request with no client certificate and a valid `Authorization: Bearer <token>` may create a CertificateSigningRequest and read one it created, and nothing else. Any other request without a client certificate is refused. A token is `<id>.<secret>`, matching `[a-z0-9]{6}\.[a-z0-9]{16}`, and the API server honours one only over TLS ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md)).
 
 ### Common rules
 
@@ -83,6 +84,22 @@ Every transition below is decided and written by the Node Agent except the rebin
 - **A Node with no Lease.** The node lifecycle controller also watches Nodes. For a Node whose Lease it has not seen, it counts validity from its first sighting of that Node, for the Lease duration plus the expiry margin. When that elapses with no Lease seen, it writes `LeaseExpired` true with reason `LeaseMissing`. Seeing the Lease afterwards applies the Lease rule: a new version makes it false, with reason `LeaseRenewed`. This keeps invariant 1: without an acknowledged Lease renewal the Node Agent never renews mvmd's node deadline, so no Machine runs on that Node. A Lease cannot be deleted, as §Paths has no such path, so a Node never having had one is the only case.
 - **Placement:** the Scheduler places a Machine only on a Node that is `Admitted`, is `Ready`, and does not have `LeaseExpired` true.
 
+### CertificateSigningRequest
+
+A request for a client certificate from the cluster CA, used by a Node Agent to get and renew its certificate ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md)). The requester names it.
+
+- **`spec`:**
+  - `request`: a PEM PKCS#10 request, a block of type `CERTIFICATE REQUEST`. Any other value is refused.
+  - `username`: the requester's identity, `bootstrap:<id>` for a token or the CN of the client certificate. The API server sets it from authentication on creation and replaces any value the requester sent.
+- **`spec` is immutable.** A `PUT` that carries `metadata.resourceVersion` is refused as `Invalid`; a new request is a new object.
+- **`status`:**
+  - `conditions`: the types are `Approved` and `Denied`, and any other type is refused. Each has a `status` of `True`, `False` or `Unknown`, and any other value is refused.
+  - `certificate`: the issued certificate, PEM, written with the `Approved` condition.
+- **Writers.** The requester writes `spec`, once, by creating the request. The signer, which is `gaon-controllers`, writes `status` and nothing else, by compare-and-swap on the whole object.
+- **The signer's approval rule:** the request is client-auth only with a CN equal to a Node name, and `spec.username` is a bootstrap token or equals that CN. A request that fails it is `Denied` ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md)).
+- **A token holder reads only a request it created,** by `GET /certificatesigningrequests/{name}`. List and watch need a client certificate.
+- **There is no delete path.** Requests stay in the Store.
+
 ### Lease and fencing
 
 - **A Lease per node, separate from `Node`.** It holds a holder, a renew time and a duration, and the Node Agent renews it by compare-and-swap.
@@ -135,6 +152,11 @@ Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where
 | `GET /leases` | all | list, with the `resourceVersion` to watch from |
 | `GET /leases/{name}` | all | read one Lease |
 | `GET /leases?watch=true` | all | subscribe to changes |
+| `PUT /certificatesigningrequests/{name}` | a bearer-token holder or any authenticated caller | create a request, without a version; `spec.username` is set by the API server |
+| `PUT /certificatesigningrequests/{name}/status` | signer | approve or deny, and record the issued certificate |
+| `GET /certificatesigningrequests` | all authenticated by certificate | list, with the `resourceVersion` to watch from |
+| `GET /certificatesigningrequests/{name}` | all; a token holder only a request it created | read one request |
+| `GET /certificatesigningrequests?watch=true` | all authenticated by certificate | subscribe to changes |
 
 Wake, exec, file API and console are data-plane features and are not recorded in the Store.
 
@@ -143,7 +165,7 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 - A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required.
 - Each line of the stream is one JSON event with a `type` and an `object`.
 - Event types, PascalCase as every enum is:
-  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Node or a Lease) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
+  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Node, a Lease or a CertificateSigningRequest) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
   - `Error` carries the error object, and is the last event of its stream.
 - The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422 and `Expired` 410.
 - An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
@@ -153,6 +175,7 @@ Wake, exec, file API and console are data-plane features and are not recorded in
 
 - Boundary, one-way dependencies and the fencing obligation: [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md).
 - Writers, Lease, watch, OnDemand, group, transport, naming: [ADR 0003](./adr/0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md).
+- Bearer-token access and the CertificateSigningRequest: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), which amends ADR 0005.
 - How `resourceVersion`, compare-and-swap and watch map onto the Store: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
 - The Lease validity is measured by the observer because a renew time written by one machine cannot be compared with another machine's clock, which can be stepped.
 

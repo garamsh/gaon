@@ -16,6 +16,8 @@ Every value is a flag with an environment variable as its fallback. A flag given
 | `--tls-ca` | `GAON_TLS_CA` | none | file of the CA certificates the API server's certificate must chain to |
 | `--tls-cert` | `GAON_TLS_CERT` | none | file of the client certificate the agent presents to the API server |
 | `--tls-key` | `GAON_TLS_KEY` | none | file of the key of the client certificate |
+| `--bootstrap-token-file` | `GAON_BOOTSTRAP_TOKEN_FILE` | none | decided in [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), not yet implemented: file of the bootstrap token with which the agent asks for its client certificate |
+| `--cert-dir` | `GAON_CERT_DIR` | none | decided in ADR 0007, not yet implemented: writable directory where the agent keeps its key and issued certificate |
 | `--node-name` | `GAON_NODE_NAME` | none, required | name of this node's Node and Lease |
 | `--mvmd-socket` | `GAON_MVMD_SOCKET` | none, required | path of mvmd's runtime API socket |
 | `--delta` | `GAON_DELTA` | 1s, provisional | δ, how long a Machine can run past mvmd's recorded deadline expiry |
@@ -29,6 +31,13 @@ Every value is a flag with an environment variable as its fallback. A flag given
 | `--restart-reset-after` | `GAON_RESTART_RESET_AFTER` | 10m | how long a Machine must have run for the wait to start over at the backoff |
 
 The three TLS values are given together or not at all. All three give a mutual TLS 1.3 client built by `lib/api` that trusts only the CA file; none gives plain HTTP, for a loopback API server; one or two refuse the start, naming the ones missing, as does a file that cannot be read or does not fit. The agent builds its client once at start, so a replaced file is read at the next start.
+
+[ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) decides how the agent gets its certificate without operator-supplied files; none of this is implemented yet:
+
+- `--bootstrap-token-file` and `--cert-dir` are mutually exclusive with `--tls-cert` and `--tls-key`. `--tls-ca` still verifies the server.
+- The agent creates `--cert-dir` with mode 0700 if it is missing and writes the key with mode 0600.
+- At start it uses the pair in `--cert-dir` if the pair is valid, and otherwise generates a key and bootstraps with the token.
+- It renews at two thirds of the certificate's validity, over its own certificate, and swaps the pair without a restart. The files given as `--tls-cert` and `--tls-key` are still read once at start.
 
 δ's default of 1s is provisional: it is not measured, in mvmd either, and it is far above a real-time thread's wake-up and a SIGKILL (mvmd ADR 0003). The durations must satisfy two inequalities, checked at start: the deadline length exceeds the renew period plus two call timeouts, so the deadline never lapses between rounds, and the Lease duration is at least the deadline length plus δ plus two call timeouts, so a round can always renew the deadline.
 
