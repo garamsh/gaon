@@ -22,8 +22,9 @@ func (c Config) tlsGiven() (bool, error) {
 	return n == 3, nil
 }
 
-// serverTLS returns the TLS configuration that requires a client certificate
-// the client CA signed, or nil where c names no TLS files.
+// serverTLS returns the TLS configuration that verifies a client certificate
+// against the client CA where one is given and does not require one, or nil
+// where c names no TLS files.
 func (c Config) serverTLS() (*tls.Config, error) {
 	given, err := c.tlsGiven()
 	if err != nil || !given {
@@ -45,6 +46,6 @@ func (c Config) serverTLS() (*tls.Config, error) {
 		MinVersion:   tls.VersionTLS13,
 		Certificates: []tls.Certificate{cert},
 		ClientCAs:    pool,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientAuth:   tls.VerifyClientCertIfGiven,
 	}, nil
 }

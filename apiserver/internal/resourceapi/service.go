@@ -32,6 +32,12 @@ type Service interface {
 	GetLease(ctx context.Context, name string) (*api.Lease, error)
 	ListLeases(ctx context.Context) (*api.LeaseList, error)
 	WatchLeases(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+
+	PutCertificateSigningRequest(ctx context.Context, name, username string, r *api.CertificateSigningRequest) (*api.CertificateSigningRequest, error)
+	PutCertificateSigningRequestStatus(ctx context.Context, name string, r *api.CertificateSigningRequest) (*api.CertificateSigningRequest, error)
+	GetCertificateSigningRequest(ctx context.Context, name string) (*api.CertificateSigningRequest, error)
+	ListCertificateSigningRequests(ctx context.Context) (*api.CertificateSigningRequestList, error)
+	WatchCertificateSigningRequests(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
 }
 
 var (
@@ -39,6 +45,8 @@ var (
 	volumes  = kind[api.Volume]{"volumes", func(v *api.Volume) *api.ObjectMeta { return &v.Metadata }, func(v *api.Volume) any { return v.Spec }}
 	nodes    = kind[api.Node]{"nodes", func(n *api.Node) *api.ObjectMeta { return &n.Metadata }, func(n *api.Node) any { return n.Spec }}
 	leases   = kind[api.Lease]{"leases", func(l *api.Lease) *api.ObjectMeta { return &l.Metadata }, func(l *api.Lease) any { return l.Spec }}
+
+	certificateSigningRequests = kind[api.CertificateSigningRequest]{"certificatesigningrequests", func(r *api.CertificateSigningRequest) *api.ObjectMeta { return &r.Metadata }, func(r *api.CertificateSigningRequest) any { return r.Spec }}
 )
 
 type service struct {
@@ -101,4 +109,21 @@ func (s *service) ListLeases(ctx context.Context) (*api.LeaseList, error) {
 
 func (s *service) WatchLeases(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
 	return leases.watch(ctx, s.st, rv)
+}
+
+func (s *service) GetCertificateSigningRequest(ctx context.Context, name string) (*api.CertificateSigningRequest, error) {
+	r, _, err := certificateSigningRequests.get(ctx, s.st, name)
+	return r, err
+}
+
+func (s *service) ListCertificateSigningRequests(ctx context.Context) (*api.CertificateSigningRequestList, error) {
+	items, rv, err := certificateSigningRequests.list(ctx, s.st)
+	if err != nil {
+		return nil, err
+	}
+	return &api.CertificateSigningRequestList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindCertificateSigningRequestList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
+}
+
+func (s *service) WatchCertificateSigningRequests(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
+	return certificateSigningRequests.watch(ctx, s.st, rv)
 }

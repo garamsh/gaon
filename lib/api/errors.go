@@ -12,6 +12,8 @@ const (
 	ReasonAlreadyExists Reason = "AlreadyExists"
 	ReasonInvalid       Reason = "Invalid"
 	ReasonExpired       Reason = "Expired"
+	ReasonUnauthorized  Reason = "Unauthorized"
+	ReasonForbidden     Reason = "Forbidden"
 )
 
 // APIError is the error object of the API: the body of a failed response and
@@ -30,6 +32,8 @@ var (
 	ErrAlreadyExists = NewAPIError(ReasonAlreadyExists, "already exists")
 	ErrInvalid       = NewAPIError(ReasonInvalid, "invalid")
 	ErrExpired       = NewAPIError(ReasonExpired, "expired")
+	ErrUnauthorized  = NewAPIError(ReasonUnauthorized, "unauthorized")
+	ErrForbidden     = NewAPIError(ReasonForbidden, "forbidden")
 )
 
 // NewAPIError returns the APIError for reason with its HTTP status code.
@@ -49,6 +53,10 @@ func (e *APIError) Is(target error) bool {
 
 func (r Reason) httpStatus() int {
 	switch r {
+	case ReasonUnauthorized:
+		return 401
+	case ReasonForbidden:
+		return 403
 	case ReasonConflict, ReasonAlreadyExists:
 		return 409
 	case ReasonNotFound:

@@ -21,6 +21,9 @@ type Config struct {
 	// callers' certificates and of the server's certificate and key. All three
 	// are set or none is.
 	TLSClientCA, TLSCert, TLSKey string
+	// BootstrapTokenFile is the path of the file of valid bootstrap tokens,
+	// one per line. It needs the TLS files.
+	BootstrapTokenFile string
 }
 
 // ParseConfig reads the flags in args.
@@ -32,6 +35,7 @@ func ParseConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.TLSClientCA, "tls-client-ca", "", "PEM file of the CA that signs client certificates")
 	fs.StringVar(&cfg.TLSCert, "tls-cert", "", "PEM file of the server certificate")
 	fs.StringVar(&cfg.TLSKey, "tls-key", "", "PEM file of the server certificate's key")
+	fs.StringVar(&cfg.BootstrapTokenFile, "bootstrap-token-file", "", "file of valid bootstrap tokens, one per line; needs the tls flags")
 	fs.DurationVar(&cfg.DialTimeout, "etcd-dial-timeout", 5*time.Second, "time allowed to reach etcd at start")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -47,7 +51,7 @@ func ParseConfig(args []string) (Config, error) {
 	if cfg.DialTimeout <= 0 {
 		return Config{}, fmt.Errorf("etcd dial timeout %s is not positive", cfg.DialTimeout)
 	}
-	if _, err := cfg.tlsGiven(); err != nil {
+	if err := cfg.tokenFileNeedsTLS(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
