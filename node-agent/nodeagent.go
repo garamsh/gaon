@@ -37,10 +37,11 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 
 	nodes := node.NewService(cfg.NodeName, client, runtime, clk, log)
 	live := liveness.NewService(cfg.NodeName, cfg.Liveness, client, runtime, clk, log)
-	store, err := newStorage(cfg.StoragePlugin, cfg.NodeName, cfg.ResyncPeriod, client, runtime, clk, log)
+	plugins, err := dialPlugins(cfg)
 	if err != nil {
 		return err
 	}
+	defer plugins.close()
 	runs := microvms.NewService(cfg.NodeName, microvms.Params{
 		Resync:            cfg.ResyncPeriod,
 		Retry:             cfg.ResyncPeriod,
@@ -48,7 +49,7 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 		RestartBackoffMax: cfg.RestartBackoffMax,
 		RestartResetAfter: cfg.RestartResetAfter,
 		ReadTimeout:       cfg.Liveness.RPCTimeout,
-	}, client, runtime, cfg.Network, store, clk, log)
+	}, client, runtime, plugins.network, plugins.storage, clk, log)
 
 	// Everything but the certificate renewal needs the Node, which the API
 	// server's authorization refuses until it exists.
@@ -56,11 +57,7 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 		if nodes.Register(ctx, cfg.ResyncPeriod) != nil {
 			return
 		}
-		loops := []func(context.Context){live.Run, func(ctx context.Context) { nodes.Run(ctx, cfg.ResyncPeriod) }, runs.Run}
-		if p, ok := store.(interface{ Run(context.Context) }); ok {
-			loops = append(loops, p.Run)
-		}
-		runAll(ctx, loops...)
+		runAll(ctx, live.Run, func(ctx context.Context) { nodes.Run(ctx, cfg.ResyncPeriod) }, runs.Run)
 	}}
 	if renewCertificate != nil {
 		loops = append(loops, renewCertificate)

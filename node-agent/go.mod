@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/garamsh/gaon/lib/api v0.0.0-00010101000000-000000000000
+	github.com/garamsh/gaon/lib/plugin v0.0.0-00010101000000-000000000000
 	github.com/garamsh/mvmd/lib/runtimeapi v0.0.0-20261112003737-3f6e60567966
 	github.com/stretchr/testify v1.12.1
 	google.golang.org/grpc v1.85.0
@@ -18,4 +19,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1 // indirect
 )
 
-replace github.com/garamsh/gaon/lib/api => ../lib/api
+replace (
+	github.com/garamsh/gaon/lib/api => ../lib/api
+	github.com/garamsh/gaon/lib/plugin => ../lib/plugin
+)

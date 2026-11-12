@@ -1,5 +1,7 @@
-// Package network holds the built-in network plugins of the Node Agent.
-package network
+// Package networkdefault is the network plugin "default": egress to the
+// operator's prefixes, and ingress to a MicroVM's ports from the operator's
+// prefixes. It is built on lib/plugin and lib/api and nothing else of gaon.
+package networkdefault
 
 import (
 	"context"
@@ -8,21 +10,24 @@ import (
 	"slices"
 
 	"github.com/garamsh/gaon/lib/api"
-	"github.com/garamsh/gaon/node-agent/internal/microvms"
-	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
+	"github.com/garamsh/gaon/lib/plugin"
 )
 
-// Name is the network the Default plugin serves and the name that selects it.
+// Name is the network the plugin serves and the name it is served under.
 const Name = "default"
 
-// ReasonUnknownNetwork is the reason of a MicroVM that names a network the
-// plugin does not serve.
-const ReasonUnknownNetwork = "UnknownNetwork"
+// The reasons a MicroVM fails with when Default refuses it.
+const (
+	// ReasonUnknownNetwork is the reason of a MicroVM that names a network
+	// the plugin does not serve.
+	ReasonUnknownNetwork = "UnknownNetwork"
+	// ReasonInvalidSpec is the reason of a MicroVM whose spec the plugin
+	// cannot make a policy of.
+	ReasonInvalidSpec = "InvalidSpec"
+)
 
-// Default serves the network "default": egress to the operator's prefixes,
-// and ingress to a MicroVM's ports from the operator's prefixes. With no
-// prefixes the policy is empty, which mvmd reads as blocking all outside
-// traffic.
+// Default serves the network "default". With no prefixes its policy is empty,
+// which mvmd reads as blocking all outside traffic.
 type Default struct {
 	egress, ingress []netip.Prefix
 }
@@ -53,34 +58,34 @@ func parsePrefixes(direction string, in []string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
-// Policy implements microvms.Network. A MicroVM naming a network other than
+// Policy implements plugin.Network. A MicroVM naming a network other than
 // "default" is refused with ReasonUnknownNetwork, and one naming a port
-// outside 1 to 65535, which mvmd would refuse, with microvms.ReasonInvalidSpec.
-func (d *Default) Policy(_ context.Context, m *api.MicroVM) (*v1alpha2.NetworkPolicy, error) {
+// outside 1 to 65535, which mvmd would refuse, with ReasonInvalidSpec.
+func (d *Default) Policy(_ context.Context, m *api.MicroVM) (*plugin.NetworkPolicy, error) {
 	if i := slices.IndexFunc(m.Spec.Networks, func(n string) bool { return n != Name }); i >= 0 {
-		return nil, &microvms.Refusal{
+		return nil, &plugin.Refusal{
 			Reason:  ReasonUnknownNetwork,
 			Message: fmt.Sprintf("spec.networks names %q; this node serves only %q", m.Spec.Networks[i], Name),
 		}
 	}
 	for _, port := range m.Spec.Ports {
 		if port < 1 || port > 65535 {
-			return nil, &microvms.Refusal{
-				Reason:  microvms.ReasonInvalidSpec,
+			return nil, &plugin.Refusal{
+				Reason:  ReasonInvalidSpec,
 				Message: fmt.Sprintf("spec.ports holds %d, want 1 to 65535", port),
 			}
 		}
 	}
-	policy := &v1alpha2.NetworkPolicy{}
+	policy := &plugin.NetworkPolicy{}
 	for _, p := range d.egress {
-		policy.Egress = append(policy.Egress, &v1alpha2.NetworkRule{Prefix: p.String(), Protocol: v1alpha2.Protocol_PROTOCOL_ANY})
+		policy.Egress = append(policy.Egress, plugin.NetworkRule{Prefix: p.String(), Protocol: plugin.Any})
 	}
 	for _, port := range m.Spec.Ports {
 		for _, p := range d.ingress {
-			policy.Ingress = append(policy.Ingress, &v1alpha2.NetworkRule{
+			policy.Ingress = append(policy.Ingress, plugin.NetworkRule{
 				Prefix:   p.String(),
-				Protocol: v1alpha2.Protocol_PROTOCOL_TCP,
-				Ports:    []*v1alpha2.PortRange{{First: uint32(port), Last: uint32(port)}},
+				Protocol: plugin.TCP,
+				Ports:    []plugin.PortRange{{First: uint32(port), Last: uint32(port)}},
 			})
 		}
 	}
