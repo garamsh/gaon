@@ -28,11 +28,11 @@ func TestRun_TakesTheServerFromTheFlagOrTheDefault(t *testing.T) {
 		code          int
 		requests      int32
 	}{
-		{"flag", []string{"--server", srv.URL, "list", "machine"}, "", command.ExitOK, 1},
-		{"default", []string{"list", "machine"}, srv.URL, command.ExitOK, 1},
-		{"flag beats default", []string{"--server", srv.URL, "list", "machine"}, "http://127.0.0.1:1", command.ExitOK, 1},
-		{"neither", []string{"list", "machine"}, "", command.ExitUsage, 0},
-		{"unknown global flag", []string{"--bogus", "list", "machine"}, srv.URL, command.ExitUsage, 0},
+		{"flag", []string{"--server", srv.URL, "get", "machine"}, "", command.ExitOK, 1},
+		{"default", []string{"get", "machine"}, srv.URL, command.ExitOK, 1},
+		{"flag beats default", []string{"--server", srv.URL, "get", "machine"}, "http://127.0.0.1:1", command.ExitOK, 1},
+		{"neither", []string{"get", "machine"}, "", command.ExitUsage, 0},
+		{"unknown global flag", []string{"--bogus", "get", "machine"}, srv.URL, command.ExitUsage, 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
