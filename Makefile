@@ -16,7 +16,7 @@ endef
 # The Go files git tracks or would track, NUL separated.
 GO_FILES = git ls-files --cached --others --exclude-standard -z -- '*.go'
 
-.PHONY: lint format format-apply test build ci
+.PHONY: lint format format-apply test build ci e2e
 
 lint:
 	@$(call count_packages,lint)
@@ -41,3 +41,32 @@ build:
 	go build $(PATTERNS)
 
 ci: lint format test build
+
+# The end-to-end test of M1 on QEMU Nodes. It is not part of ci: it needs /dev/kvm
+# with nested virtualization (docs/architecture/e2e.md). E2E_DISABLE names services
+# naru-cluster leaves out, for the run that shows the test fails without them.
+E2E_DIR ?= $(CURDIR)/build/e2e
+E2E_DISABLE ?=
+NARU_COMMIT = 5b42b429c6b41447f2ea267fe606c2b5d44ea63e
+NARU_RELEASE = v0.3.0-rc.1
+GAON_SERVICES = gaon-apiserver:./apiserver/cmd/gaon-apiserver gaon-scheduler:./scheduler/cmd/gaon-scheduler gaon-controllers:./controllers/cmd/gaon-controllers gaon-node-agent:./node-agent/cmd/gaon-node-agent
+
+e2e:
+	rm -rf "$(E2E_DIR)/cluster" "$(E2E_DIR)/services"
+	mkdir -p "$(E2E_DIR)/tools" "$(E2E_DIR)/release" "$(E2E_DIR)/services"
+	for s in $(GAON_SERVICES); do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$(E2E_DIR)/services/$${s%%:*}" "$${s#*:}"; \
+	done
+	go build -o "$(E2E_DIR)/gaon" ./gaon-cli/cmd/gaon
+	GOBIN="$(E2E_DIR)/tools" go install github.com/garamsh/naru/tooling/qemu/cmd/naru-cluster@$(NARU_COMMIT)
+	gh release download $(NARU_RELEASE) -R garamsh/naru -D "$(E2E_DIR)/release" --clobber
+	cd "$(E2E_DIR)/release" && sha256sum --check --quiet SHA256SUMS
+	echo "e2e: gaon binaries built from $$(git rev-parse HEAD) with naru $(NARU_RELEASE) at $(NARU_COMMIT); disabled services: '$(E2E_DISABLE)'"
+	cd tooling/e2e && go vet -tags e2e ./...
+	status=0; cd tooling/e2e && E2E_NARU_CLUSTER="$(E2E_DIR)/tools/naru-cluster" E2E_RELEASE="$(E2E_DIR)/release" \
+		E2E_SERVICES="$(E2E_DIR)/services" E2E_GAON="$(E2E_DIR)/gaon" E2E_DIR="$(E2E_DIR)" E2E_DISABLE="$(E2E_DISABLE)" \
+		go test -tags e2e -count=1 -v -timeout 30m -run '^TestFailover_' ./tests >"$(E2E_DIR)/test.log" 2>&1 || status=$$?; \
+		tail -n 40 "$(E2E_DIR)/test.log"; \
+		n=$$(grep -c '^--- PASS' "$(E2E_DIR)/test.log" || true); \
+		echo "e2e: $$n test(s) passed, selected by -run '^TestFailover_' with -tags e2e; exit $$status"; \
+		test $$status -eq 0 -a "$$n" -gt 0

@@ -13,4 +13,5 @@ use (
 	./lib/api
 	./node-agent
 	./scheduler
+	./tooling/e2e
 )
