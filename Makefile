@@ -63,10 +63,10 @@ e2e:
 	cd "$(E2E_DIR)/release" && sha256sum --check --quiet SHA256SUMS
 	echo "e2e: gaon binaries built from $$(git rev-parse HEAD) with naru $(NARU_RELEASE) at $(NARU_COMMIT); disabled services: '$(E2E_DISABLE)'"
 	cd tooling/e2e && go vet -tags e2e ./...
-	cd tooling/e2e && E2E_NARU_CLUSTER="$(E2E_DIR)/tools/naru-cluster" E2E_RELEASE="$(E2E_DIR)/release" \
+	status=0; cd tooling/e2e && E2E_NARU_CLUSTER="$(E2E_DIR)/tools/naru-cluster" E2E_RELEASE="$(E2E_DIR)/release" \
 		E2E_SERVICES="$(E2E_DIR)/services" E2E_GAON="$(E2E_DIR)/gaon" E2E_DIR="$(E2E_DIR)" E2E_DISABLE="$(E2E_DISABLE)" \
-		go test -tags e2e -count=1 -v -timeout 30m -run '^TestFailover_' ./tests >"$(E2E_DIR)/test.log" 2>&1; \
-	status=$$?; tail -n 40 "$(E2E_DIR)/test.log"; \
-	n=$$(grep -c '^--- PASS' "$(E2E_DIR)/test.log" || true); \
-	echo "e2e: $$n test(s) passed, selected by -run '^TestFailover_' with -tags e2e; exit $$status"; \
-	test $$status -eq 0 -a "$$n" -gt 0
+		go test -tags e2e -count=1 -v -timeout 30m -run '^TestFailover_' ./tests >"$(E2E_DIR)/test.log" 2>&1 || status=$$?; \
+		tail -n 40 "$(E2E_DIR)/test.log"; \
+		n=$$(grep -c '^--- PASS' "$(E2E_DIR)/test.log" || true); \
+		echo "e2e: $$n test(s) passed, selected by -run '^TestFailover_' with -tags e2e; exit $$status"; \
+		test $$status -eq 0 -a "$$n" -gt 0
