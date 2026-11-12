@@ -73,6 +73,11 @@ func TestParseConfig_Refuses(t *testing.T) {
 		"no CA":            {"-tls-cert", "cert.pem", "-tls-key", "key.pem"},
 		"issuer, no key":   {"-service-account-issuer", "https://gaon"},
 		"key, no issuer":   {"-service-account-signing-key-file", "key.pem"},
+		"verify keys only": {"-service-account-verify-key-files", "old.pem"},
+		"audiences only":   {"-api-audiences", "openbao"},
+		"http issuer":      {"-service-account-issuer", "http://gaon", "-service-account-signing-key-file", "key.pem"},
+		"issuer with path": {"-service-account-issuer", "https://gaon/path", "-service-account-signing-key-file", "key.pem"},
+		"issuer, query":    {"-service-account-issuer", "https://gaon?a=b", "-service-account-signing-key-file", "key.pem"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := apiserver.ParseConfig(args)
@@ -86,6 +91,28 @@ func TestParseConfig_TokenSigningFlags(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "https://gaon", cfg.ServiceAccountIssuer)
 	assert.Equal(t, "key.pem", cfg.ServiceAccountSigningKeyFile)
+	assert.Empty(t, cfg.ServiceAccountVerifyKeyFiles)
+
+	cfg, err = apiserver.ParseConfig([]string{"-service-account-issuer", "https://gaon:6443", "-service-account-signing-key-file", "key.pem", "-service-account-verify-key-files", "a.pem, b.pem"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a.pem", "b.pem"}, cfg.ServiceAccountVerifyKeyFiles)
+
+	cfg, err = apiserver.ParseConfig([]string{"-service-account-issuer", "https://gaon", "-service-account-signing-key-file", "key.pem", "-api-audiences", "openbao, gaon"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"openbao", "gaon"}, cfg.APIAudiences)
+}
+
+func TestRun_RefusesAVerificationKeyThatIsNotAnECPublicKey(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	signing := newSigningKey(t)
+	bad := writeFile(t, "bad.pem", []byte("not a key"))
+	cfg := apiserver.Config{Endpoints: []string{"http://127.0.0.1:1"}, DialTimeout: time.Second, ServiceAccountIssuer: "https://gaon", ServiceAccountSigningKeyFile: signing.file, ServiceAccountVerifyKeyFiles: []string{bad}}
+
+	err = apiserver.Run(context.Background(), cfg, ln, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	assert.ErrorContains(t, err, "token verification key")
 }
 
 func TestRun_RefusesATokenSigningKeyThatIsNotAnECKey(t *testing.T) {
