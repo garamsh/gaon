@@ -29,6 +29,10 @@ type Params struct {
 	RestartResetAfter time.Duration
 	// ReadTimeout bounds the read of an entrypoint's record.
 	ReadTimeout time.Duration
+	// TokenAudience is the audience a MicroVM's ServiceAccount token is
+	// requested with: one the API server accepts, by default its issuer. A
+	// MicroVM that names a ServiceAccount is not started while it is empty.
+	TokenAudience string
 }
 
 // Service runs the MicroVMs bound to the node.

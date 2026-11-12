@@ -56,6 +56,8 @@ type Server struct {
 	diskFailure v1alpha2.OutcomeKind
 	records     map[string]*v1alpha2.ExecRecord
 	silent      map[string]bool
+	guest       map[string]map[string][]byte
+	failWrites  bool
 }
 
 // New starts a fake mvmd on a socket in a plugintest.SocketDir, reading time from clk,
@@ -73,6 +75,7 @@ func New(t testing.TB, clk clock.Clock) *Server {
 		disks:    map[string]*v1alpha2.Disk{},
 		records:  map[string]*v1alpha2.ExecRecord{},
 		silent:   map[string]bool{},
+		guest:    map[string]map[string][]byte{},
 		events:   make(chan *v1alpha2.WatchEventsResponse, 256),
 		capacity: &v1alpha2.NodeCapacity{Cpus: 8, MemoryBytes: 16 << 30, StateTotalBytes: 100 << 30, StateAvailableBytes: 90 << 30},
 	}

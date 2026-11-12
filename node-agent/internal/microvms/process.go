@@ -29,26 +29,28 @@ func (e specFailure) Unwrap() error { return e.err }
 // under the Node's own identity. A missing object or key, a file that is over
 // the bound once resolved, and a file whose owner cannot be decided are
 // returned as a specFailure, as is a spec that sets workingDir, which mvmd has
-// no field for; any other error is retried.
-func (s *service) withProcess(ctx context.Context, m *api.MicroVM, req *v1alpha2.CreateMachineRequest) error {
+// no field for; any other error is retried. It also puts the token file of
+// the MicroVM's ServiceAccount in req, and returns what the agent remembers
+// of it.
+func (s *service) withProcess(ctx context.Context, m *api.MicroVM, req *v1alpha2.CreateMachineRequest) (tokenState, error) {
 	spec := &m.Spec
 	if spec.WorkingDir != "" {
-		return specFailure{ReasonInvalidSpec, errors.New("spec.workingDir is set, and mvmd takes no working directory at create (garamsh/mvmd#519)")}
+		return tokenState{}, specFailure{ReasonInvalidSpec, errors.New("spec.workingDir is set, and mvmd takes no working directory at create (garamsh/mvmd#519)")}
 	}
 	req.Command, req.Args, req.User = slices.Clone(spec.Command), slices.Clone(spec.Args), spec.User
-	refs := references{api: s.api, secrets: map[string]*api.Secret{}, configMaps: map[string]*api.ConfigMap{}}
+	refs := newReferences(s.api)
 	for _, e := range spec.Env {
 		value := []byte(e.Value)
 		if e.ValueFrom != nil {
 			var err error
 			if value, err = refs.resolve(ctx, e.ValueFrom); err != nil {
-				return fmt.Errorf("env %s: %w", e.Name, err)
+				return tokenState{}, fmt.Errorf("env %s: %w", e.Name, err)
 			}
 		}
 		req.Env = append(req.Env, &v1alpha2.EnvVar{Name: e.Name, Value: string(value)})
 	}
 	if len(spec.Files) > api.MaxFiles {
-		return specFailure{ReasonFilesOverBound, fmt.Errorf("spec.files holds %d files, want at most %d", len(spec.Files), api.MaxFiles)}
+		return tokenState{}, specFailure{ReasonFilesOverBound, fmt.Errorf("spec.files holds %d files, want at most %d", len(spec.Files), api.MaxFiles)}
 	}
 	total := 0
 	for _, f := range spec.Files {
@@ -56,15 +58,15 @@ func (s *service) withProcess(ctx context.Context, m *api.MicroVM, req *v1alpha2
 		if f.ValueFrom != nil {
 			var err error
 			if content, err = refs.resolve(ctx, f.ValueFrom); err != nil {
-				return fmt.Errorf("file %s: %w", f.Path, err)
+				return tokenState{}, fmt.Errorf("file %s: %w", f.Path, err)
 			}
 		}
 		if total += len(content); total > api.MaxFilesBytes {
-			return specFailure{ReasonFilesOverBound, fmt.Errorf("the content of spec.files is over %d bytes once resolved", api.MaxFilesBytes)}
+			return tokenState{}, specFailure{ReasonFilesOverBound, fmt.Errorf("the content of spec.files is over %d bytes once resolved", api.MaxFilesBytes)}
 		}
 		uid, gid, err := fileOwner(spec, f)
 		if err != nil {
-			return err
+			return tokenState{}, err
 		}
 		mode := api.DefaultFileMode
 		if f.Mode != nil {
@@ -72,7 +74,7 @@ func (s *service) withProcess(ctx context.Context, m *api.MicroVM, req *v1alpha2
 		}
 		req.Files = append(req.Files, &v1alpha2.File{Path: f.Path, Content: content, Mode: uint32(mode), Uid: uid, Gid: gid})
 	}
-	return nil
+	return s.withToken(ctx, m, req, total)
 }
 
 // fileOwner is the owner of f in the guest: its own, else the MicroVM's user,
@@ -102,6 +104,10 @@ type references struct {
 	api        API
 	secrets    map[string]*api.Secret
 	configMaps map[string]*api.ConfigMap
+}
+
+func newReferences(a API) *references {
+	return &references{api: a, secrets: map[string]*api.Secret{}, configMaps: map[string]*api.ConfigMap{}}
 }
 
 // resolve returns the value src names. The value is a Secret's or a

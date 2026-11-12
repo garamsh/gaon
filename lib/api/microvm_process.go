@@ -30,8 +30,9 @@ type KeyReference struct {
 }
 
 // ValueSource says where a value comes from: exactly one of a Secret's key or
-// a ConfigMap's key. It is resolved when the MicroVM starts and is not
-// updated while the MicroVM runs.
+// a ConfigMap's key. An env value is resolved when the MicroVM starts and is
+// not updated while it runs; a file's value is replaced in the running
+// MicroVM when the object changes (ADR 0029).
 type ValueSource struct {
 	SecretKeyRef    *KeyReference `json:"secretKeyRef,omitempty"`
 	ConfigMapKeyRef *KeyReference `json:"configMapKeyRef,omitempty"`

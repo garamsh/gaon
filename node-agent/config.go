@@ -38,6 +38,8 @@ const (
 	EnvPluginDir     = "GAON_PLUGIN_DIR"
 	EnvNetworkPlugin = "GAON_NETWORK_PLUGIN"
 	EnvStoragePlugin = "GAON_STORAGE_PLUGIN"
+
+	EnvServiceAccountAudience = "GAON_SERVICE_ACCOUNT_AUDIENCE"
 )
 
 // Config is what the agent is started with.
@@ -80,6 +82,12 @@ type Config struct {
 	// is empty and no disk is attached.
 	NetworkPlugin string
 	StoragePlugin string
+	// ServiceAccountAudience is the audience the agent requests a MicroVM's
+	// ServiceAccount token with. The API server accepts a token whose
+	// audience is one of its --api-audiences, by default its issuer URL, so
+	// this is that value. A MicroVM that names a ServiceAccount is not
+	// started while it is empty.
+	ServiceAccountAudience string
 }
 
 // Defaults of the durations. δ's is provisional: it is not measured.
@@ -141,6 +149,7 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	str(&c.PluginDir, "plugin-dir", EnvPluginDir, "directory the network and storage plugins serve their sockets in, default "+plugin.DefaultDir)
 	str(&c.NetworkPlugin, "network-plugin", EnvNetworkPlugin, "name of the network plugin, which decides each MicroVM's network policy; none when empty")
 	str(&c.StoragePlugin, "storage-plugin", EnvStoragePlugin, "name of the storage plugin, which decides each MicroVM's disks; none when empty")
+	str(&c.ServiceAccountAudience, "service-account-audience", EnvServiceAccountAudience, "audience of a MicroVM's ServiceAccount token: one of the API server's --api-audiences, by default its issuer URL; a MicroVM that names a ServiceAccount is not started while empty")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
