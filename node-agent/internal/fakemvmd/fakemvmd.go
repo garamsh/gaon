@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/garamsh/gaon/lib/plugin/plugintest"
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
@@ -54,14 +55,14 @@ type Server struct {
 	silent      map[string]bool
 }
 
-// New starts a fake mvmd on a socket under t.TempDir, reading time from clk,
+// New starts a fake mvmd on a socket in a plugintest.SocketDir, reading time from clk,
 // and stops it when the test ends.
 func New(t testing.TB, clk clock.Clock) *Server {
 	t.Helper()
 	// A socket path is limited to about 100 bytes, so it sits in a short
 	// directory of its own.
 	s := &Server{
-		Socket:   filepath.Join(shortTempDir(t), "mvmd.sock"),
+		Socket:   filepath.Join(plugintest.SocketDir(t), "mvmd.sock"),
 		clock:    clk,
 		machines: map[string]*v1alpha2.Machine{},
 		disks:    map[string]*v1alpha2.Disk{},

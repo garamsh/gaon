@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/lib/plugin/plugintest"
 	nodeagent "github.com/garamsh/gaon/node-agent"
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
@@ -66,15 +67,6 @@ func run(m *testing.M) int {
 		}
 	}
 	return m.Run()
-}
-
-// socketDir returns a directory short enough for a Unix socket path.
-func socketDir(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "gp")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
 }
 
 // process is a plugin started by a test.
@@ -153,7 +145,7 @@ type world struct {
 
 func newWorld(t *testing.T) *world {
 	t.Helper()
-	return &world{gaon: fakegaon.New(t), mvmd: fakemvmd.New(t, clock.System{}), dir: socketDir(t)}
+	return &world{gaon: fakegaon.New(t), mvmd: fakemvmd.New(t, clock.System{}), dir: plugintest.SocketDir(t)}
 }
 
 func (w *world) socket(kind, name string) string { return filepath.Join(w.dir, kind+"-"+name+".sock") }

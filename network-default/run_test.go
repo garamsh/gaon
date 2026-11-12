@@ -2,7 +2,6 @@ package networkdefault_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -10,13 +9,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/lib/plugin"
+	"github.com/garamsh/gaon/lib/plugin/plugintest"
 	networkdefault "github.com/garamsh/gaon/network-default"
 )
 
 func TestRun_ServesThePolicyOfItsPrefixesOnTheSocketOfTheNamedPlugin(t *testing.T) {
-	dir, err := os.MkdirTemp("", "nd")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := plugintest.SocketDir(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {

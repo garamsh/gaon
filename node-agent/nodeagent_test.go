@@ -107,6 +107,26 @@ func TestParseConfig_FlagsOverrideEnvironment(t *testing.T) {
 	assert.Equal(t, 2*time.Minute, cfg.RestartResetAfter)
 }
 
+func TestParseConfig_RefusesAPluginDirectoryWhoseSocketPathIsOverTheLimit(t *testing.T) {
+	// "/" + "network-a.sock" is 15 bytes, so a directory of 92 bytes makes 107.
+	atLimit := "/" + strings.Repeat("d", 91)
+	for _, kind := range []struct{ env, name string }{{nodeagent.EnvNetworkPlugin, "a"}, {nodeagent.EnvStoragePlugin, "a"}} {
+		t.Run(kind.env, func(t *testing.T) {
+			m := map[string]string{kind.env: kind.name, nodeagent.EnvPluginDir: atLimit}
+			for k, v := range required {
+				m[k] = v
+			}
+			_, err := nodeagent.ParseConfig(nil, env(m), io.Discard)
+			require.NoError(t, err, "the control: a path on the limit is accepted")
+
+			m[nodeagent.EnvPluginDir] = atLimit + "d"
+			_, err = nodeagent.ParseConfig(nil, env(m), io.Discard)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "over the 107")
+		})
+	}
+}
+
 func TestParseConfig_RefusesWhatItCannotRunWith(t *testing.T) {
 	tests := []struct {
 		name string

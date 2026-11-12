@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,17 +16,8 @@ import (
 
 	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/lib/plugin"
+	"github.com/garamsh/gaon/lib/plugin/plugintest"
 )
-
-// shortDir is a directory whose path leaves room for a socket name, which
-// t.TempDir does not always.
-func shortDir(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "plg")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
-}
 
 func start(t *testing.T, serve func(ctx context.Context) error) {
 	t.Helper()
@@ -84,7 +76,7 @@ func (s *storage) Release(_ context.Context, id string) error {
 }
 
 func TestNetwork_APolicyArrivesWithEveryFieldAndTheMicroVMItWasAskedFor(t *testing.T) {
-	dir := shortDir(t)
+	dir := plugintest.SocketDir(t)
 	want := &plugin.NetworkPolicy{
 		Egress: []plugin.NetworkRule{{Prefix: "10.0.0.0/8", Protocol: plugin.Any}},
 		Ingress: []plugin.NetworkRule{
@@ -111,7 +103,7 @@ func TestNetwork_APolicyArrivesWithEveryFieldAndTheMicroVMItWasAskedFor(t *testi
 }
 
 func TestNetwork_ARefusalArrivesAsARefusalAndAnyOtherErrorDoesNot(t *testing.T) {
-	dir := shortDir(t)
+	dir := plugintest.SocketDir(t)
 	n := &network{err: &plugin.Refusal{Reason: "UnknownNetwork", Message: "no such network"}}
 	start(t, func(ctx context.Context) error { return plugin.ServeNetwork(ctx, dir, "test", n) })
 	waitSocket(t, dir, plugin.KindNetwork, "test")
@@ -135,7 +127,7 @@ func TestNetwork_ARefusalArrivesAsARefusalAndAnyOtherErrorDoesNot(t *testing.T) 
 }
 
 func TestNetwork_APluginThatIsNotRunningFailsTheCallWithoutRefusing(t *testing.T) {
-	dir := shortDir(t)
+	dir := plugintest.SocketDir(t)
 	c, err := plugin.DialNetwork(dir, "absent")
 	require.NoError(t, err)
 	defer c.Close()
@@ -149,7 +141,7 @@ func TestNetwork_APluginThatIsNotRunningFailsTheCallWithoutRefusing(t *testing.T
 }
 
 func TestNetwork_APluginStartedAfterTheClientWasMadeAnswersTheNextCall(t *testing.T) {
-	dir := shortDir(t)
+	dir := plugintest.SocketDir(t)
 	c, err := plugin.DialNetwork(dir, "late")
 	require.NoError(t, err)
 	defer c.Close()
@@ -168,7 +160,7 @@ func TestNetwork_APluginStartedAfterTheClientWasMadeAnswersTheNextCall(t *testin
 }
 
 func TestStorage_DisksArriveAndReleaseCarriesTheMachineID(t *testing.T) {
-	dir := shortDir(t)
+	dir := plugintest.SocketDir(t)
 	s := &storage{disks: []plugin.DiskAttachment{{DiskID: "volume-a"}, {DiskID: "volume-b", ReadOnly: true}}}
 	start(t, func(ctx context.Context) error { return plugin.ServeStorage(ctx, dir, "test", s) })
 	waitSocket(t, dir, plugin.KindStorage, "test")
@@ -185,7 +177,7 @@ func TestStorage_DisksArriveAndReleaseCarriesTheMachineID(t *testing.T) {
 }
 
 func TestStorage_ARefusalArrivesAsARefusalAndAFailedReleaseAsAnError(t *testing.T) {
-	dir := shortDir(t)
+	dir := plugintest.SocketDir(t)
 	s := &storage{err: &plugin.Refusal{Reason: "VolumeNotFound", Message: "volume x"}}
 	start(t, func(ctx context.Context) error { return plugin.ServeStorage(ctx, dir, "test", s) })
 	waitSocket(t, dir, plugin.KindStorage, "test")
@@ -208,7 +200,7 @@ func TestStorage_ARefusalArrivesAsARefusalAndAFailedReleaseAsAnError(t *testing.
 }
 
 func TestServe_RefusesASocketAnotherProcessServesAndReplacesAStaleOne(t *testing.T) {
-	dir := shortDir(t)
+	dir := plugintest.SocketDir(t)
 	start(t, func(ctx context.Context) error {
 		return plugin.ServeNetwork(ctx, dir, "test", &network{policy: &plugin.NetworkPolicy{}})
 	})
@@ -247,8 +239,37 @@ func TestSocketPath_NamesTheKindAndRefusesANameThatLeavesTheDirectory(t *testing
 	assert.Error(t, err)
 }
 
+func TestSocketPath_RefusesAPathOverTheLimitAndNamesIt(t *testing.T) {
+	// "/" + "network-a.sock" is 15 bytes, so a directory of 92 bytes makes 107.
+	atLimit := "/" + strings.Repeat("d", 91)
+	p, err := plugin.SocketPath(atLimit, plugin.KindNetwork, "a")
+	require.NoError(t, err)
+	require.Len(t, p, plugin.MaxSocketPathLen, "the control must sit on the limit")
+
+	_, err = plugin.SocketPath(atLimit+"d", plugin.KindNetwork, "a")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "over the 107")
+}
+
+func TestServe_RefusesADirectoryWhoseSocketPathIsOverTheLimitBeforeBinding(t *testing.T) {
+	dir := plugintest.SocketDir(t)
+	long := filepath.Join(dir, strings.Repeat("d", plugin.MaxSocketPathLen))
+
+	err := plugin.ServeNetwork(t.Context(), long, "test", &network{})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "over the 107")
+	_, statErr := os.Stat(long)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "nothing was made for a socket that cannot be bound")
+
+	start(t, func(ctx context.Context) error {
+		return plugin.ServeNetwork(ctx, dir, "test", &network{policy: &plugin.NetworkPolicy{}})
+	})
+	waitSocket(t, dir, plugin.KindNetwork, "test")
+}
+
 func TestServe_RestrictsTheSocketToItsUserAndMakesTheDirectoryItCreatesPrivate(t *testing.T) {
-	dir := filepath.Join(shortDir(t), "plugins")
+	dir := filepath.Join(plugintest.SocketDir(t), "plugins")
 	start(t, func(ctx context.Context) error {
 		return plugin.ServeNetwork(ctx, dir, "test", &network{policy: &plugin.NetworkPolicy{}})
 	})
