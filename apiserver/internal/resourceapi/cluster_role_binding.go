@@ -1,0 +1,54 @@
+package resourceapi
+
+import (
+	"context"
+
+	"github.com/garamsh/gaon/lib/api"
+)
+
+// PutClusterRoleBinding creates b, or changes the subjects of the stored
+// ClusterRoleBinding b was read at. An update that changes roleRef is Invalid.
+func (s *service) PutClusterRoleBinding(ctx context.Context, name string, b *api.ClusterRoleBinding) (*api.ClusterRoleBinding, error) {
+	if err := checkName(name, b.Metadata.Name); err != nil {
+		return nil, err
+	}
+	if err := b.Validate(); err != nil {
+		return nil, err
+	}
+	return clusterRoleBindings.put(ctx, s.st, b, func() error { return nil }, func(old *api.ClusterRoleBinding) error {
+		if b.RoleRef != old.RoleRef {
+			return api.NewAPIError(api.ReasonInvalid, "roleRef of clusterrolebinding %q cannot change", name)
+		}
+		return nil
+	})
+}
+
+// DeleteClusterRoleBinding removes the ClusterRoleBinding if rv is its current
+// version.
+func (s *service) DeleteClusterRoleBinding(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterRoleBinding, error) {
+	b, rev, err := clusterRoleBindings.get(ctx, s.st, name)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkVersion(clusterRoleBindings.plural, name, rv, b.Metadata.ResourceVersion); err != nil {
+		return nil, err
+	}
+	return b, clusterRoleBindings.remove(ctx, s.st, b, rev)
+}
+
+func (s *service) GetClusterRoleBinding(ctx context.Context, name string) (*api.ClusterRoleBinding, error) {
+	b, _, err := clusterRoleBindings.get(ctx, s.st, name)
+	return b, err
+}
+
+func (s *service) ListClusterRoleBindings(ctx context.Context) (*api.ClusterRoleBindingList, error) {
+	items, rv, err := clusterRoleBindings.list(ctx, s.st)
+	if err != nil {
+		return nil, err
+	}
+	return &api.ClusterRoleBindingList{TypeMeta: api.TypeMeta{APIVersion: api.RBACGroupVersion, Kind: api.KindClusterRoleBindingList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
+}
+
+func (s *service) WatchClusterRoleBindings(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
+	return clusterRoleBindings.watch(ctx, s.st, rv)
+}
