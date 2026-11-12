@@ -16,7 +16,7 @@ endef
 # The Go files git tracks or would track, NUL separated.
 GO_FILES = git ls-files --cached --others --exclude-standard -z -- '*.go'
 
-.PHONY: lint format format-apply test build ci e2e
+.PHONY: lint format format-apply test build ci e2e e2e-extensions
 
 lint:
 	@$(call count_packages,lint)
@@ -40,7 +40,7 @@ build:
 	@$(call count_packages,build)
 	go build $(PATTERNS)
 
-ci: lint format test build
+ci: lint format test build e2e-extensions
 
 # The end-to-end test of M1 on QEMU Nodes. It is not part of ci: it needs /dev/kvm
 # with nested virtualization (docs/architecture/e2e.md). E2E_DISABLE names services
@@ -69,4 +69,23 @@ e2e:
 		tail -n 40 "$(E2E_DIR)/test.log"; \
 		n=$$(grep -c '^--- PASS' "$(E2E_DIR)/test.log" || true); \
 		echo "e2e: $$n test(s) passed, selected by -run '^TestFailover_' with -tags e2e; exit $$status"; \
+		test $$status -eq 0 -a "$$n" -gt 0
+
+# The extension points under RBAC on this host, with no KVM: the built services
+# run against embedded etcd and a test-served mvmd (docs/architecture/e2e.md).
+# The build tag keeps the test out of lint and test, so vet compiles it here.
+EXT_DIR ?= $(CURDIR)/build/e2e-extensions
+
+e2e-extensions:
+	rm -rf "$(EXT_DIR)"
+	mkdir -p "$(EXT_DIR)/services"
+	for s in $(GAON_SERVICES); do \
+		go build -o "$(EXT_DIR)/services/$${s%%:*}" "$${s#*:}"; \
+	done
+	cd tooling/e2e && go vet -tags extensions ./extensions
+	status=0; cd tooling/e2e && E2E_EXT_SERVICES="$(EXT_DIR)/services" \
+		go test -tags extensions -count=1 -v -timeout 10m ./extensions >"$(EXT_DIR)/test.log" 2>&1 || status=$$?; \
+		tail -n 40 "$(EXT_DIR)/test.log"; \
+		n=$$(grep -c '^--- PASS' "$(EXT_DIR)/test.log" || true); \
+		echo "e2e-extensions: $$n test(s) passed, selected by -tags extensions ./extensions; exit $$status"; \
 		test $$status -eq 0 -a "$$n" -gt 0
