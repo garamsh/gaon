@@ -2,6 +2,7 @@ package resourceapi
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/garamsh/gaon/lib/api"
@@ -37,14 +38,21 @@ func hasStatusSubresource(d *api.CustomResourceDefinition) bool {
 // from the moment the definition holds its names until the definition is
 // removed, so the objects of a definition being deleted stay reachable.
 func (s *service) servedDefinition(ctx context.Context, p CustomPath) (*api.CustomResourceDefinition, error) {
-	d, _, err := customResourceDefinitions.get(ctx, s.st, p.Plural+"."+p.Group)
+	d, _, err := s.servedDefinitionAt(ctx, p)
+	return d, err
+}
+
+// servedDefinitionAt is servedDefinition and the revision of the stored
+// definition, which a create of an object is fenced on.
+func (s *service) servedDefinitionAt(ctx context.Context, p CustomPath) (*api.CustomResourceDefinition, int64, error) {
+	d, rev, err := customResourceDefinitions.get(ctx, s.st, p.Plural+"."+p.Group)
 	if err == nil && d.Spec.Versions[0].Name == p.Version && namesAccepted(d) {
-		return d, nil
+		return d, rev, nil
 	}
 	if err != nil && !isReason(err, api.ReasonNotFound) {
-		return nil, err
+		return nil, 0, err
 	}
-	return nil, api.NewAPIError(api.ReasonNotFound, "no resource %q is served under %s/%s", p.Plural, p.Group, p.Version)
+	return nil, 0, api.NewAPIError(api.ReasonNotFound, "no resource %q is served under %s/%s", p.Plural, p.Group, p.Version)
 }
 
 // PutCustomObject creates o, or changes the stored object o was read at. The
@@ -52,17 +60,21 @@ func (s *service) servedDefinition(ctx context.Context, p CustomPath) (*api.Cust
 // enabled o's status is not taken. An update that clears the last finalizer of
 // an object being deleted removes it.
 func (s *service) PutCustomObject(ctx context.Context, p CustomPath, name string, o *api.CustomObject) (*api.CustomObject, error) {
-	d, out, removed, err := s.putCustomObject(ctx, p, name, o)
-	if err == nil && removed {
-		_, err = s.finishDefinition(ctx, d)
+	for range fenceAttempts {
+		d, out, removed, err := s.putCustomObject(ctx, p, name, o)
+		if errors.Is(err, errFenceMoved) {
+			continue
+		}
+		if err == nil && removed {
+			_, err = s.finishDefinition(ctx, d)
+		}
+		return out, err
 	}
-	return out, err
+	return nil, api.NewAPIError(api.ReasonConflict, "the definition of %q was changed meanwhile; retry", p.Plural)
 }
 
 func (s *service) putCustomObject(ctx context.Context, p CustomPath, name string, o *api.CustomObject) (d *api.CustomResourceDefinition, out *api.CustomObject, removed bool, err error) {
-	s.defs.RLock()
-	defer s.defs.RUnlock()
-	d, err = s.servedDefinition(ctx, p)
+	d, defRev, err := s.servedDefinitionAt(ctx, p)
 	if err != nil {
 		return nil, nil, false, err
 	}
@@ -100,7 +112,11 @@ func (s *service) putCustomObject(ctx context.Context, p CustomPath, name string
 		if err := validate(ctx, s, k, "", api.OperationCreate, o, nil); err != nil {
 			return nil, nil, false, err
 		}
-		return d, o, false, k.create(ctx, s.st, o)
+		// The create holds the definition at the revision read: once the
+		// definition is being deleted, or its schema changed, it fails and the
+		// object is judged again against the definition as it stands.
+		fenced := fencedStore{Store: s.st, fence: []Write{{Key: customResourceDefinitions.key(d.Metadata.Name), Revision: defRev}}}
+		return d, o, false, k.create(ctx, fenced, o)
 	}
 	old, rev, err := k.get(ctx, s.st, name)
 	if err != nil {
@@ -139,8 +155,6 @@ func (s *service) putCustomObject(ctx context.Context, p CustomPath, name string
 // at, after the schema has pruned and validated it. The path exists only where
 // the definition enables the status subresource.
 func (s *service) PutCustomObjectStatus(ctx context.Context, p CustomPath, name string, next *api.CustomObject) (*api.CustomObject, error) {
-	s.defs.RLock()
-	defer s.defs.RUnlock()
 	d, err := s.servedDefinition(ctx, p)
 	if err != nil {
 		return nil, err
@@ -187,8 +201,6 @@ func (s *service) DeleteCustomObject(ctx context.Context, p CustomPath, name str
 }
 
 func (s *service) deleteCustomObject(ctx context.Context, p CustomPath, name string, rv api.ResourceVersion) (*api.CustomResourceDefinition, *api.CustomObject, bool, error) {
-	s.defs.RLock()
-	defer s.defs.RUnlock()
 	d, err := s.servedDefinition(ctx, p)
 	if err != nil {
 		return nil, nil, false, err

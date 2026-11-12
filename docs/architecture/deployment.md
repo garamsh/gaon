@@ -11,11 +11,14 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 | Where | Runs |
 |---|---|
 | Every Node | `gaon-node-agent`, beside mvmd ([node-agent.md](./node-agent.md)), and the plugin processes the Node's config names: `gaon-network-default` and `gaon-storage-local` for the built-ins, and any third party's ([node-agent.md](./node-agent.md) §Plugins) |
-| One control-plane Node | etcd, `gaon-apiserver`, `gaon-scheduler`, `gaon-controllers` |
+| Each of three control-plane Nodes | etcd (one member of three), `gaon-apiserver`, `gaon-scheduler`, `gaon-controllers` |
 
-- **One instance of each control-plane service.** The scheduler and the controllers have no leader election: no Go file outside a test mentions one, and `gaon-scheduler` and `gaon-controllers` each start their loop unconditionally (`scheduler/cmd/gaon-scheduler/main.go`, `controllers/cmd/gaon-controllers/main.go`). A second instance of either is not supported.
-- **etcd is on the API server's loopback.** `gaon-apiserver` dials etcd over plain HTTP and has no etcd TLS flag (`apiserver/config.go`), its default endpoint being `http://127.0.0.1:2379`.
-- **etcd's data persists across a reboot and an upgrade.** The Store holds every resource, so losing it loses them all ([ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md) for the single member).
+- **Three control-plane Nodes, one instance of each service on each.** `gaon-scheduler` and `gaon-controllers` each run on all three but act only on the Node that holds their coordination Lease, `gaon-scheduler` and `gaon-controllers`; the others poll it and do nothing else. A holder stopped cleanly releases it and another takes it on its next poll; after a crash another takes it between 15s and 19s after the last renewal with the default times. The flags are `--leader-elect` (on by default), `--leader-election-name`, `--leader-election-identity`, `--leader-election-duration` (15s), `--leader-election-renew-deadline` (10s) and `--leader-election-retry-period` (2s); `-leader-elect=false` is for a deployment with one instance. [ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md).
+- **The Nodes' etcd members form one cluster.** Each `gaon-apiserver` gets all three members' client endpoints, the same list on every Node, in `--etcd-endpoints`; it starts if any one answers. The cluster keeps its quorum with one Node down.
+- **Clients reach the API server through one address,** naru's virtual IP (garamsh/naru#59). The CLI's `--server`, the scheduler's and the controllers' `-api` and every Node Agent's `--api-server` name it; no client takes a list of addresses. The scheduler and the controllers each present their own client certificate, the same on every Node.
+- **The etcd version follows the API server's.** `gaon-apiserver` is built against etcd 3.6.16 and naru's etcd image takes its version from `apiserver/go.mod`, so a bump of one is a bump of both.
+- **etcd is dialled over plain HTTP.** `gaon-apiserver` has no etcd TLS flag (`apiserver/config.go`), and its default endpoint is `http://127.0.0.1:2379`. With three members the client and peer ports are on the Node network, which naru's configuration is to keep closed to everything but the Nodes of the control plane.
+- **etcd's data persists across a reboot and an upgrade.** The Store holds every resource, so losing it loses them all ([ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md), its single member superseded by [ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md)).
 - **The CLI is not a Node service.** `gaon` runs wherever an operator uses it ([cli.md](./cli.md)).
 
 ### Plugins
@@ -62,13 +65,14 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 - Who starts gaon's services and how gaon relates to naru: [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md).
 - The authorization mode, the roles and the certificate subjects: [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md).
 - Plugins as separate processes of a Node, their socket directory and the identity they use: [ADR 0019](./adr/0019-the-node-agent-reaches-its-network-and-storage-plugins-as-separate-processes-through-a-versioned-grpc-api-on-unix-sockets.md).
-- One etcd member, and what its loss costs: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
+- etcd as the Store and what its loss costs: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md). Three Nodes, three members, the election and the VIP: [ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md).
 - Mutual TLS, one certificate per caller, and issuance outside gaon: [ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md).
 - The bootstrap token, the signing request and renewal, which narrow ADR 0005 for Node Agents: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md).
 
 ## Open questions
 
 - **Garbage collection of CertificateSigningRequests.** The contract has no delete path, so requests stay in the Store ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md)).
-- **Growth beyond one member.** More etcd members, and a control plane that is not one Node, wait for their own ADR; the scheduler and the controllers then need leader election or another way to run once.
+- **Growth beyond three members.** More members, or more than one cell, wait for their own ADR.
+- **etcd TLS.** The API server has no flag for etcd's client TLS, so the three members' client ports carry plain HTTP between the Nodes.
 - **Skew policy.** Which Node Agent and API server versions work together is left to `v1beta1`.
 - **Node API.** How gaon calls naru's node API to apply a config is not decided ([ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md)).

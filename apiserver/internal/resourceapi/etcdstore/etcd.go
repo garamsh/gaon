@@ -20,20 +20,27 @@ type Store struct {
 	cli *clientv3.Client
 }
 
-// New connects to the etcd endpoints and checks that one answers within
+// New connects to the etcd endpoints and checks that one answers, each within
 // timeout.
 func New(ctx context.Context, endpoints []string, timeout time.Duration) (*Store, error) {
 	cli, err := clientv3.New(clientv3.Config{Endpoints: endpoints, DialTimeout: timeout, Logger: zap.NewNop()})
 	if err != nil {
 		return nil, fmt.Errorf("connect to etcd: %w", err)
 	}
-	probe, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if _, err := cli.Status(probe, endpoints[0]); err != nil {
-		_ = cli.Close()
-		return nil, fmt.Errorf("reach etcd at %s: %w", endpoints[0], err)
+	// One member answering is enough: the others may be down while the cluster
+	// still has a quorum, and the client reaches the cluster through any member.
+	var failures []error
+	for _, endpoint := range endpoints {
+		probe, cancel := context.WithTimeout(ctx, timeout)
+		_, err := cli.Status(probe, endpoint)
+		cancel()
+		if err == nil {
+			return &Store{cli: cli}, nil
+		}
+		failures = append(failures, fmt.Errorf("%s: %w", endpoint, err))
 	}
-	return &Store{cli: cli}, nil
+	_ = cli.Close()
+	return nil, fmt.Errorf("reach etcd: %w", errors.Join(failures...))
 }
 
 // Close closes the connection to etcd.

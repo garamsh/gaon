@@ -23,6 +23,7 @@ type config struct {
 	interval   time.Duration
 	httpClient *http.Client
 	scheduler  scheduler.Config
+	leader     *api.LeaderElectionFlags
 }
 
 // parseFlags reads the flags in args and builds the HTTP client the --tls
@@ -35,6 +36,7 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 	interval := fs.Duration("interval", 5*time.Second, "time between scheduling passes")
 	configFile := fs.String("config", "", "scheduler configuration file; with none, no score plugin and no extender is enabled")
 	files := api.RegisterTLSFlags(fs)
+	leader := api.RegisterLeaderElectionFlags(fs, "gaon-scheduler")
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -52,7 +54,7 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 			return config{}, err
 		}
 	}
-	return config{root: *root, interval: *interval, httpClient: httpClient, scheduler: sc}, nil
+	return config{root: *root, interval: *interval, httpClient: httpClient, scheduler: sc, leader: leader}, nil
 }
 
 func main() {
@@ -69,6 +71,23 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if err := run(ctx, cfg, log); err != nil {
+		log.Error("stopped", "err", err)
+		os.Exit(1)
+	}
+}
+
+// run schedules while this process holds the coordination Lease, or at once
+// when leader election is off. Each term builds a service of its own, so that a
+// process that lost the Lease and took it again starts from the Store's state.
+func run(ctx context.Context, cfg config, log *slog.Logger) error {
+	elector, err := cfg.leader.Elector(cfg.root, cfg.httpClient)
+	if err != nil {
+		return err
+	}
 	client := api.NewClient(cfg.root, cfg.httpClient)
-	scheduler.NewService(client, log, scheduler.WithConfig(cfg.scheduler)).Run(ctx, cfg.interval)
+	return api.RunLeading(ctx, elector, func(ctx context.Context) error {
+		scheduler.NewService(client, log, scheduler.WithConfig(cfg.scheduler)).Run(ctx, cfg.interval)
+		return nil
+	})
 }

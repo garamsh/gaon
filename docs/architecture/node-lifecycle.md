@@ -11,6 +11,7 @@ Basis: [resource-api.md](./resource-api.md) §Lease and fencing and §Node, and 
 - **The node lifecycle controller confirms Lease expiry.** It is the one unit that does. The Scheduler reads the result from the Node and does not measure a Lease.
 - **It writes one thing**: the Node condition `LeaseExpired`, through `PUT /nodes/{name}/status`, by compare-and-swap on the Node it read. It re-reads and tries again when the write conflicts.
 - **It never writes `/binding`**, a Node's `spec` or any MicroVM. Only the Scheduler writes `/binding`, and the Scheduler places a MicroVM only on a Node without `LeaseExpired` true ([resource-api.md](./resource-api.md) §Node).
+- **It acts only while the controllers hold their Lease.** It runs inside the term of `gaon-controllers`, with the garbage collector and the signer ([deployment.md](./deployment.md); [ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md)). A term starts with no observation: the controller counts each Lease's duration from the first version it sees in the term, so after a takeover a Node's expiry is confirmed no sooner than one Lease duration after the new term began.
 - It uses the public resource API through `lib/api` and imports no other unit.
 
 ### Timing
@@ -44,6 +45,7 @@ Basis: [resource-api.md](./resource-api.md) §Lease and fencing and §Node, and 
 
 - Lease validity is measured by the observer because a renew time written by one machine cannot be compared with another machine's clock ([resource-api.md](./resource-api.md) §Rationale).
 - The controller, not the Scheduler, confirms expiry: the Scheduler writes `/binding` only and reads the Node, and writing a Node's `/status` is a controller's section ([resource-api.md](./resource-api.md) §Common rules).
+- The first sighting restarts with each term, so a takeover delays a confirmation and never brings one forward.
 - It counts from the first sighting of a version and not from the renew time because only that is the observer's own clock.
 - A Node with no Lease counts from its first sighting for the same reason, and for a duration the controller holds itself because there is no Lease to carry one.
 

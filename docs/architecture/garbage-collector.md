@@ -12,6 +12,7 @@ Basis: [ADR 0018](./adr/0018-metadata-gains-uid-labels-and-owner-references-list
 - **An object is deleted when it has at least one owner reference and every one of them is gone.** One owner still present keeps the object. An object with no owner reference is never deleted.
 - **It works for every kind**: the built-in kinds the API server serves, and each kind of a CustomResourceDefinition whose condition `Established` is true. An owner reference is matched to a kind by its `apiVersion` and `kind`, because the Lease of the compute group and the Lease of the coordination group share a kind name.
 - **It writes only DELETE**, at the `resourceVersion` it listed. A conflict or a missing object is not an error: the next sweep decides again.
+- **It acts only while the controllers hold their Lease,** inside the term of `gaon-controllers` ([deployment.md](./deployment.md); [ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md)). It keeps no state between sweeps, so a new holder starts where the old one left off.
 - It uses the public resource API through `lib/api` and imports no other unit.
 
 ### When an owner is gone

@@ -4,7 +4,6 @@ package resourceapi
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/garamsh/gaon/apiserver/internal/admission"
@@ -132,11 +131,6 @@ type service struct {
 	st    Store
 	now   func() time.Time
 	hooks *admission.Caller
-	// defs orders the writes of definitions, which take it whole, against the
-	// writes of objects, which share it: an object is not created under a
-	// definition that is being deleted, and a definition is not removed under
-	// an object being created.
-	defs sync.RWMutex
 }
 
 // NewService returns the Service over st. now is the clock that stamps a
