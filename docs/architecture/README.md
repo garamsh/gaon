@@ -22,7 +22,7 @@ Current architecture of the system and the decisions behind it. This file is the
 
 - Responsibility documents
   - [structure.md](./structure.md): the shape gaon is partitioned into, what may reference what, and when a new unit is earned.
-  - [resource-api.md](./resource-api.md): the `v1alpha1` resource API contract: writers, state transitions, Lease and fencing, invariants, paths and authorization.
+  - [resource-api.md](./resource-api.md): the `v1alpha1` resource API contract: writers, state transitions, Lease and fencing, invariants, paths, authorization and resource definitions.
   - [apiserver.md](./apiserver.md): how `gaon-apiserver` serves the resource API over etcd and holds the invariants the contract gives it.
   - [scheduler.md](./scheduler.md): what the Scheduler binds, the placement rule, and when it rebinds.
   - [node-lifecycle.md](./node-lifecycle.md): how the node lifecycle controller confirms Lease expiry and the condition it records.
@@ -39,3 +39,4 @@ Current architecture of the system and the decisions behind it. This file is the
   - [0006](./adr/0006-a-gaon-deployment-is-one-control-plane-node-configured-by-argv-and-files.md): a gaon deployment is one control-plane Node, its services configured by argv and files, pinned by commit.
   - [0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md): a Node gets its client certificate from gaon's own CA through a CertificateSigningRequest, which a bootstrap token may create.
   - [0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md): the API server authorizes certificate callers with cluster roles, bindings and a Node authorizer.
+  - [0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md): a user registers a resource kind with a CustomResourceDefinition, and the API server serves it under its own group.
