@@ -130,7 +130,10 @@ func TestNewServerTLSClientRefusesTLS12AndAFileItCannotUse(t *testing.T) {
 	_, err = api.NewClient(current.URL, c).GetNode(testContext(t), "node-a")
 	require.NoError(t, err, "control: a TLS 1.3 server is reached")
 
-	old := httptest.NewUnstartedServer(http.NotFoundHandler())
+	old := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(newNode("node-a"))
+	}))
 	certPEM, keyPEM := ca.issue(t, "server")
 	pair, err := tls.X509KeyPair(certPEM, keyPEM)
 	require.NoError(t, err)
