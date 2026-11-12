@@ -22,6 +22,7 @@ type config struct {
 	root       string
 	interval   time.Duration
 	httpClient *http.Client
+	scheduler  scheduler.Config
 }
 
 // parseFlags reads the flags in args and builds the HTTP client the --tls
@@ -32,6 +33,7 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 	fs.SetOutput(out)
 	root := fs.String("api", "", "group and version root of the resource API, e.g. http://127.0.0.1:8080/apis/compute.gaon.garam.sh/v1alpha1")
 	interval := fs.Duration("interval", 5*time.Second, "time between scheduling passes")
+	configFile := fs.String("config", "", "scheduler configuration file; with none, no score plugin and no extender is enabled")
 	files := api.RegisterTLSFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
@@ -44,7 +46,13 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 		return config{}, err
 	}
 	httpClient.Timeout = 30 * time.Second
-	return config{root: *root, interval: *interval, httpClient: httpClient}, nil
+	var sc scheduler.Config
+	if *configFile != "" {
+		if sc, err = scheduler.LoadConfig(*configFile); err != nil {
+			return config{}, err
+		}
+	}
+	return config{root: *root, interval: *interval, httpClient: httpClient, scheduler: sc}, nil
 }
 
 func main() {
@@ -62,5 +70,5 @@ func main() {
 	defer stop()
 
 	client := api.NewClient(cfg.root, cfg.httpClient)
-	scheduler.NewService(client, log).Run(ctx, cfg.interval)
+	scheduler.NewService(client, log, scheduler.WithConfig(cfg.scheduler)).Run(ctx, cfg.interval)
 }
