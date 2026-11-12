@@ -9,8 +9,10 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/garamsh/gaon/apiserver/internal/resourceapi"
+	"github.com/garamsh/gaon/apiserver/internal/token"
 	"github.com/garamsh/gaon/lib/api"
 )
 
@@ -58,6 +60,41 @@ func (s tokenSet) identify(header string) (identity, bool) {
 	return id, found == 1
 }
 
+// accountTokens authenticates the bearer tokens of the server's own issuer.
+type accountTokens struct {
+	verifier *token.Verifier
+	// microvm reads the MicroVM a token is bound to.
+	microvm func(ctx context.Context, name string) (*api.MicroVM, error)
+	now     func() time.Time
+}
+
+// identify returns the identity of the holder of the service account token in
+// header: the token's subject, where the token verifies, has not expired and
+// is bound to a MicroVM that still exists with the uid it names. A token that
+// does not hold is not an error; a failure to read the MicroVM is. A nil
+// accountTokens authenticates nobody.
+func (a *accountTokens) identify(ctx context.Context, header string) (identity, bool, error) {
+	presented, ok := strings.CutPrefix(header, "Bearer ")
+	if a == nil || !ok {
+		return identity{}, false, nil
+	}
+	claims, err := a.verifier.Verify(presented, a.now())
+	if err != nil {
+		return identity{}, false, nil
+	}
+	m, err := a.microvm(ctx, claims.Extension.MicroVM.Name)
+	if errors.Is(err, api.ErrNotFound) {
+		return identity{}, false, nil
+	}
+	if err != nil {
+		return identity{}, false, err
+	}
+	if m.Metadata.UID != claims.Extension.MicroVM.UID {
+		return identity{}, false, nil
+	}
+	return identity{name: claims.Subject}, true, nil
+}
+
 // bootstrapTokens reads the token file of c. It returns no tokens where c names
 // none, and refuses a file given without the TLS files, a file that does not
 // read and a line that is not a token.
@@ -98,11 +135,17 @@ func (c Config) tokenFileNeedsTLS() error {
 
 // authenticate identifies the caller of each request before it is routed. Over
 // TLS, a request with a verified client certificate is the certificate's CN; one
-// without is a bearer-token holder, who may reach only the create and the get
-// route of a CertificateSigningRequest, or is refused as Unauthorized. Plain
-// HTTP authenticates nobody.
-func (h *handler) authenticate(mux *http.ServeMux, tokens tokenSet) http.Handler {
+// without is a holder of a service account token, who is its subject, or of a
+// bootstrap token, who may reach only the create and the get route of a
+// CertificateSigningRequest, or is refused as Unauthorized. Plain HTTP
+// authenticates nobody. The discovery document and the key set are served to
+// every caller, with no identity.
+func (h *handler) authenticate(mux *http.ServeMux, tokens tokenSet, accounts *accountTokens) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, pattern := mux.Handler(r); pattern == discoveryRoute || pattern == jwksRoute {
+			mux.ServeHTTP(w, r)
+			return
+		}
 		var id identity
 		switch {
 		case r.TLS == nil:
@@ -110,13 +153,22 @@ func (h *handler) authenticate(mux *http.ServeMux, tokens tokenSet) http.Handler
 			subject := r.TLS.PeerCertificates[0].Subject
 			id = identity{name: subject.CommonName, groups: subject.Organization}
 		default:
+			header := r.Header.Get("Authorization")
 			var ok bool
-			if id, ok = tokens.identify(r.Header.Get("Authorization")); !ok {
-				h.fail(w, r, api.NewAPIError(api.ReasonUnauthorized, "a client certificate or a valid bearer token is required"))
+			if id, ok = tokens.identify(header); ok {
+				if _, pattern := mux.Handler(r); pattern != createCSRRoute && pattern != getCSRRoute {
+					h.fail(w, r, api.NewAPIError(api.ReasonForbidden, "a bearer token may only create a certificatesigningrequest and read one it created"))
+					return
+				}
+				break
+			}
+			var err error
+			if id, ok, err = accounts.identify(r.Context(), header); err != nil {
+				h.fail(w, r, err)
 				return
 			}
-			if _, pattern := mux.Handler(r); pattern != createCSRRoute && pattern != getCSRRoute {
-				h.fail(w, r, api.NewAPIError(api.ReasonForbidden, "a bearer token may only create a certificatesigningrequest and read one it created"))
+			if !ok {
+				h.fail(w, r, api.NewAPIError(api.ReasonUnauthorized, "a client certificate or a valid bearer token is required"))
 				return
 			}
 		}

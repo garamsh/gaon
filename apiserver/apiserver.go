@@ -3,6 +3,7 @@ package apiserver
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -37,12 +38,20 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 		return err
 	}
 	var signer resourceapi.TokenSigner
+	var verifier *token.Verifier
 	if cfg.ServiceAccountSigningKeyFile != "" {
 		sg, err := token.LoadSigner(cfg.ServiceAccountIssuer, cfg.ServiceAccountSigningKeyFile)
 		if err != nil {
 			return err
 		}
 		signer = sg
+		rotated, err := token.LoadPublicKeys(cfg.ServiceAccountVerifyKeyFiles)
+		if err != nil {
+			return err
+		}
+		if verifier, err = token.NewVerifier(cfg.ServiceAccountIssuer, append([]*ecdsa.PublicKey{sg.Public()}, rotated...)...); err != nil {
+			return err
+		}
 	}
 	if addr, ok := ln.Addr().(*net.TCPAddr); tlsCfg == nil && (!ok || !addr.IP.IsLoopback()) {
 		return fmt.Errorf("listener %s is not a loopback address and no TLS files are given", ln.Addr())
@@ -64,8 +73,12 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 		}
 		az = authorization.NewRBAC(svc)
 	}
+	var accounts *accountTokens
+	if verifier != nil {
+		accounts = &accountTokens{verifier: verifier, microvm: svc.GetMicroVM, now: time.Now}
+	}
 	srv := &http.Server{
-		Handler:           newHandler(svc, az, tokens, log),
+		Handler:           newHandler(svc, az, tokens, accounts, log),
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig:         tlsCfg,

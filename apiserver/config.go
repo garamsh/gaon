@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -35,8 +36,13 @@ type Config struct {
 	// ServiceAccountIssuer is the "iss" of the service account tokens, and
 	// ServiceAccountSigningKeyFile the PEM file of the EC P-256 key that signs
 	// them. Both are set or neither is; with neither, the token request is
-	// refused.
+	// refused and no token is authenticated. The issuer is an https URL
+	// without a path, query or fragment.
 	ServiceAccountIssuer, ServiceAccountSigningKeyFile string
+	// ServiceAccountVerifyKeyFiles are PEM files of public keys that the
+	// server publishes and accepts beside the signing key's, for a rotation.
+	// They need the issuer and the signing key.
+	ServiceAccountVerifyKeyFiles []string
 }
 
 // The authorization modes of ADR 0008, Decision 2.
@@ -78,6 +84,7 @@ func ParseConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.AuthorizationMode, "authorization-mode", ModeAlwaysAllow, "AlwaysAllow, or RBAC: the Node authorizer, then cluster roles and bindings; RBAC needs the tls flags")
 	fs.StringVar(&cfg.ServiceAccountIssuer, "service-account-issuer", "", "the iss of service account tokens; given with service-account-signing-key-file")
 	fs.StringVar(&cfg.ServiceAccountSigningKeyFile, "service-account-signing-key-file", "", "PEM file of the EC P-256 key that signs service account tokens, the same on every API server; given with service-account-issuer")
+	verifyKeys := fs.String("service-account-verify-key-files", "", "comma separated PEM files of public keys published and accepted beside the signing key's, for a rotation; given with service-account-issuer")
 	fs.StringVar(&cfg.EtcdCA, "etcd-ca-file", "", "PEM file of the CA that signs etcd's certificate; given with etcd-cert-file and etcd-key-file")
 	fs.StringVar(&cfg.EtcdCert, "etcd-cert-file", "", "PEM file of the client certificate presented to etcd; given with etcd-ca-file and etcd-key-file")
 	fs.StringVar(&cfg.EtcdKey, "etcd-key-file", "", "PEM file of the client certificate's key; given with etcd-ca-file and etcd-cert-file")
@@ -92,6 +99,11 @@ func ParseConfig(args []string) (Config, error) {
 	}
 	if len(cfg.Endpoints) == 0 {
 		return Config{}, errors.New("no etcd endpoint given")
+	}
+	for _, f := range strings.Split(*verifyKeys, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			cfg.ServiceAccountVerifyKeyFiles = append(cfg.ServiceAccountVerifyKeyFiles, f)
+		}
 	}
 	if cfg.DialTimeout <= 0 {
 		return Config{}, fmt.Errorf("etcd dial timeout %s is not positive", cfg.DialTimeout)
@@ -112,10 +124,22 @@ func ParseConfig(args []string) (Config, error) {
 }
 
 // validateTokenSigning refuses an issuer without a key and a key without an
-// issuer, because a token needs both.
+// issuer, because a token needs both, verification keys without them, and an
+// issuer that is not an https URL on the server's root, because the discovery
+// document is served at the issuer's well-known path.
 func (c Config) validateTokenSigning() error {
 	if (c.ServiceAccountIssuer == "") != (c.ServiceAccountSigningKeyFile == "") {
 		return errors.New("service-account-issuer and service-account-signing-key-file are given together or not at all")
+	}
+	if c.ServiceAccountIssuer == "" {
+		if len(c.ServiceAccountVerifyKeyFiles) > 0 {
+			return errors.New("service-account-verify-key-files needs service-account-issuer and service-account-signing-key-file")
+		}
+		return nil
+	}
+	u, err := url.Parse(c.ServiceAccountIssuer)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return fmt.Errorf("service-account-issuer %q is not an https URL of a host, with no path, query or fragment", c.ServiceAccountIssuer)
 	}
 	return nil
 }
