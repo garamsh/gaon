@@ -30,6 +30,7 @@ Current architecture of the system and the decisions behind it. This file is the
   - [node-agent.md](./node-agent.md): what `gaon-node-agent` does on a node: registration, Lease and fencing renewal, and running bound Machines on mvmd.
   - [cli.md](./cli.md): the `gaon` client CLI, its commands and how `apply` treats a concurrent change.
   - [deployment.md](./deployment.md): which gaon services run on which Node, what a Node's config carries for them, how certificates reach them and which gaon commit is run.
+  - [e2e.md](./e2e.md): how the end-to-end test of M1 runs, what it asserts, and what the host needs.
 - ADRs
   - [0001](./adr/0001-the-repository-is-a-go-workspace-of-executable-units-partitioned-by-responsibility.md): the repository is a Go workspace of executable units, each its own module, partitioned by responsibility.
   - [0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md): gaon owns the Node Agent and depends one way on mvmd and naru, through their APIs.
