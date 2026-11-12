@@ -24,6 +24,7 @@ type memoryServer struct {
 	log       []loggedEvent
 	compacted int64
 	changed   chan struct{}
+	url       string
 }
 
 type loggedEvent struct {
@@ -74,9 +75,47 @@ func newMemoryServer(t *testing.T) (*memoryServer, *api.Client) {
 	mux.HandleFunc("GET /clusterrolebindings", listOrWatch(s, "clusterrolebindings/", api.KindClusterRoleBinding, func(items []api.ClusterRoleBinding, rv api.ResourceVersion) any {
 		return &api.ClusterRoleBindingList{TypeMeta: api.TypeMeta{APIVersion: api.RBACGroupVersion, Kind: api.KindClusterRoleBindingList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
 	}))
+	mux.HandleFunc("PUT /customresourcedefinitions/{name}", putValidated(s, "customresourcedefinitions/", api.KindCustomResourceDefinition, func(d *api.CustomResourceDefinition) (*api.ObjectMeta, error) { return &d.Metadata, d.Validate() }))
+	mux.HandleFunc("DELETE /customresourcedefinitions/{name}", deleteObject[api.CustomResourceDefinition](s, "customresourcedefinitions/", api.KindCustomResourceDefinition, func(d *api.CustomResourceDefinition) *api.ObjectMeta { return &d.Metadata }))
+	mux.HandleFunc("GET /customresourcedefinitions/{name}", getObject[api.CustomResourceDefinition](s, "customresourcedefinitions/"))
+	mux.HandleFunc("GET /customresourcedefinitions", listOrWatch(s, "customresourcedefinitions/", api.KindCustomResourceDefinition, func(items []api.CustomResourceDefinition, rv api.ResourceVersion) any {
+		return &api.CustomResourceDefinitionList{TypeMeta: api.TypeMeta{APIVersion: api.APIExtensionsGroupVersion, Kind: api.KindCustomResourceDefinitionList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
+	for _, ct := range []api.CustomResourceType{widgetType, gadgetType} {
+		s.customRoutes(mux, ct)
+	}
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
+	s.url = ts.URL
 	return s, api.NewClient(ts.URL, ts.Client())
+}
+
+// customRoutes serves the objects of a registered kind under its own root, as
+// the API server serves them once its definition is established.
+func (s *memoryServer) customRoutes(mux *http.ServeMux, ct api.CustomResourceType) {
+	root := "/apis/" + ct.Group + "/" + ct.Version + "/" + ct.Plural
+	prefix := ct.Plural + "/"
+	mux.HandleFunc("PUT "+root+"/{name}", putValidated(s, prefix, ct.Kind, func(o *api.CustomObject) (*api.ObjectMeta, error) { return &o.Metadata, o.Validate(ct) }))
+	mux.HandleFunc("PUT "+root+"/{name}/status", func(w http.ResponseWriter, r *http.Request) {
+		var next api.CustomObject
+		if !decodeBody(w, r, &next) || !s.nameMatches(w, r, next.Metadata.Name) {
+			return
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		o, found := load[api.CustomObject](s, prefix+next.Metadata.Name)
+		if err := s.requireVersion(found, o.Metadata.ResourceVersion, next.Metadata.ResourceVersion, next.Metadata.Name); err != nil {
+			writeError(w, err)
+			return
+		}
+		o.Status = next.Status
+		store(s, w, prefix+o.Metadata.Name, ct.Kind, &o.Metadata, &o, api.EventModified)
+	})
+	mux.HandleFunc("DELETE "+root+"/{name}", deleteObject[api.CustomObject](s, prefix, ct.Kind, func(o *api.CustomObject) *api.ObjectMeta { return &o.Metadata }))
+	mux.HandleFunc("GET "+root+"/{name}", getObject[api.CustomObject](s, prefix))
+	mux.HandleFunc("GET "+root, listOrWatch(s, prefix, ct.Kind, func(items []api.CustomObject, rv api.ResourceVersion) any {
+		return &api.CustomObjectList{TypeMeta: api.TypeMeta{APIVersion: ct.Group + "/" + ct.Version, Kind: ct.Kind + "List"}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	}))
 }
 
 // memoryRequester is the username the memory server, which authenticates no

@@ -243,6 +243,43 @@ func (c *Client) WatchClusterRoleBindings(ctx context.Context, rv ResourceVersio
 	return watch[ClusterRoleBinding](ctx, c, "/clusterrolebindings", KindClusterRoleBinding, rv)
 }
 
+// PutCustomResourceDefinition creates o, or changes it when o carries the
+// ResourceVersion it was read at (PUT /customresourcedefinitions/{name}). Call
+// it on a client whose root is the apiextensions group's. The API server
+// writes the status.
+func (c *Client) PutCustomResourceDefinition(ctx context.Context, o *CustomResourceDefinition) (*CustomResourceDefinition, error) {
+	return put(ctx, c, "/customresourcedefinitions/"+url.PathEscape(o.Metadata.Name), o)
+}
+
+// DeleteCustomResourceDefinition sets the deletionTimestamp of the named
+// definition, if it is still at version rv
+// (DELETE /customresourcedefinitions/{name}). The API server then deletes the
+// definition's objects.
+func (c *Client) DeleteCustomResourceDefinition(ctx context.Context, name string, rv ResourceVersion) (*CustomResourceDefinition, error) {
+	if rv == "" {
+		return nil, errors.New("delete customresourcedefinitions: resource version is empty")
+	}
+	return call[CustomResourceDefinition](ctx, c, http.MethodDelete, "/customresourcedefinitions/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetCustomResourceDefinition returns the named definition
+// (GET /customresourcedefinitions/{name}).
+func (c *Client) GetCustomResourceDefinition(ctx context.Context, name string) (*CustomResourceDefinition, error) {
+	return call[CustomResourceDefinition](ctx, c, http.MethodGet, "/customresourcedefinitions/"+url.PathEscape(name), nil, nil)
+}
+
+// ListCustomResourceDefinitions returns every definition and the version to
+// watch from (GET /customresourcedefinitions).
+func (c *Client) ListCustomResourceDefinitions(ctx context.Context) (*CustomResourceDefinitionList, error) {
+	return call[CustomResourceDefinitionList](ctx, c, http.MethodGet, "/customresourcedefinitions", nil, nil)
+}
+
+// WatchCustomResourceDefinitions streams the changes made after version rv
+// (GET /customresourcedefinitions?watch=true), as WatchMachines does.
+func (c *Client) WatchCustomResourceDefinitions(ctx context.Context, rv ResourceVersion) (*Watch[CustomResourceDefinition], error) {
+	return watch[CustomResourceDefinition](ctx, c, "/customresourcedefinitions", KindCustomResourceDefinition, rv)
+}
+
 func watch[T any](ctx context.Context, c *Client, path, kind string, rv ResourceVersion) (*Watch[T], error) {
 	if rv == "" {
 		return nil, fmt.Errorf("watch %s: resource version is empty", path)

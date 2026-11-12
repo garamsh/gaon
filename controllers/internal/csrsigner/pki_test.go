@@ -62,6 +62,11 @@ var (
 	oidEKU        = asn1.ObjectIdentifier{2, 5, 29, 37}
 	oidClientAuth = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
 	oidServerAuth = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
+
+	oidCommonName         = asn1.ObjectIdentifier{2, 5, 4, 3}
+	oidOrganization       = asn1.ObjectIdentifier{2, 5, 4, 10}
+	oidOrganizationalUnit = asn1.ObjectIdentifier{2, 5, 4, 11}
+	oidCountry            = asn1.ObjectIdentifier{2, 5, 4, 6}
 )
 
 // withExtKeyUsage asks for an extended key usage of the given OIDs.
@@ -70,6 +75,24 @@ func withExtKeyUsage(t *testing.T, oids ...asn1.ObjectIdentifier) csrOption {
 	require.NoError(t, err)
 	return func(r *x509.CertificateRequest) {
 		r.ExtraExtensions = append(r.ExtraExtensions, pkix.Extension{Id: oidEKU, Value: value})
+	}
+}
+
+// withSubjectAttribute adds an attribute of the given type to the subject, beside the CN.
+func withSubjectAttribute(typ asn1.ObjectIdentifier, value string) csrOption {
+	return func(r *x509.CertificateRequest) {
+		r.Subject.ExtraNames = append(r.Subject.ExtraNames, pkix.AttributeTypeAndValue{Type: typ, Value: value})
+	}
+}
+
+// withTwoCNs gives the subject two CN attributes. ExtraNames overrides
+// Subject.CommonName for the same type, so both go through ExtraNames.
+func withTwoCNs(first, second string) csrOption {
+	return func(r *x509.CertificateRequest) {
+		r.Subject.CommonName = ""
+		r.Subject.ExtraNames = append(r.Subject.ExtraNames,
+			pkix.AttributeTypeAndValue{Type: oidCommonName, Value: first},
+			pkix.AttributeTypeAndValue{Type: oidCommonName, Value: second})
 	}
 }
 
