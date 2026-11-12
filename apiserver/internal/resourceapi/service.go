@@ -38,6 +38,18 @@ type Service interface {
 	GetCertificateSigningRequest(ctx context.Context, name string) (*api.CertificateSigningRequest, error)
 	ListCertificateSigningRequests(ctx context.Context) (*api.CertificateSigningRequestList, error)
 	WatchCertificateSigningRequests(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+
+	PutClusterRole(ctx context.Context, name string, r *api.ClusterRole) (*api.ClusterRole, error)
+	DeleteClusterRole(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterRole, error)
+	GetClusterRole(ctx context.Context, name string) (*api.ClusterRole, error)
+	ListClusterRoles(ctx context.Context) (*api.ClusterRoleList, error)
+	WatchClusterRoles(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+
+	PutClusterRoleBinding(ctx context.Context, name string, b *api.ClusterRoleBinding) (*api.ClusterRoleBinding, error)
+	DeleteClusterRoleBinding(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterRoleBinding, error)
+	GetClusterRoleBinding(ctx context.Context, name string) (*api.ClusterRoleBinding, error)
+	ListClusterRoleBindings(ctx context.Context) (*api.ClusterRoleBindingList, error)
+	WatchClusterRoleBindings(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
 }
 
 var (
@@ -47,6 +59,9 @@ var (
 	leases   = kind[api.Lease]{"leases", func(l *api.Lease) *api.ObjectMeta { return &l.Metadata }, func(l *api.Lease) any { return l.Spec }}
 
 	certificateSigningRequests = kind[api.CertificateSigningRequest]{"certificatesigningrequests", func(r *api.CertificateSigningRequest) *api.ObjectMeta { return &r.Metadata }, func(r *api.CertificateSigningRequest) any { return r.Spec }}
+
+	clusterRoles        = kind[api.ClusterRole]{"clusterroles", func(r *api.ClusterRole) *api.ObjectMeta { return &r.Metadata }, func(r *api.ClusterRole) any { return r.Rules }}
+	clusterRoleBindings = kind[api.ClusterRoleBinding]{"clusterrolebindings", func(b *api.ClusterRoleBinding) *api.ObjectMeta { return &b.Metadata }, func(b *api.ClusterRoleBinding) any { return [2]any{b.RoleRef, b.Subjects} }}
 )
 
 type service struct {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/garamsh/gaon/apiserver/internal/authorization"
 	"github.com/garamsh/gaon/apiserver/internal/resourceapi"
 	"github.com/garamsh/gaon/apiserver/internal/resourceapi/etcdstore"
 )
@@ -28,6 +29,9 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 	if err != nil {
 		return err
 	}
+	if err := cfg.validateAuthorization(); err != nil {
+		return err
+	}
 	if addr, ok := ln.Addr().(*net.TCPAddr); tlsCfg == nil && (!ok || !addr.IP.IsLoopback()) {
 		return fmt.Errorf("listener %s is not a loopback address and no TLS files are given", ln.Addr())
 	}
@@ -36,8 +40,16 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 		return err
 	}
 	defer st.Close()
+	svc := resourceapi.NewService(st, time.Now)
+	az := authorization.AlwaysAllow()
+	if cfg.AuthorizationMode == ModeRBAC {
+		if err := authorization.Bootstrap(ctx, svc); err != nil {
+			return err
+		}
+		az = authorization.NewRBAC(svc)
+	}
 	srv := &http.Server{
-		Handler:           newHandler(resourceapi.NewService(st, time.Now), tokens, log),
+		Handler:           newHandler(svc, az, tokens, log),
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig:         tlsCfg,

@@ -1,0 +1,48 @@
+package resourceapi
+
+import (
+	"context"
+
+	"github.com/garamsh/gaon/lib/api"
+)
+
+// PutClusterRole creates r, or changes the rules of the stored ClusterRole r
+// was read at.
+func (s *service) PutClusterRole(ctx context.Context, name string, r *api.ClusterRole) (*api.ClusterRole, error) {
+	if err := checkName(name, r.Metadata.Name); err != nil {
+		return nil, err
+	}
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	return clusterRoles.put(ctx, s.st, r, func() error { return nil }, func(*api.ClusterRole) error { return nil })
+}
+
+// DeleteClusterRole removes the ClusterRole if rv is its current version.
+func (s *service) DeleteClusterRole(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterRole, error) {
+	r, rev, err := clusterRoles.get(ctx, s.st, name)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkVersion(clusterRoles.plural, name, rv, r.Metadata.ResourceVersion); err != nil {
+		return nil, err
+	}
+	return r, clusterRoles.remove(ctx, s.st, r, rev)
+}
+
+func (s *service) GetClusterRole(ctx context.Context, name string) (*api.ClusterRole, error) {
+	r, _, err := clusterRoles.get(ctx, s.st, name)
+	return r, err
+}
+
+func (s *service) ListClusterRoles(ctx context.Context) (*api.ClusterRoleList, error) {
+	items, rv, err := clusterRoles.list(ctx, s.st)
+	if err != nil {
+		return nil, err
+	}
+	return &api.ClusterRoleList{TypeMeta: api.TypeMeta{APIVersion: api.RBACGroupVersion, Kind: api.KindClusterRoleList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
+}
+
+func (s *service) WatchClusterRoles(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
+	return clusterRoles.watch(ctx, s.st, rv)
+}
