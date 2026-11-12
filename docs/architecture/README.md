@@ -26,6 +26,7 @@ Current architecture of the system and the decisions behind it. This file is the
   - [apiserver.md](./apiserver.md): how `gaon-apiserver` serves the resource API over etcd and holds the invariants the contract gives it.
   - [scheduler.md](./scheduler.md): what the Scheduler binds, the placement rule, and when it rebinds.
   - [node-lifecycle.md](./node-lifecycle.md): how the node lifecycle controller confirms Lease expiry and the condition it records.
+  - [csr-signer.md](./csr-signer.md): how the signer in `gaon-controllers` decides a CertificateSigningRequest, what it signs and how it is configured.
   - [node-agent.md](./node-agent.md): what `gaon-node-agent` does on a node: registration, Lease and fencing renewal, and running bound Machines on mvmd.
   - [cli.md](./cli.md): the `gaon` client CLI, its commands and how `apply` treats a concurrent change.
   - [deployment.md](./deployment.md): which gaon services run on which Node, what a Node's config carries for them, how certificates reach them and which gaon commit is run.

@@ -9,7 +9,9 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -139,4 +141,112 @@ func TestParseFlags_RefusesAPartialTLSSet(t *testing.T) {
 	}
 	_, err := parseFlags(append([]string{"-api", a.URL}, a.flags()...), io.Discard)
 	assert.NoError(t, err, "control: the three together are accepted")
+}
+
+// writeCA writes a self-signed CA certificate and its key as PEM files and
+// returns their paths.
+func writeCA(t *testing.T) (certFile, keyFile string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	require.NoError(t, err)
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	require.NoError(t, err)
+	dir := t.TempDir()
+	certFile, keyFile = filepath.Join(dir, "ca.pem"), filepath.Join(dir, "ca-key.pem")
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600))
+	return certFile, keyFile
+}
+
+func TestParseFlags_RunsTheSignerOnlyWithTheSigningFiles(t *testing.T) {
+	certFile, keyFile := writeCA(t)
+
+	without, err := parseFlags([]string{"-api", "http://127.0.0.1:1"}, io.Discard)
+	require.NoError(t, err)
+	with, err := parseFlags([]string{"-api", "http://127.0.0.1:1", "-signing-cert", certFile, "-signing-key", keyFile}, io.Discard)
+	require.NoError(t, err)
+
+	assert.Nil(t, without.signer, "no signing files, so the signer does not run")
+	require.NotNil(t, with.signer)
+	assert.Equal(t, 8760*time.Hour, with.signer.Duration, "the default signing duration")
+}
+
+func TestParseFlags_TakesTheSigningDuration(t *testing.T) {
+	certFile, keyFile := writeCA(t)
+
+	cfg, err := parseFlags([]string{"-api", "http://127.0.0.1:1", "-signing-cert", certFile, "-signing-key", keyFile, "-signing-duration", "36h"}, io.Discard)
+
+	require.NoError(t, err)
+	assert.Equal(t, 36*time.Hour, cfg.signer.Duration)
+}
+
+func TestParseFlags_RefusesAPartialSigningSet(t *testing.T) {
+	certFile, keyFile := writeCA(t)
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"cert only", []string{"-signing-cert", certFile}},
+		{"key only", []string{"-signing-key", keyFile}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseFlags(append([]string{"-api", "http://127.0.0.1:1"}, tt.args...), io.Discard)
+
+			assert.ErrorContains(t, err, "-signing-cert and -signing-key")
+		})
+	}
+	_, err := parseFlags([]string{"-api", "http://127.0.0.1:1", "-signing-cert", certFile, "-signing-key", keyFile}, io.Discard)
+	assert.NoError(t, err, "control: the two together are accepted")
+}
+
+func TestParseFlags_RefusesSigningFilesThatDoNotLoadOrDoNotMatch(t *testing.T) {
+	certFile, keyFile := writeCA(t)
+	_, otherKey := writeCA(t)
+	missing := filepath.Join(t.TempDir(), "none.pem")
+	tests := []struct {
+		name      string
+		cert, key string
+	}{
+		{"missing cert", missing, keyFile},
+		{"missing key", certFile, missing},
+		{"key of another CA", certFile, otherKey},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseFlags([]string{"-api", "http://127.0.0.1:1", "-signing-cert", tt.cert, "-signing-key", tt.key}, io.Discard)
+
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestParseFlags_RefusesASigningDurationAtOrBelowZero(t *testing.T) {
+	certFile, keyFile := writeCA(t)
+	for _, d := range []string{"0s", "-1h"} {
+		t.Run(d, func(t *testing.T) {
+			_, err := parseFlags([]string{"-api", "http://127.0.0.1:1", "-signing-cert", certFile, "-signing-key", keyFile, "-signing-duration", d}, io.Discard)
+
+			assert.ErrorContains(t, err, "-signing-duration")
+		})
+	}
+}
+
+func TestRunAll_AFailureEndsTheOthersAndIsReported(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	waits := func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+	fails := func(context.Context) error { return errors.New("down") }
+
+	assert.False(t, runAll(context.Background(), log, map[string]func(context.Context) error{"waits": waits, "fails": fails}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.True(t, runAll(ctx, log, map[string]func(context.Context) error{"waits": waits}), "control: ending by cancellation is not a failure")
 }
