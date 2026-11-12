@@ -87,6 +87,9 @@ func (s *service) putCustomObject(ctx context.Context, p CustomPath, name string
 		}
 	}
 	if o.Metadata.ResourceVersion == "" {
+		if err := o.Metadata.ValidateCreate(); err != nil {
+			return nil, nil, false, err
+		}
 		if d.Metadata.DeletionTimestamp != nil {
 			return nil, nil, false, api.NewAPIError(api.ReasonConflict, "the definition %q is being deleted", d.Metadata.Name)
 		}
@@ -106,6 +109,10 @@ func (s *service) putCustomObject(ctx context.Context, p CustomPath, name string
 	if err := checkVersion(k.plural, name, o.Metadata.ResourceVersion, old.Metadata.ResourceVersion); err != nil {
 		return nil, nil, false, err
 	}
+	if err := o.Metadata.ValidateUpdate(old.Metadata); err != nil {
+		return nil, nil, false, err
+	}
+	o.Metadata.UID = old.Metadata.UID
 	deleting := old.Metadata.DeletionTimestamp != nil
 	if deleting && slices.ContainsFunc(o.Metadata.Finalizers, func(f string) bool { return !slices.Contains(old.Metadata.Finalizers, f) }) {
 		return nil, nil, false, api.NewAPIError(api.ReasonInvalid, "a finalizer cannot be added to an object being deleted")
@@ -217,22 +224,22 @@ func (s *service) GetCustomObject(ctx context.Context, p CustomPath, name string
 	return o, err
 }
 
-func (s *service) ListCustomObjects(ctx context.Context, p CustomPath) (*api.CustomObjectList, error) {
+func (s *service) ListCustomObjects(ctx context.Context, p CustomPath, sel api.Selector) (*api.CustomObjectList, error) {
 	d, err := s.servedDefinition(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	items, rv, err := customKind(d).list(ctx, s.st)
+	items, rv, err := customKind(d).list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.CustomObjectList{TypeMeta: api.TypeMeta{APIVersion: d.Spec.Group + "/" + d.Spec.Versions[0].Name, Kind: d.Spec.Names.ListKind}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchCustomObjects(ctx context.Context, p CustomPath, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
+func (s *service) WatchCustomObjects(ctx context.Context, p CustomPath, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
 	d, err := s.servedDefinition(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	return customKind(d).watch(ctx, s.st, rv)
+	return customKind(d).watch(ctx, s.st, rv, sel)
 }

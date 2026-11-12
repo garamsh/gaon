@@ -84,7 +84,7 @@ func (a *rbac) pinned(ctx context.Context, user, name string) (bool, error) {
 // uses reports whether a MicroVM bound to the Node user mounts the Volume
 // name.
 func (a *rbac) uses(ctx context.Context, user, name string) (bool, error) {
-	ms, err := a.src.ListMicroVMs(ctx)
+	ms, err := a.src.ListMicroVMs(ctx, nil)
 	if err != nil {
 		return false, err
 	}

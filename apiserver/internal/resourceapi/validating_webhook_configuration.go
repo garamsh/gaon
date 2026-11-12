@@ -37,14 +37,14 @@ func (s *service) GetValidatingWebhookConfiguration(ctx context.Context, name st
 	return c, err
 }
 
-func (s *service) ListValidatingWebhookConfigurations(ctx context.Context) (*api.ValidatingWebhookConfigurationList, error) {
-	items, rv, err := validatingWebhookConfigurations.list(ctx, s.st)
+func (s *service) ListValidatingWebhookConfigurations(ctx context.Context, sel api.Selector) (*api.ValidatingWebhookConfigurationList, error) {
+	items, rv, err := validatingWebhookConfigurations.list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.ValidatingWebhookConfigurationList{TypeMeta: api.TypeMeta{APIVersion: api.AdmissionRegistrationGroupVersion, Kind: api.KindValidatingWebhookConfigurationList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchValidatingWebhookConfigurations(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return validatingWebhookConfigurations.watch(ctx, s.st, rv)
+func (s *service) WatchValidatingWebhookConfigurations(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+	return validatingWebhookConfigurations.watch(ctx, s.st, rv, sel)
 }

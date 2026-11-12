@@ -44,9 +44,11 @@ func (h *handler) listOrWatchCustomObjects(svc resourceapi.Service) http.Handler
 	return func(w http.ResponseWriter, r *http.Request) {
 		p := customPathOf(r)
 		listOrWatch(h,
-			func(ctx context.Context) (*api.CustomObjectList, error) { return svc.ListCustomObjects(ctx, p) },
-			func(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-				return svc.WatchCustomObjects(ctx, p, rv)
+			func(ctx context.Context, sel api.Selector) (*api.CustomObjectList, error) {
+				return svc.ListCustomObjects(ctx, p, sel)
+			},
+			func(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+				return svc.WatchCustomObjects(ctx, p, rv, sel)
 			})(w, r)
 	}
 }

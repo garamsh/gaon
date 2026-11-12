@@ -25,10 +25,13 @@ type Entry struct {
 // Event is one change under a prefix, or the end of a watch. Err is set on
 // the last event of a stream, and the other fields are then unset. For a
 // Deleted event, Entry holds the last value and the revision of the deletion.
+// For a Modified event, Previous holds the value Entry replaced, and is nil
+// where the Store no longer keeps it.
 type Event struct {
-	Type  api.EventType
-	Entry Entry
-	Err   error
+	Type     api.EventType
+	Entry    Entry
+	Previous []byte
+	Err      error
 }
 
 // Write is one write of a Transact: Value replaces what is under Key if it is

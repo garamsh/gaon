@@ -46,7 +46,7 @@ func (s *service) PutCustomResourceDefinition(ctx context.Context, name string, 
 // holds its names, has any of d's names; the older keeps them.
 func (s *service) creationConditions(ctx context.Context, d *api.CustomResourceDefinition) ([]api.Condition, error) {
 	now := s.now().UTC()
-	others, _, err := customResourceDefinitions.list(ctx, s.st)
+	others, _, err := customResourceDefinitions.list(ctx, s.st, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (s *service) markDefinitionDeleted(ctx context.Context, name string, rv api
 // changes between the read and the delete is read again.
 func (s *service) deleteObjectsOf(ctx context.Context, d *api.CustomResourceDefinition) error {
 	k := customKind(d)
-	items, _, err := k.list(ctx, s.st)
+	items, _, err := k.list(ctx, s.st, nil)
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func (s *service) finishDefinition(ctx context.Context, d *api.CustomResourceDef
 		return cur, nil
 	}
 	k := customKind(cur)
-	items, _, err := k.list(ctx, s.st)
+	items, _, err := k.list(ctx, s.st, nil)
 	if err != nil || len(items) > 0 {
 		return cur, err
 	}
@@ -212,14 +212,14 @@ func (s *service) GetCustomResourceDefinition(ctx context.Context, name string) 
 	return d, err
 }
 
-func (s *service) ListCustomResourceDefinitions(ctx context.Context) (*api.CustomResourceDefinitionList, error) {
-	items, rv, err := customResourceDefinitions.list(ctx, s.st)
+func (s *service) ListCustomResourceDefinitions(ctx context.Context, sel api.Selector) (*api.CustomResourceDefinitionList, error) {
+	items, rv, err := customResourceDefinitions.list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.CustomResourceDefinitionList{TypeMeta: api.TypeMeta{APIVersion: api.APIExtensionsGroupVersion, Kind: api.KindCustomResourceDefinitionList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchCustomResourceDefinitions(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return customResourceDefinitions.watch(ctx, s.st, rv)
+func (s *service) WatchCustomResourceDefinitions(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+	return customResourceDefinitions.watch(ctx, s.st, rv, sel)
 }

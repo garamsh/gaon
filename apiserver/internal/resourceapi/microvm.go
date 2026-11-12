@@ -27,6 +27,9 @@ func (s *service) PutMicroVM(ctx context.Context, name string, m *api.MicroVM) (
 	if m.Spec.NodeName != "" || m.Spec.BindingEpoch != 0 {
 		return nil, api.NewAPIError(api.ReasonInvalid, "spec.nodeName and spec.bindingEpoch are set by the binding only")
 	}
+	if err := m.Metadata.ValidateCreate(); err != nil {
+		return nil, err
+	}
 	m.Metadata.Generation, m.Metadata.DeletionTimestamp = 1, nil
 	m.Status = api.MicroVMStatus{Phase: api.MicroVMPending}
 	if err := validate(ctx, s, microvms, "", api.OperationCreate, m, nil); err != nil {
@@ -43,6 +46,10 @@ func (s *service) updateMicroVM(ctx context.Context, m *api.MicroVM) (*api.Micro
 	if err := checkVersion(microvms.plural, m.Metadata.Name, m.Metadata.ResourceVersion, old.Metadata.ResourceVersion); err != nil {
 		return nil, err
 	}
+	if err := m.Metadata.ValidateUpdate(old.Metadata); err != nil {
+		return nil, err
+	}
+	m.Metadata.UID = old.Metadata.UID
 	if err := m.ValidateUpdate(old); err != nil {
 		return nil, err
 	}
