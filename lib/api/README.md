@@ -30,3 +30,20 @@ c := api.NewClient(root, httpClient)
 - A file that is missing or unreadable, a CA file with no certificate, and a key that does not match the certificate each fail with an error naming the file.
 - `api.NewTLSClient(caFile, certFile, keyFile)` builds the same client from three paths, for a unit that reads no flags.
 - The client sets no `Timeout`, so a watch may stay open.
+
+## Calling with a bootstrap token
+
+A caller that holds a bootstrap token and no certificate builds its client from the CA file alone and adds the token as an option:
+
+```go
+httpClient, err := api.NewServerTLSClient(caFile)
+if err != nil {
+	return err
+}
+c := api.NewClient(root, httpClient, api.WithBearerToken(token))
+```
+
+- `NewServerTLSClient` speaks TLS 1.3, trusts only the certificates in `caFile` and presents no certificate.
+- `WithBearerToken` sends `Authorization: Bearer <token>` on every request, and the client refuses to send one over a URL that is not `https`.
+- The option also works on a client from `NewTLSClient`, which keeps presenting its certificate.
+- The API server lets a token create a CertificateSigningRequest and read one it created, and nothing else ([resource-api.md](../../docs/architecture/resource-api.md) §Transport).
