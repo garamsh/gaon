@@ -23,17 +23,20 @@ type fakeAPI struct {
 	definitions      map[string]*api.CustomResourceDefinition
 	jobs             map[string]*api.CustomObject
 	cronjobs         map[string]*api.CustomObject
+	deployments      map[string]*api.CustomObject
 	microvms         map[string]*api.MicroVM
 	definitionWrites int
 	statusWrites     int
 	nextRV           int
 	invalidMicroVM   bool
+	// bounds, when a test sets it, is checked after every write to a MicroVM.
+	bounds *rolloutBounds
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
 	f := &fakeAPI{
 		t: t, definitions: map[string]*api.CustomResourceDefinition{}, jobs: map[string]*api.CustomObject{},
-		cronjobs: map[string]*api.CustomObject{}, microvms: map[string]*api.MicroVM{}, nextRV: 100,
+		cronjobs: map[string]*api.CustomObject{}, deployments: map[string]*api.CustomObject{}, microvms: map[string]*api.MicroVM{}, nextRV: 100,
 	}
 	mux := http.NewServeMux()
 	ext := "/apis/" + api.APIExtensionsGroupVersion + "/customresourcedefinitions/{name}"
@@ -47,9 +50,13 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 	cronjobs := "/apis/" + job.APIVersion + "/cronjobs"
 	mux.HandleFunc("GET "+cronjobs, f.listCronJobs)
 	mux.HandleFunc("PUT "+cronjobs+"/{name}/status", f.putCronJobStatus)
+	deployments := "/apis/" + job.APIVersion + "/deployments"
+	mux.HandleFunc("GET "+deployments, f.listDeployments)
+	mux.HandleFunc("PUT "+deployments+"/{name}/status", f.putDeploymentStatus)
 	mvms := "/apis/" + api.GroupVersion + "/microvms"
 	mux.HandleFunc("GET "+mvms, f.listMicroVMs)
 	mux.HandleFunc("PUT "+mvms+"/{name}", f.putMicroVM)
+	mux.HandleFunc("DELETE "+mvms+"/{name}", f.deleteMicroVM)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		http.Error(w, "unexpected", http.StatusTeapot)
@@ -239,6 +246,7 @@ func (f *fakeAPI) putMicroVM(w http.ResponseWriter, r *http.Request) {
 	default:
 		m.Metadata.ResourceVersion = f.rv()
 		f.microvms[m.Metadata.Name] = &m
+		f.checkBounds()
 		writeJSON(w, http.StatusCreated, &m)
 	}
 }
