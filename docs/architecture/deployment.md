@@ -10,13 +10,21 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 
 | Where | Runs |
 |---|---|
-| Every Node | `gaon-node-agent`, beside mvmd ([node-agent.md](./node-agent.md)) |
+| Every Node | `gaon-node-agent`, beside mvmd ([node-agent.md](./node-agent.md)), and the plugin processes the Node's config names: `gaon-network-default` and `gaon-storage-local` for the built-ins, and any third party's ([node-agent.md](./node-agent.md) §Plugins) |
 | One control-plane Node | etcd, `gaon-apiserver`, `gaon-scheduler`, `gaon-controllers` |
 
 - **One instance of each control-plane service.** The scheduler and the controllers have no leader election: no Go file outside a test mentions one, and `gaon-scheduler` and `gaon-controllers` each start their loop unconditionally (`scheduler/cmd/gaon-scheduler/main.go`, `controllers/cmd/gaon-controllers/main.go`). A second instance of either is not supported.
 - **etcd is on the API server's loopback.** `gaon-apiserver` dials etcd over plain HTTP and has no etcd TLS flag (`apiserver/config.go`), its default endpoint being `http://127.0.0.1:2379`.
 - **etcd's data persists across a reboot and an upgrade.** The Store holds every resource, so losing it loses them all ([ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md) for the single member).
 - **The CLI is not a Node service.** `gaon` runs wherever an operator uses it ([cli.md](./cli.md)).
+
+### Plugins
+
+- **A plugin is a Node service, installed by naru.** The Node Agent does not start plugins ([ADR 0019](./adr/0019-the-node-agent-reaches-its-network-and-storage-plugins-as-separate-processes-through-a-versioned-grpc-api-on-unix-sockets.md)). naru installs a plugin as a system extension of the Node and starts it, which is garamsh/naru#57; until that lands there is no gaon-side installation, and an operator or test starts the binary beside the agent.
+- **One socket directory.** The plugins serve `<dir>/<kind>-<name>.sock` in `/run/gaon/plugins`, and the agent names the ones it uses with `--plugin-dir`, `--network-plugin` and `--storage-plugin`. The sockets are mode 0600, so a plugin runs as the user the agent runs as. The order of start does not matter: an agent whose plugin is not yet running leaves MicroVMs `Pending` and serves them once it is.
+- **The Node's config sets the plugins' flags.** `gaon-network-default` takes `--plugin-dir`, `--egress-prefix` and `--ingress-prefix`; `gaon-storage-local` takes `--plugin-dir`, `--api-server`, `--node-name`, `--mvmd-socket`, `--resync-period` and the TLS flags, each with a `GAON_` variable ([node-agent.md](./node-agent.md) §Plugins).
+- **A plugin acts as the Node.** `gaon-storage-local` presents the Node Agent's certificate: the same `--cert-dir` and `--tls-ca` as the agent, so it reads the `node-agent.pem` the agent keeps and renews, or the same `--tls-cert` and `--tls-key`. The plugin therefore needs read access to the agent's certificate directory and has the Node's authority under the Node authorizer. A certificate subject for a plugin is for garamsh/gaon#122.
+- **`make e2e` is unchanged.** `tooling/e2e` starts `gaon-node-agent` with no plugin flags, which names no plugin, so its MicroVMs are created isolated with no disk; its `GAON_SERVICES` does not list the plugin binaries.
 
 ### Certificates
 
@@ -40,7 +48,7 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 ### Config shape
 
 - **argv plus files.** Every gaon service binary takes flags, and the certificate files are named by the TLS flags. The API server's flags are in [apiserver.md](./apiserver.md) §Running and the Node Agent's in [node-agent.md](./node-agent.md) §Configuration. The scheduler takes `-api`, `-interval` and the TLS flags of `lib/api`, and the controllers take `-api`, `-lease-margin`, `-default-lease-duration`, `-signing-cert`, `-signing-key`, `-signing-duration` and the same TLS flags (`scheduler/cmd/gaon-scheduler/main.go`, `controllers/cmd/gaon-controllers/main.go`).
-- **Environment variables are a Node Agent fallback only.** Of the four services, only `gaon-node-agent` reads `GAON_*` variables, and a flag given wins over its variable ([node-agent.md](./node-agent.md) §Configuration). A Node's config sets flags for every service.
+- **Environment variables are a fallback of the Node's own services only.** Of the services, only `gaon-node-agent` and the two plugin binaries read `GAON_*` variables, and a flag given wins over its variable ([node-agent.md](./node-agent.md) §Configuration and §Plugins). A Node's config sets flags for every service.
 
 ### Versioning
 
@@ -52,6 +60,7 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 - Services, topology, certificates, config shape and versioning as decided: [ADR 0006](./adr/0006-a-gaon-deployment-is-one-control-plane-node-configured-by-argv-and-files.md).
 - Who starts gaon's services and how gaon relates to naru: [ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md).
 - The authorization mode, the roles and the certificate subjects: [ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md).
+- Plugins as separate processes of a Node, their socket directory and the identity they use: [ADR 0019](./adr/0019-the-node-agent-reaches-its-network-and-storage-plugins-as-separate-processes-through-a-versioned-grpc-api-on-unix-sockets.md).
 - One etcd member, and what its loss costs: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
 - Mutual TLS, one certificate per caller, and issuance outside gaon: [ADR 0005](./adr/0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md).
 - The bootstrap token, the signing request and renewal, which narrow ADR 0005 for Node Agents: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md).

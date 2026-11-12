@@ -19,69 +19,86 @@ type Service interface {
 	PutMicroVMStatus(ctx context.Context, name string, m *api.MicroVM) (*api.MicroVM, error)
 	DeleteMicroVM(ctx context.Context, name string, rv api.ResourceVersion) (*api.MicroVM, error)
 	GetMicroVM(ctx context.Context, name string) (*api.MicroVM, error)
-	ListMicroVMs(ctx context.Context) (*api.MicroVMList, error)
-	WatchMicroVMs(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListMicroVMs(ctx context.Context, sel api.Selector) (*api.MicroVMList, error)
+	WatchMicroVMs(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutVolume(ctx context.Context, name string, v *api.Volume) (*api.Volume, error)
 	PutVolumeStatus(ctx context.Context, name string, v *api.Volume) (*api.Volume, error)
 	DeleteVolume(ctx context.Context, name string, rv api.ResourceVersion) (*api.Volume, error)
 	GetVolume(ctx context.Context, name string) (*api.Volume, error)
-	ListVolumes(ctx context.Context) (*api.VolumeList, error)
-	WatchVolumes(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListVolumes(ctx context.Context, sel api.Selector) (*api.VolumeList, error)
+	WatchVolumes(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutNode(ctx context.Context, name string, n *api.Node) (*api.Node, error)
 	PutNodeStatus(ctx context.Context, name string, n *api.Node) (*api.Node, error)
 	GetNode(ctx context.Context, name string) (*api.Node, error)
-	ListNodes(ctx context.Context) (*api.NodeList, error)
-	WatchNodes(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListNodes(ctx context.Context, sel api.Selector) (*api.NodeList, error)
+	WatchNodes(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutLease(ctx context.Context, name string, l *api.Lease) (*api.Lease, error)
 	GetLease(ctx context.Context, name string) (*api.Lease, error)
-	ListLeases(ctx context.Context) (*api.LeaseList, error)
-	WatchLeases(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListLeases(ctx context.Context, sel api.Selector) (*api.LeaseList, error)
+	WatchLeases(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutCertificateSigningRequest(ctx context.Context, name, username string, r *api.CertificateSigningRequest) (*api.CertificateSigningRequest, error)
 	PutCertificateSigningRequestStatus(ctx context.Context, name string, r *api.CertificateSigningRequest) (*api.CertificateSigningRequest, error)
 	GetCertificateSigningRequest(ctx context.Context, name string) (*api.CertificateSigningRequest, error)
-	ListCertificateSigningRequests(ctx context.Context) (*api.CertificateSigningRequestList, error)
-	WatchCertificateSigningRequests(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListCertificateSigningRequests(ctx context.Context, sel api.Selector) (*api.CertificateSigningRequestList, error)
+	WatchCertificateSigningRequests(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutClusterRole(ctx context.Context, name string, r *api.ClusterRole) (*api.ClusterRole, error)
 	DeleteClusterRole(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterRole, error)
 	GetClusterRole(ctx context.Context, name string) (*api.ClusterRole, error)
-	ListClusterRoles(ctx context.Context) (*api.ClusterRoleList, error)
-	WatchClusterRoles(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListClusterRoles(ctx context.Context, sel api.Selector) (*api.ClusterRoleList, error)
+	WatchClusterRoles(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutClusterRoleBinding(ctx context.Context, name string, b *api.ClusterRoleBinding) (*api.ClusterRoleBinding, error)
 	DeleteClusterRoleBinding(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterRoleBinding, error)
 	GetClusterRoleBinding(ctx context.Context, name string) (*api.ClusterRoleBinding, error)
-	ListClusterRoleBindings(ctx context.Context) (*api.ClusterRoleBindingList, error)
-	WatchClusterRoleBindings(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListClusterRoleBindings(ctx context.Context, sel api.Selector) (*api.ClusterRoleBindingList, error)
+	WatchClusterRoleBindings(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutCustomResourceDefinition(ctx context.Context, name string, d *api.CustomResourceDefinition) (*api.CustomResourceDefinition, error)
 	DeleteCustomResourceDefinition(ctx context.Context, name string, rv api.ResourceVersion) (*api.CustomResourceDefinition, error)
 	GetCustomResourceDefinition(ctx context.Context, name string) (*api.CustomResourceDefinition, error)
-	ListCustomResourceDefinitions(ctx context.Context) (*api.CustomResourceDefinitionList, error)
-	WatchCustomResourceDefinitions(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListCustomResourceDefinitions(ctx context.Context, sel api.Selector) (*api.CustomResourceDefinitionList, error)
+	WatchCustomResourceDefinitions(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutMutatingWebhookConfiguration(ctx context.Context, name string, c *api.MutatingWebhookConfiguration) (*api.MutatingWebhookConfiguration, error)
 	DeleteMutatingWebhookConfiguration(ctx context.Context, name string, rv api.ResourceVersion) (*api.MutatingWebhookConfiguration, error)
 	GetMutatingWebhookConfiguration(ctx context.Context, name string) (*api.MutatingWebhookConfiguration, error)
-	ListMutatingWebhookConfigurations(ctx context.Context) (*api.MutatingWebhookConfigurationList, error)
-	WatchMutatingWebhookConfigurations(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListMutatingWebhookConfigurations(ctx context.Context, sel api.Selector) (*api.MutatingWebhookConfigurationList, error)
+	WatchMutatingWebhookConfigurations(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutValidatingWebhookConfiguration(ctx context.Context, name string, c *api.ValidatingWebhookConfiguration) (*api.ValidatingWebhookConfiguration, error)
 	DeleteValidatingWebhookConfiguration(ctx context.Context, name string, rv api.ResourceVersion) (*api.ValidatingWebhookConfiguration, error)
 	GetValidatingWebhookConfiguration(ctx context.Context, name string) (*api.ValidatingWebhookConfiguration, error)
-	ListValidatingWebhookConfigurations(ctx context.Context) (*api.ValidatingWebhookConfigurationList, error)
-	WatchValidatingWebhookConfigurations(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListValidatingWebhookConfigurations(ctx context.Context, sel api.Selector) (*api.ValidatingWebhookConfigurationList, error)
+	WatchValidatingWebhookConfigurations(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
+	PutCoordinationLease(ctx context.Context, name string, l *api.CoordinationLease) (*api.CoordinationLease, error)
+	DeleteCoordinationLease(ctx context.Context, name string, rv api.ResourceVersion) (*api.CoordinationLease, error)
+	GetCoordinationLease(ctx context.Context, name string) (*api.CoordinationLease, error)
+	ListCoordinationLeases(ctx context.Context, sel api.Selector) (*api.CoordinationLeaseList, error)
+	WatchCoordinationLeases(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
+	PutClusterEvent(ctx context.Context, name string, e *api.ClusterEvent) (*api.ClusterEvent, error)
+	DeleteClusterEvent(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterEvent, error)
+	GetClusterEvent(ctx context.Context, name string) (*api.ClusterEvent, error)
+	ListClusterEvents(ctx context.Context, sel api.Selector) (*api.ClusterEventList, error)
+	WatchClusterEvents(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
+	// Labels returns the labels of the object named name of the resource in
+	// group, built-in or custom, or nil where there is no such object. The
+	// authorizer judges a label selector rule on them.
+	Labels(ctx context.Context, group, resource, name string) (map[string]string, error)
 
 	PutCustomObject(ctx context.Context, p CustomPath, name string, o *api.CustomObject) (*api.CustomObject, error)
 	PutCustomObjectStatus(ctx context.Context, p CustomPath, name string, o *api.CustomObject) (*api.CustomObject, error)
 	DeleteCustomObject(ctx context.Context, p CustomPath, name string, rv api.ResourceVersion) (*api.CustomObject, error)
 	GetCustomObject(ctx context.Context, p CustomPath, name string) (*api.CustomObject, error)
-	ListCustomObjects(ctx context.Context, p CustomPath) (*api.CustomObjectList, error)
-	WatchCustomObjects(ctx context.Context, p CustomPath, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+	ListCustomObjects(ctx context.Context, p CustomPath, sel api.Selector) (*api.CustomObjectList, error)
+	WatchCustomObjects(ctx context.Context, p CustomPath, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 }
 
 var (
@@ -89,6 +106,11 @@ var (
 	volumes  = kind[api.Volume]{"volumes", func(v *api.Volume) *api.ObjectMeta { return &v.Metadata }, func(v *api.Volume) any { return v.Spec }, gvk(api.Group, api.KindVolume)}
 	nodes    = kind[api.Node]{"nodes", func(n *api.Node) *api.ObjectMeta { return &n.Metadata }, func(n *api.Node) any { return n.Spec }, gvk(api.Group, api.KindNode)}
 	leases   = kind[api.Lease]{"leases", func(l *api.Lease) *api.ObjectMeta { return &l.Metadata }, func(l *api.Lease) any { return l.Spec }, gvk(api.Group, api.KindLease)}
+
+	// The Lease of the coordination group is stored under a plural that holds
+	// the group, as a custom kind is, so that it is not the Node's Lease.
+	coordinationLeases = kind[api.CoordinationLease]{"leases." + api.CoordinationGroup, func(l *api.CoordinationLease) *api.ObjectMeta { return &l.Metadata }, func(l *api.CoordinationLease) any { return l.Spec }, gvk(api.CoordinationGroup, api.KindCoordinationLease)}
+	clusterEvents      = kind[api.ClusterEvent]{"events", func(e *api.ClusterEvent) *api.ObjectMeta { return &e.Metadata }, func(e *api.ClusterEvent) any { return e.Spec }, gvk(api.Group, api.KindEvent)}
 
 	certificateSigningRequests = kind[api.CertificateSigningRequest]{"certificatesigningrequests", func(r *api.CertificateSigningRequest) *api.ObjectMeta { return &r.Metadata }, func(r *api.CertificateSigningRequest) any { return r.Spec }, gvk(api.Group, api.KindCertificateSigningRequest)}
 
@@ -128,16 +150,16 @@ func (s *service) GetMicroVM(ctx context.Context, name string) (*api.MicroVM, er
 	return m, err
 }
 
-func (s *service) ListMicroVMs(ctx context.Context) (*api.MicroVMList, error) {
-	items, rv, err := microvms.list(ctx, s.st)
+func (s *service) ListMicroVMs(ctx context.Context, sel api.Selector) (*api.MicroVMList, error) {
+	items, rv, err := microvms.list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.MicroVMList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVMList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchMicroVMs(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return microvms.watch(ctx, s.st, rv)
+func (s *service) WatchMicroVMs(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+	return microvms.watch(ctx, s.st, rv, sel)
 }
 
 func (s *service) GetNode(ctx context.Context, name string) (*api.Node, error) {
@@ -145,16 +167,16 @@ func (s *service) GetNode(ctx context.Context, name string) (*api.Node, error) {
 	return n, err
 }
 
-func (s *service) ListNodes(ctx context.Context) (*api.NodeList, error) {
-	items, rv, err := nodes.list(ctx, s.st)
+func (s *service) ListNodes(ctx context.Context, sel api.Selector) (*api.NodeList, error) {
+	items, rv, err := nodes.list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.NodeList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindNodeList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchNodes(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return nodes.watch(ctx, s.st, rv)
+func (s *service) WatchNodes(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+	return nodes.watch(ctx, s.st, rv, sel)
 }
 
 func (s *service) GetLease(ctx context.Context, name string) (*api.Lease, error) {
@@ -162,16 +184,16 @@ func (s *service) GetLease(ctx context.Context, name string) (*api.Lease, error)
 	return l, err
 }
 
-func (s *service) ListLeases(ctx context.Context) (*api.LeaseList, error) {
-	items, rv, err := leases.list(ctx, s.st)
+func (s *service) ListLeases(ctx context.Context, sel api.Selector) (*api.LeaseList, error) {
+	items, rv, err := leases.list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.LeaseList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindLeaseList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchLeases(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return leases.watch(ctx, s.st, rv)
+func (s *service) WatchLeases(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+	return leases.watch(ctx, s.st, rv, sel)
 }
 
 func (s *service) GetCertificateSigningRequest(ctx context.Context, name string) (*api.CertificateSigningRequest, error) {
@@ -179,14 +201,14 @@ func (s *service) GetCertificateSigningRequest(ctx context.Context, name string)
 	return r, err
 }
 
-func (s *service) ListCertificateSigningRequests(ctx context.Context) (*api.CertificateSigningRequestList, error) {
-	items, rv, err := certificateSigningRequests.list(ctx, s.st)
+func (s *service) ListCertificateSigningRequests(ctx context.Context, sel api.Selector) (*api.CertificateSigningRequestList, error) {
+	items, rv, err := certificateSigningRequests.list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.CertificateSigningRequestList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindCertificateSigningRequestList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchCertificateSigningRequests(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return certificateSigningRequests.watch(ctx, s.st, rv)
+func (s *service) WatchCertificateSigningRequests(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+	return certificateSigningRequests.watch(ctx, s.st, rv, sel)
 }

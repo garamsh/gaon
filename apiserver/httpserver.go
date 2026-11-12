@@ -32,6 +32,9 @@ const extensionsRoot = "/apis/" + api.APIExtensionsGroupVersion
 // admissionRoot is the root of the paths of the webhook configurations.
 const admissionRoot = "/apis/" + api.AdmissionRegistrationGroupVersion
 
+// coordinationRoot is the root of the paths of the coordination group's Lease.
+const coordinationRoot = "/apis/" + api.CoordinationGroupVersion
+
 // customRoot is the collection path of the objects of a registered kind: the
 // group, the version and the plural come from the request, and the definition
 // that matches them decides whether it is served.
@@ -40,7 +43,7 @@ const customRoot = "/apis/{group}/{version}/{plural}"
 type traceKey struct{}
 
 // newHandler serves the paths of resource-api.md §Paths under root, rbacRoot,
-// extensionsRoot and customRoot over svc, and answers NotFound to any other path. az authorizes
+// extensionsRoot, admissionRoot, coordinationRoot and customRoot over svc, and answers NotFound to any other path. az authorizes
 // each request a certificate holder makes. It is the one place that maps a
 // failure to an HTTP status.
 func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tokenSet, log *slog.Logger) http.Handler {
@@ -67,6 +70,14 @@ func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tok
 	mux.HandleFunc("PUT "+root+"/leases/{name}", h.guard(api.Group, "leases", putVerb, put(h, svc.PutLease)))
 	mux.HandleFunc("GET "+root+"/leases/{name}", h.guard(api.Group, "leases", fixed(api.VerbGet), get(h, svc.GetLease)))
 	mux.HandleFunc("GET "+root+"/leases", h.guard(api.Group, "leases", readVerb, listOrWatch(h, svc.ListLeases, svc.WatchLeases)))
+	mux.HandleFunc("PUT "+root+"/events/{name}", h.guard(api.Group, "events", putVerb, put(h, svc.PutClusterEvent)))
+	mux.HandleFunc("DELETE "+root+"/events/{name}", h.guard(api.Group, "events", fixed(api.VerbDelete), deleteObject(h, svc.DeleteClusterEvent)))
+	mux.HandleFunc("GET "+root+"/events/{name}", h.guard(api.Group, "events", fixed(api.VerbGet), get(h, svc.GetClusterEvent)))
+	mux.HandleFunc("GET "+root+"/events", h.guard(api.Group, "events", readVerb, listOrWatch(h, svc.ListClusterEvents, svc.WatchClusterEvents)))
+	mux.HandleFunc("PUT "+coordinationRoot+"/leases/{name}", h.guard(api.CoordinationGroup, "leases", putVerb, put(h, svc.PutCoordinationLease)))
+	mux.HandleFunc("DELETE "+coordinationRoot+"/leases/{name}", h.guard(api.CoordinationGroup, "leases", fixed(api.VerbDelete), deleteObject(h, svc.DeleteCoordinationLease)))
+	mux.HandleFunc("GET "+coordinationRoot+"/leases/{name}", h.guard(api.CoordinationGroup, "leases", fixed(api.VerbGet), get(h, svc.GetCoordinationLease)))
+	mux.HandleFunc("GET "+coordinationRoot+"/leases", h.guard(api.CoordinationGroup, "leases", readVerb, listOrWatch(h, svc.ListCoordinationLeases, svc.WatchCoordinationLeases)))
 	mux.HandleFunc(createCSRRoute, h.guard(api.Group, "certificatesigningrequests", fixed(api.VerbCreate), h.createCertificateSigningRequest(svc)))
 	mux.HandleFunc("PUT "+root+"/certificatesigningrequests/{name}/status", h.guard(api.Group, "certificatesigningrequests/status", fixed(api.VerbUpdate), put(h, svc.PutCertificateSigningRequestStatus)))
 	mux.HandleFunc(getCSRRoute, h.guard(api.Group, "certificatesigningrequests", fixed(api.VerbGet), h.getCertificateSigningRequest(svc)))
@@ -134,23 +145,50 @@ func readVerb(r *http.Request) (api.Verb, error) {
 	return api.VerbList, nil
 }
 
-// putVerb is update for a body that carries a resourceVersion and create for
-// one that does not. It leaves the body to be read again.
-func putVerb(r *http.Request) (api.Verb, error) {
+// bodyMetadata is what authorization reads of the metadata in a request body.
+type bodyMetadata struct {
+	ResourceVersion api.ResourceVersion `json:"resourceVersion"`
+	Labels          map[string]string   `json:"labels"`
+}
+
+// peekMetadata reads the metadata of the body without consuming it. A body
+// that does not parse has none: the handler refuses it.
+func peekMetadata(r *http.Request) (bodyMetadata, error) {
 	body, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, maxBody))
 	if err != nil {
-		return "", api.NewAPIError(api.ReasonInvalid, "read body: %v", err)
+		return bodyMetadata{}, api.NewAPIError(api.ReasonInvalid, "read body: %v", err)
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	var peek struct {
-		Metadata struct {
-			ResourceVersion api.ResourceVersion `json:"resourceVersion"`
-		} `json:"metadata"`
+		Metadata bodyMetadata `json:"metadata"`
 	}
-	if json.Unmarshal(body, &peek) == nil && peek.Metadata.ResourceVersion != "" {
+	if json.Unmarshal(body, &peek) != nil {
+		return bodyMetadata{}, nil
+	}
+	return peek.Metadata, nil
+}
+
+// putVerb is update for a body that carries a resourceVersion and create for
+// one that does not. It leaves the body to be read again.
+func putVerb(r *http.Request) (api.Verb, error) {
+	meta, err := peekMetadata(r)
+	if err != nil {
+		return "", err
+	}
+	if meta.ResourceVersion != "" {
 		return api.VerbUpdate, nil
 	}
 	return api.VerbCreate, nil
+}
+
+// selectorOf is the label selector of a list or a watch, and nil where the
+// request has none. A selector that does not parse is an Invalid failure.
+func selectorOf(r *http.Request) (api.Selector, error) {
+	sel, err := api.ParseSelector(r.URL.Query().Get(api.LabelSelectorParam))
+	if err != nil {
+		return nil, api.NewAPIError(api.ReasonInvalid, "%s: %v", api.LabelSelectorParam, err)
+	}
+	return sel, nil
 }
 
 // caller is the identity as the authorizers see it.
@@ -179,7 +217,11 @@ func (h *handler) guardBy(resourceOf func(*http.Request) (group, resource string
 		if err == nil {
 			group, resource := resourceOf(r)
 			name, sub, _ := strings.Cut(resource, "/")
-			err = h.az.Authorize(r.Context(), id.caller(), authorization.Request{Group: group, Resource: name, Subresource: sub, Verb: v, Name: r.PathValue("name")})
+			req := authorization.Request{Group: group, Resource: name, Subresource: sub, Verb: v, Name: r.PathValue("name")}
+			err = h.scope(r, &req)
+			if err == nil {
+				err = h.az.Authorize(r.Context(), id.caller(), req)
+			}
 		}
 		if err != nil {
 			h.fail(w, r, err)
@@ -187,6 +229,23 @@ func (h *handler) guardBy(resourceOf func(*http.Request) (group, resource string
 		}
 		next(w, r)
 	}
+}
+
+// scope sets on req what a rule with a label selector judges that is not
+// stored: the labels in the body of a create or an update of an object, and
+// the selector of a list or a watch. A selector that does not parse is left
+// empty, the widest, so that no rule with a selector allows the request, and
+// the handler answers it as Invalid.
+func (h *handler) scope(r *http.Request, req *authorization.Request) error {
+	switch {
+	case req.Verb == api.VerbList || req.Verb == api.VerbWatch:
+		req.Selector, _ = selectorOf(r)
+	case (req.Verb == api.VerbCreate || req.Verb == api.VerbUpdate) && req.Subresource == "":
+		meta, err := peekMetadata(r)
+		req.Labels = meta.Labels
+		return err
+	}
+	return nil
 }
 
 // recoverPanics answers 500 where a handler panics, which net/http would
@@ -355,15 +414,20 @@ func (h *handler) putClusterRoleBinding(svc resourceapi.Service) http.HandlerFun
 }
 
 // listOrWatch answers GET of a collection: the list, or with watch=true the
-// events after the resourceVersion.
-func listOrWatch[T any](h *handler, list func(context.Context) (*T, error), watch func(context.Context, api.ResourceVersion) (<-chan api.WatchEvent, error)) http.HandlerFunc {
+// events after the resourceVersion, of the objects the labelSelector selects.
+func listOrWatch[T any](h *handler, list func(context.Context, api.Selector) (*T, error), watch func(context.Context, api.ResourceVersion, api.Selector) (<-chan api.WatchEvent, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		sel, err := selectorOf(r)
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
 		if r.URL.Query().Get("watch") != "true" {
-			out, err := list(r.Context())
+			out, err := list(r.Context(), sel)
 			h.respond(w, r, out, err)
 			return
 		}
-		events, err := watch(r.Context(), api.ResourceVersion(r.URL.Query().Get("resourceVersion")))
+		events, err := watch(r.Context(), api.ResourceVersion(r.URL.Query().Get("resourceVersion")), sel)
 		if err != nil {
 			h.fail(w, r, err)
 			return

@@ -1,6 +1,6 @@
 # ADR 0012: The Node Agent asks a network plugin and a storage plugin, compiled into it, before it creates a Machine
 
-> Status: accepted
+> Status: superseded by [ADR 0019](./0019-the-node-agent-reaches-its-network-and-storage-plugins-as-separate-processes-through-a-versioned-grpc-api-on-unix-sockets.md)
 > Date: 2026-11-12
 
 Drafted for garamsh/gaon#90. The design is the PM's, recorded in #90 §Design. It fills the gap [node-agent.md](../node-agent.md) §What the agent does not do yet named: a Machine was created with no network policy and no disks, so invariant 6 of [resource-api.md](../resource-api.md), that no Machine runs before its network policy is applied, was not kept by the agent. The boundary is [ADR 0002](./0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md): gaon reaches mvmd only through its runtime API.

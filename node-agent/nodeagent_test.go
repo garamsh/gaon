@@ -13,14 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/lib/plugin"
 	nodeagent "github.com/garamsh/gaon/node-agent"
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
 	"github.com/garamsh/gaon/node-agent/internal/liveness"
-	"github.com/garamsh/gaon/node-agent/internal/microvms"
-	"github.com/garamsh/gaon/node-agent/internal/microvms/network"
-	"github.com/garamsh/gaon/node-agent/internal/microvms/storage"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
@@ -53,34 +51,35 @@ func TestParseConfig_ReadsEveryValueFromItsEnvironmentVariable(t *testing.T) {
 	assert.Equal(t, nodeagent.Config{
 		APIServer: "http://api", HTTPClient: &http.Client{}, NodeName: "node-a", MvmdSocket: "/s.sock", ResyncPeriod: 7 * time.Second,
 		RestartBackoff: 3 * time.Second, RestartBackoffMax: 2 * time.Minute, RestartResetAfter: 8 * time.Minute,
-		StoragePlugin: storage.LocalName,
-		Liveness:      liveness.Params{LeaseDuration: 40 * time.Second, RenewPeriod: 6 * time.Second, DeadlineLength: 20 * time.Second, Delta: 4 * time.Second, RPCTimeout: 3 * time.Second},
-	}, withoutPlugins(t, cfg))
+		PluginDir: plugin.DefaultDir,
+		Liveness:  liveness.Params{LeaseDuration: 40 * time.Second, RenewPeriod: 6 * time.Second, DeadlineLength: 20 * time.Second, Delta: 4 * time.Second, RPCTimeout: 3 * time.Second},
+	}, cfg)
 }
 
-func TestParseConfig_SelectsTheStoragePluginByFlagOrEnvironmentAndDefaultsToLocal(t *testing.T) {
+func TestParseConfig_NamesThePluginsAndTheirDirectoryByFlagOrEnvironmentAndDefaultsToNone(t *testing.T) {
 	required := map[string]string{nodeagent.EnvAPIServer: "http://api", nodeagent.EnvNodeName: "n1", nodeagent.EnvMvmdSocket: "/s.sock"}
 	byDefault, err := nodeagent.ParseConfig(nil, env(required), io.Discard)
 	require.NoError(t, err)
-	assert.Equal(t, storage.LocalName, byDefault.StoragePlugin)
+	assert.Empty(t, byDefault.NetworkPlugin, "no network plugin unless one is named")
+	assert.Empty(t, byDefault.StoragePlugin, "no storage plugin unless one is named")
+	assert.Equal(t, plugin.DefaultDir, byDefault.PluginDir)
 
-	byFlag, err := nodeagent.ParseConfig([]string{"--storage-plugin=none"}, env(required), io.Discard)
+	byFlag, err := nodeagent.ParseConfig([]string{"--network-plugin=default", "--storage-plugin=local", "--plugin-dir=/d"}, env(required), io.Discard)
 	require.NoError(t, err)
-	assert.Equal(t, storage.NoneName, byFlag.StoragePlugin)
+	assert.Equal(t, "default", byFlag.NetworkPlugin)
+	assert.Equal(t, "local", byFlag.StoragePlugin)
+	assert.Equal(t, "/d", byFlag.PluginDir)
 
-	required[nodeagent.EnvStoragePlugin] = "none"
+	required[nodeagent.EnvNetworkPlugin], required[nodeagent.EnvStoragePlugin], required[nodeagent.EnvPluginDir] = "acme-net", "acme-disk", "/e"
 	byEnv, err := nodeagent.ParseConfig(nil, env(required), io.Discard)
 	require.NoError(t, err)
-	assert.Equal(t, storage.NoneName, byEnv.StoragePlugin)
-}
+	assert.Equal(t, "acme-net", byEnv.NetworkPlugin)
+	assert.Equal(t, "acme-disk", byEnv.StoragePlugin)
+	assert.Equal(t, "/e", byEnv.PluginDir)
 
-// withoutPlugins returns cfg with its network plugin nil after checking it has one,
-// since a plugin is compared by what it does and not by its address.
-func withoutPlugins(t *testing.T, cfg nodeagent.Config) nodeagent.Config {
-	t.Helper()
-	assert.NotNil(t, cfg.Network)
-	cfg.Network = nil
-	return cfg
+	byBoth, err := nodeagent.ParseConfig([]string{"--network-plugin=other"}, env(required), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, "other", byBoth.NetworkPlugin, "a flag given wins over its variable")
 }
 
 func TestParseConfig_DefaultsDeltaToOneSecondAndEveryDefaultPassesTheChecks(t *testing.T) {
@@ -123,10 +122,8 @@ func TestParseConfig_RefusesWhatItCannotRunWith(t *testing.T) {
 		{"a restart backoff above its maximum", "", map[string]string{nodeagent.EnvRestartBackoff: "10m"}, "restart backoff"},
 		{"a restart backoff of zero", "", map[string]string{nodeagent.EnvRestartBackoff: "0s"}, "restart backoff"},
 		{"a restart reset time of zero", "", map[string]string{nodeagent.EnvRestartResetAfter: "0s"}, "restart backoff"},
-		{"an unknown network plugin", "", map[string]string{nodeagent.EnvNetworkPlugin: "calico"}, "calico"},
-		{"an unknown storage plugin", "", map[string]string{nodeagent.EnvStoragePlugin: "ceph"}, "ceph"},
-		{"an egress prefix that is not a CIDR", "", map[string]string{nodeagent.EnvEgressPrefix: "10.0.0.0/8,10.1.2.3"}, "10.1.2.3"},
-		{"an ingress prefix that is not a CIDR", "", map[string]string{nodeagent.EnvIngressPrefix: "everyone"}, "everyone"},
+		{"a network plugin name that cannot be in a socket path", "", map[string]string{nodeagent.EnvNetworkPlugin: "../calico"}, "../calico"},
+		{"a storage plugin name that cannot be in a socket path", "", map[string]string{nodeagent.EnvStoragePlugin: "Ceph/1"}, "Ceph/1"},
 		{"durations that do not fit", "", map[string]string{nodeagent.EnvLeaseDuration: "10s"}, "lease duration"},
 	}
 	for _, tt := range tests {
@@ -149,33 +146,11 @@ func TestParseConfig_RefusesWhatItCannotRunWith(t *testing.T) {
 	assert.NoError(t, err, "control: the same environment with everything present is accepted")
 }
 
-func TestParseConfig_ChoosesPluginsAndPrefixesByFlagOrEnvironment(t *testing.T) {
-	_, err := nodeagent.ParseConfig([]string{"--network-plugin=default", "--storage-plugin=none"}, env(required), io.Discard)
-	assert.NoError(t, err, "control: the built-in plugins are accepted by flag")
-
-	for _, args := range [][]string{
-		{"--network-plugin=calico"},
-		{"--storage-plugin=ceph"},
-		{"--egress-prefix=10.0.0.0/8", "--egress-prefix=nonsense"},
-		{"--ingress-prefix=300.0.0.0/8"},
-	} {
-		_, err := nodeagent.ParseConfig(args, env(required), io.Discard)
-		assert.Error(t, err, "%v stops the start", args)
-	}
-
-	// A flag replaces the environment's prefixes, and a repeated flag adds to the flag's.
-	_, err = nodeagent.ParseConfig([]string{"--egress-prefix=10.0.0.0/8", "--egress-prefix=fd00::/8"},
-		env(map[string]string{"GAON_NODE_NAME": "n1", nodeagent.EnvAPIServer: "http://api", nodeagent.EnvMvmdSocket: "/s", nodeagent.EnvEgressPrefix: "bad"}), io.Discard)
-	assert.NoError(t, err, "a --egress-prefix replaces the environment's, which is not parsed then")
-}
-
 func TestRun_RegistersTheNodeRenewsItsLeaseAndRunsABoundMicroVM(t *testing.T) {
 	clk := clock.System{}
 	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clk)
-	defaultNetwork, err := network.NewDefault(nil, nil)
-	require.NoError(t, err)
 	cfg := nodeagent.Config{
-		Network: defaultNetwork, StoragePlugin: storage.NoneName,
+		PluginDir: t.TempDir(),
 		APIServer: gaon.URL, NodeName: "n1", MvmdSocket: mvmd.Socket, ResyncPeriod: 20 * time.Millisecond,
 		Liveness: liveness.Params{LeaseDuration: 30 * time.Second, RenewPeriod: 20 * time.Millisecond, DeadlineLength: 5 * time.Second, Delta: time.Second, RPCTimeout: time.Second},
 	}
@@ -212,69 +187,27 @@ func TestRun_RegistersTheNodeRenewsItsLeaseAndRunsABoundMicroVM(t *testing.T) {
 	assert.Equal(t, v1alpha2.MachineState_MACHINE_STATE_RUNNING, mustMicroVM(t, mvmd, "m1-e1").GetState())
 }
 
-func TestRun_CreatesAMicroVMWithThePolicyOfTheFlags(t *testing.T) {
-	clk := clock.System{}
-	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clk)
-	cfg, err := nodeagent.ParseConfig([]string{
-		"--api-server=" + gaon.URL, "--node-name=n1", "--mvmd-socket=" + mvmd.Socket, "--resync-period=20ms", "--renew-period=20ms", "--deadline-length=5s",
-		"--egress-prefix=10.0.0.0/8", "--ingress-prefix=192.168.0.0/16",
-	}, env(nil), io.Discard)
-	require.NoError(t, err)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- nodeagent.Run(ctx, cfg, clk, slog.New(slog.NewTextHandler(io.Discard, nil))) }()
-	t.Cleanup(func() { cancel(); <-done })
-
-	gaon.SetMicroVM(api.MicroVM{
-		Metadata: api.ObjectMeta{Name: "m1"},
-		Spec: api.MicroVMSpec{
-			Image:        "registry.example/app@sha256:" + strings.Repeat("b", 64),
-			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "1", Memory: "512Mi"}},
-			RunStrategy:  api.RunAlways,
-			NodeName:     "n1",
-			BindingEpoch: 1,
-			Ports:        []int32{8080},
-		},
-	})
-
-	require.Eventually(t, func() bool {
-		return gaon.MicroVM("m1").Status.Phase == api.MicroVMRunning
-	}, 5*time.Second, 10*time.Millisecond)
-	policy := mustMicroVM(t, mvmd, "m1-e1").GetNetworkPolicy()
-	require.Len(t, policy.GetEgress(), 1)
-	assert.Equal(t, "10.0.0.0/8", policy.GetEgress()[0].GetPrefix())
-	require.Len(t, policy.GetIngress(), 1)
-	assert.Equal(t, "192.168.0.0/16", policy.GetIngress()[0].GetPrefix())
-	assert.EqualValues(t, 8080, policy.GetIngress()[0].GetPorts()[0].GetFirst())
-}
-
-// runAgent runs the agent against gaon and mvmd with fast periods until the
-// test ends.
+// runAgent runs the agent against gaon and mvmd with fast periods and no
+// plugin until the test ends.
 func runAgent(t *testing.T, gaon *fakegaon.Server, mvmd *fakemvmd.Server) {
 	t.Helper()
-	runAgentWithStorage(t, gaon, mvmd, storage.NoneName)
+	runAgentWith(t, gaon, mvmd, nodeagent.Config{})
 }
 
-// runAgentWithStorage is runAgent with the storage plugin called plugin.
-func runAgentWithStorage(t *testing.T, gaon *fakegaon.Server, mvmd *fakemvmd.Server, plugin string) {
+// runAgentWith is runAgent with the plugin settings of plugins.
+func runAgentWith(t *testing.T, gaon *fakegaon.Server, mvmd *fakemvmd.Server, plugins nodeagent.Config) {
 	t.Helper()
 	clk := clock.System{}
 	cfg := nodeagent.Config{
-		Network: mustNetwork(t), StoragePlugin: plugin,
+		PluginDir: plugins.PluginDir, PluginTimeout: plugins.PluginTimeout, NetworkPlugin: plugins.NetworkPlugin, StoragePlugin: plugins.StoragePlugin,
 		APIServer: gaon.URL, NodeName: "n1", MvmdSocket: mvmd.Socket, ResyncPeriod: 20 * time.Millisecond,
+		RestartBackoff: time.Hour, RestartBackoffMax: time.Hour, RestartResetAfter: time.Hour,
 		Liveness: liveness.Params{LeaseDuration: 30 * time.Second, RenewPeriod: 20 * time.Millisecond, DeadlineLength: 5 * time.Second, Delta: time.Second, RPCTimeout: time.Second},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- nodeagent.Run(ctx, cfg, clk, slog.New(slog.NewTextHandler(io.Discard, nil))) }()
 	t.Cleanup(func() { cancel(); <-done })
-}
-
-func mustNetwork(t *testing.T) microvms.Network {
-	t.Helper()
-	n, err := network.NewDefault(nil, nil)
-	require.NoError(t, err)
-	return n
 }
 
 func statusCode(t *testing.T, method, url string) int {
@@ -352,28 +285,4 @@ func mustMicroVM(t *testing.T, m *fakemvmd.Server, id string) *v1alpha2.Machine 
 	got, ok := m.Machine(id)
 	require.True(t, ok)
 	return got
-}
-
-func TestRun_RunsTheLocalStoragePluginForTheVolumesOfItsNode(t *testing.T) {
-	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clock.System{})
-	pinned := api.Volume{
-		Metadata: api.ObjectMeta{Name: "data", Generation: 1, Finalizers: []string{api.NodeAgentFinalizer}},
-		Spec:     api.VolumeSpec{StorageClass: api.StorageClassLocal, AccessModes: []string{api.AccessReadWriteOnce}, Storage: "10Mi", NodeName: "n1"},
-	}
-	elsewhere := pinned
-	elsewhere.Metadata.Name, elsewhere.Spec.NodeName = "elsewhere", "n2"
-	gaon.SetVolume(pinned)
-	gaon.SetVolume(elsewhere)
-	runAgentWithStorage(t, gaon, mvmd, storage.LocalName)
-
-	require.Eventually(t, func() bool {
-		v, _ := gaon.Volume("data")
-		return v.Status.Phase == api.VolumeAvailable
-	}, 5*time.Second, 10*time.Millisecond, "data is Available")
-
-	disk, ok := mvmd.Disk("volume-data")
-	require.True(t, ok)
-	assert.EqualValues(t, 10<<20, disk.GetSizeBytes())
-	_, ok = mvmd.Disk("volume-elsewhere")
-	assert.False(t, ok, "control: a Volume pinned to another Node gets no disk")
 }

@@ -58,17 +58,24 @@ func (k kind[T]) decode(e Entry) (*T, error) {
 	return &obj, nil
 }
 
-// encode serialises obj without its version.
+// encode serialises obj without its version. An object that has no uid, as
+// one stored before uids existed has none, is given one: every write of it
+// goes through here, so the next write of such an object sets it.
 func (k kind[T]) encode(obj *T) ([]byte, error) {
 	m := k.meta(obj)
+	if m.UID == "" {
+		m.UID = api.NewUID()
+	}
 	rv := m.ResourceVersion
 	m.ResourceVersion = ""
 	defer func() { m.ResourceVersion = rv }()
 	return json.Marshal(obj)
 }
 
-// create stores obj, which has no version, and sets the version it got.
+// create stores obj, which has no version, under a new uid in place of any it
+// carries, and sets the version it got.
 func (k kind[T]) create(ctx context.Context, st Store, obj *T) error {
+	k.meta(obj).UID = api.NewUID()
 	value, err := k.encode(obj)
 	if err != nil {
 		return err
@@ -118,6 +125,9 @@ func (k kind[T]) put(ctx context.Context, st Store, obj *T, onCreate func() erro
 	m := k.meta(obj)
 	if m.ResourceVersion == "" {
 		m.Generation, m.DeletionTimestamp = 1, nil
+		if err := m.ValidateCreate(); err != nil {
+			return nil, err
+		}
 		if err := onCreate(); err != nil {
 			return nil, err
 		}
@@ -133,6 +143,10 @@ func (k kind[T]) put(ctx context.Context, st Store, obj *T, onCreate func() erro
 	if err := checkVersion(k.plural, m.Name, m.ResourceVersion, k.meta(old).ResourceVersion); err != nil {
 		return nil, err
 	}
+	if err := m.ValidateUpdate(*k.meta(old)); err != nil {
+		return nil, err
+	}
+	m.UID = k.meta(old).UID
 	m.Generation = nextGeneration(k.meta(old).Generation, k.spec(old), k.spec(obj))
 	m.DeletionTimestamp = k.meta(old).DeletionTimestamp
 	if err := onUpdate(old); err != nil {
@@ -144,8 +158,9 @@ func (k kind[T]) put(ctx context.Context, st Store, obj *T, onCreate func() erro
 	return obj, nil
 }
 
-// list returns the stored objects and the version to watch from.
-func (k kind[T]) list(ctx context.Context, st Store) ([]T, api.ResourceVersion, error) {
+// list returns the stored objects sel selects and the version to watch from,
+// which is the Store's whatever sel selects.
+func (k kind[T]) list(ctx context.Context, st Store, sel api.Selector) ([]T, api.ResourceVersion, error) {
 	entries, rev, err := st.List(ctx, k.prefix())
 	if err != nil {
 		return nil, "", err
@@ -159,14 +174,17 @@ func (k kind[T]) list(ctx context.Context, st Store) ([]T, api.ResourceVersion, 
 		if err != nil {
 			return nil, "", err
 		}
-		items = append(items, *obj)
+		if sel.Matches(k.meta(obj).Labels) {
+			items = append(items, *obj)
+		}
 	}
 	return items, version(rev), nil
 }
 
-// watch streams the changes made after version rv as watch events, ending
-// with an Error event when the stream fails, and closes the channel after it.
-func (k kind[T]) watch(ctx context.Context, st Store, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
+// watch streams the changes made after version rv to the objects sel selects
+// as watch events, ending with an Error event when the stream fails, and
+// closes the channel after it.
+func (k kind[T]) watch(ctx context.Context, st Store, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
 	after, err := parseVersion(rv)
 	if err != nil {
 		return nil, err
@@ -182,7 +200,10 @@ func (k kind[T]) watch(ctx context.Context, st Store, rv api.ResourceVersion) (<
 			if ev.Err == nil && !k.own(ev.Entry.Key) {
 				return
 			}
-			converted := k.convert(ev)
+			converted, send := k.convert(ev, sel)
+			if !send {
+				continue
+			}
 			select {
 			case out <- converted:
 			case <-ctx.Done():
@@ -193,12 +214,14 @@ func (k kind[T]) watch(ctx context.Context, st Store, rv api.ResourceVersion) (<
 	return out, nil
 }
 
-func (k kind[T]) convert(ev Event) api.WatchEvent {
+// convert is the watch event for ev, and false where sel selects the object
+// neither before nor after the change, so that the watcher is told nothing.
+func (k kind[T]) convert(ev Event, sel api.Selector) (api.WatchEvent, bool) {
 	failure := ev.Err
 	if failure == nil {
-		converted, err := k.event(ev)
+		converted, send, err := k.event(ev, sel)
 		if err == nil {
-			return converted
+			return converted, send
 		}
 		failure = err
 	}
@@ -210,15 +233,45 @@ func (k kind[T]) convert(ev Event) api.WatchEvent {
 	if err != nil {
 		panic(err)
 	}
-	return converted
+	return converted, true
 }
 
-func (k kind[T]) event(ev Event) (api.WatchEvent, error) {
+// event applies sel to ev: an object that starts to match is Added, one that
+// stops matching is Deleted, and one that matches before and after is
+// Modified. A Modified event whose previous value is gone cannot be judged and
+// is reported as compacted.
+func (k kind[T]) event(ev Event, sel api.Selector) (api.WatchEvent, bool, error) {
 	obj, err := k.decode(ev.Entry)
 	if err != nil {
-		return api.WatchEvent{}, err
+		return api.WatchEvent{}, false, err
 	}
-	return api.NewEvent(ev.Type, obj)
+	after := sel.Matches(k.meta(obj).Labels)
+	typ := ev.Type
+	switch ev.Type {
+	case api.EventAdded, api.EventDeleted:
+		if !after {
+			return api.WatchEvent{}, false, nil
+		}
+	case api.EventModified:
+		if ev.Previous == nil {
+			return api.WatchEvent{}, false, ErrCompacted
+		}
+		prev, err := k.decode(Entry{Key: ev.Entry.Key, Value: ev.Previous, Revision: ev.Entry.Revision})
+		if err != nil {
+			return api.WatchEvent{}, false, err
+		}
+		switch before := sel.Matches(k.meta(prev).Labels); {
+		case before && after:
+		case after:
+			typ = api.EventAdded
+		case before:
+			typ = api.EventDeleted
+		default:
+			return api.WatchEvent{}, false, nil
+		}
+	}
+	converted, err := api.NewEvent(typ, obj)
+	return converted, true, err
 }
 
 // translate maps a Store failure on the object named name to its API error.

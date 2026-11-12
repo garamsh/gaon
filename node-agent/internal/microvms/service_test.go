@@ -14,12 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/lib/plugin"
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
 	"github.com/garamsh/gaon/node-agent/internal/microvms"
-	"github.com/garamsh/gaon/node-agent/internal/microvms/network"
-	"github.com/garamsh/gaon/node-agent/internal/microvms/storage"
 	"github.com/garamsh/mvmd/lib/runtimeapi"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
@@ -33,7 +32,8 @@ type env struct {
 	mvmd *fakemvmd.Server
 	rt   v1alpha2.RuntimeServiceClient
 	// network and storage are the plugins the service runs with; a setup
-	// function may replace them, and they default to the built-ins.
+	// function may replace them, and they default to plugins that serve every
+	// MicroVM with the empty policy and no disk.
 	network microvms.Network
 	storage microvms.Storage
 }
@@ -48,12 +48,10 @@ func start(t *testing.T, armed bool, wrap func(microvms.API) microvms.API, setup
 		f(e)
 	}
 	if e.network == nil {
-		def, err := network.NewDefault(nil, nil)
-		require.NoError(t, err)
-		e.network = def
+		e.network = emptyNetwork{}
 	}
 	if e.storage == nil {
-		e.storage = storage.None{}
+		e.storage = noDisks{}
 	}
 	conn, err := runtimeapi.Dial(context.Background(), e.mvmd.Socket)
 	require.NoError(t, err)
@@ -77,6 +75,22 @@ func start(t *testing.T, armed bool, wrap func(microvms.API) microvms.API, setup
 	t.Cleanup(func() { cancel(); <-done })
 	return e
 }
+
+// emptyNetwork gives every MicroVM the empty policy.
+type emptyNetwork struct{}
+
+func (emptyNetwork) Policy(context.Context, *api.MicroVM) (*plugin.NetworkPolicy, error) {
+	return &plugin.NetworkPolicy{}, nil
+}
+
+// noDisks attaches nothing and releases nothing.
+type noDisks struct{}
+
+func (noDisks) Attach(context.Context, *api.MicroVM) ([]plugin.DiskAttachment, error) {
+	return nil, nil
+}
+
+func (noDisks) Release(context.Context, string) error { return nil }
 
 func microvm(name string, epoch api.Epoch, nodeName string, strategy api.RunStrategy) api.MicroVM {
 	return api.MicroVM{

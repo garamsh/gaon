@@ -37,14 +37,14 @@ func (s *service) GetMutatingWebhookConfiguration(ctx context.Context, name stri
 	return c, err
 }
 
-func (s *service) ListMutatingWebhookConfigurations(ctx context.Context) (*api.MutatingWebhookConfigurationList, error) {
-	items, rv, err := mutatingWebhookConfigurations.list(ctx, s.st)
+func (s *service) ListMutatingWebhookConfigurations(ctx context.Context, sel api.Selector) (*api.MutatingWebhookConfigurationList, error) {
+	items, rv, err := mutatingWebhookConfigurations.list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.MutatingWebhookConfigurationList{TypeMeta: api.TypeMeta{APIVersion: api.AdmissionRegistrationGroupVersion, Kind: api.KindMutatingWebhookConfigurationList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchMutatingWebhookConfigurations(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return mutatingWebhookConfigurations.watch(ctx, s.st, rv)
+func (s *service) WatchMutatingWebhookConfigurations(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+	return mutatingWebhookConfigurations.watch(ctx, s.st, rv, sel)
 }
