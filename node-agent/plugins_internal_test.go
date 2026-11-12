@@ -3,7 +3,6 @@ package nodeagent
 import (
 	"context"
 	"net"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/lib/plugin/plugintest"
 )
 
 func TestConfig_PluginTimeoutIsTenSecondsUnlessSet(t *testing.T) {
@@ -38,9 +38,7 @@ func hang(t *testing.T, dir, kind, name string) {
 }
 
 func TestDialPlugins_ACallToAPluginThatNeverAnswersReturnsWithinTheTimeout(t *testing.T) {
-	dir, err := os.MkdirTemp("", "gp")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	dir := plugintest.SocketDir(t)
 	hang(t, dir, "network", "hung")
 	hang(t, dir, "storage", "hung")
 	p, err := dialPlugins(Config{PluginDir: dir, NetworkPlugin: "hung", StoragePlugin: "hung", PluginTimeout: 200 * time.Millisecond})

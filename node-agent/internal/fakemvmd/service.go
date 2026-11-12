@@ -2,10 +2,8 @@ package fakemvmd
 
 import (
 	"context"
-	"os"
 	"slices"
 	"strings"
-	"testing"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -13,16 +11,6 @@ import (
 
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
-
-func shortTempDir(t testing.TB) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "fm")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
-}
 
 func (s *Server) record(call, id string) {
 	s.calls = append(s.calls, call+" "+id)
