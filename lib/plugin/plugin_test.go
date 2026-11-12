@@ -1,0 +1,248 @@
+package plugin_test
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/lib/plugin"
+)
+
+// shortDir is a directory whose path leaves room for a socket name, which
+// t.TempDir does not always.
+func shortDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "plg")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+func start(t *testing.T, serve func(ctx context.Context) error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			assert.NoError(t, err)
+		case <-time.After(5 * time.Second):
+			t.Error("the plugin did not stop")
+		}
+	})
+}
+
+func waitSocket(t *testing.T, dir string, kind plugin.Kind, name string) {
+	t.Helper()
+	path, err := plugin.SocketPath(dir, kind, name)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { _, err := os.Stat(path); return err == nil }, 5*time.Second, 10*time.Millisecond)
+}
+
+func microvm(name string) *api.MicroVM {
+	m := &api.MicroVM{}
+	m.Metadata.Name = name
+	m.Spec.Image = "img"
+	return m
+}
+
+type network struct {
+	policy *plugin.NetworkPolicy
+	err    error
+	seen   *api.MicroVM
+}
+
+func (n *network) Policy(_ context.Context, m *api.MicroVM) (*plugin.NetworkPolicy, error) {
+	n.seen = m
+	return n.policy, n.err
+}
+
+type storage struct {
+	disks    []plugin.DiskAttachment
+	err      error
+	released []string
+}
+
+func (s *storage) Attach(context.Context, *api.MicroVM) ([]plugin.DiskAttachment, error) {
+	return s.disks, s.err
+}
+
+func (s *storage) Release(_ context.Context, id string) error {
+	s.released = append(s.released, id)
+	return s.err
+}
+
+func TestNetwork_APolicyArrivesWithEveryFieldAndTheMicroVMItWasAskedFor(t *testing.T) {
+	dir := shortDir(t)
+	want := &plugin.NetworkPolicy{
+		Egress: []plugin.NetworkRule{{Prefix: "10.0.0.0/8", Protocol: plugin.Any}},
+		Ingress: []plugin.NetworkRule{
+			{Prefix: "192.168.0.0/16", Protocol: plugin.TCP, Ports: []plugin.PortRange{{First: 80, Last: 80}, {First: 8000, Last: 8100}}},
+			{Prefix: "fd00::/8", Protocol: plugin.ICMPv6},
+			{Prefix: "10.1.0.0/16", Protocol: plugin.UDP, Ports: []plugin.PortRange{{First: 53, Last: 53}}},
+			{Prefix: "10.2.0.0/16", Protocol: plugin.ICMP},
+		},
+	}
+	n := &network{policy: want}
+	start(t, func(ctx context.Context) error { return plugin.ServeNetwork(ctx, dir, "test", n) })
+	waitSocket(t, dir, plugin.KindNetwork, "test")
+	c, err := plugin.DialNetwork(dir, "test")
+	require.NoError(t, err)
+	defer c.Close()
+
+	got, err := c.Policy(t.Context(), microvm("a"))
+
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	require.NotNil(t, n.seen)
+	assert.Equal(t, "a", n.seen.Metadata.Name)
+	assert.Equal(t, "img", n.seen.Spec.Image)
+}
+
+func TestNetwork_ARefusalArrivesAsARefusalAndAnyOtherErrorDoesNot(t *testing.T) {
+	dir := shortDir(t)
+	n := &network{err: &plugin.Refusal{Reason: "UnknownNetwork", Message: "no such network"}}
+	start(t, func(ctx context.Context) error { return plugin.ServeNetwork(ctx, dir, "test", n) })
+	waitSocket(t, dir, plugin.KindNetwork, "test")
+	c, err := plugin.DialNetwork(dir, "test")
+	require.NoError(t, err)
+	defer c.Close()
+
+	_, err = c.Policy(t.Context(), microvm("a"))
+	var r *plugin.Refusal
+	require.ErrorAs(t, err, &r)
+	assert.Equal(t, plugin.Refusal{Reason: "UnknownNetwork", Message: "no such network"}, *r)
+
+	// The control: an error that is not a refusal is not one on the other
+	// side either, so the agent retries it.
+	n.err = errors.New("the database is down")
+	_, err = c.Policy(t.Context(), microvm("a"))
+	require.Error(t, err)
+	assert.False(t, errors.As(err, &r))
+	assert.Equal(t, codes.Unknown, status.Code(err))
+	assert.Contains(t, err.Error(), "the database is down")
+}
+
+func TestNetwork_APluginThatIsNotRunningFailsTheCallWithoutRefusing(t *testing.T) {
+	dir := shortDir(t)
+	c, err := plugin.DialNetwork(dir, "absent")
+	require.NoError(t, err)
+	defer c.Close()
+
+	_, err = c.Policy(t.Context(), microvm("a"))
+
+	require.Error(t, err)
+	var r *plugin.Refusal
+	assert.False(t, errors.As(err, &r))
+	assert.Equal(t, codes.Unavailable, status.Code(err))
+}
+
+func TestNetwork_APluginStartedAfterTheClientWasMadeAnswersTheNextCall(t *testing.T) {
+	dir := shortDir(t)
+	c, err := plugin.DialNetwork(dir, "late")
+	require.NoError(t, err)
+	defer c.Close()
+	_, err = c.Policy(t.Context(), microvm("a"))
+	require.Error(t, err)
+
+	start(t, func(ctx context.Context) error {
+		return plugin.ServeNetwork(ctx, dir, "late", &network{policy: &plugin.NetworkPolicy{}})
+	})
+	waitSocket(t, dir, plugin.KindNetwork, "late")
+
+	require.Eventually(t, func() bool {
+		_, err := c.Policy(t.Context(), microvm("a"))
+		return err == nil
+	}, 10*time.Second, 50*time.Millisecond)
+}
+
+func TestStorage_DisksArriveAndReleaseCarriesTheMachineID(t *testing.T) {
+	dir := shortDir(t)
+	s := &storage{disks: []plugin.DiskAttachment{{DiskID: "volume-a"}, {DiskID: "volume-b", ReadOnly: true}}}
+	start(t, func(ctx context.Context) error { return plugin.ServeStorage(ctx, dir, "test", s) })
+	waitSocket(t, dir, plugin.KindStorage, "test")
+	c, err := plugin.DialStorage(dir, "test")
+	require.NoError(t, err)
+	defer c.Close()
+
+	got, err := c.Attach(t.Context(), microvm("a"))
+	require.NoError(t, err)
+	assert.Equal(t, s.disks, got)
+
+	require.NoError(t, c.Release(t.Context(), "machine-1"))
+	assert.Equal(t, []string{"machine-1"}, s.released)
+}
+
+func TestStorage_ARefusalArrivesAsARefusalAndAFailedReleaseAsAnError(t *testing.T) {
+	dir := shortDir(t)
+	s := &storage{err: &plugin.Refusal{Reason: "VolumeNotFound", Message: "volume x"}}
+	start(t, func(ctx context.Context) error { return plugin.ServeStorage(ctx, dir, "test", s) })
+	waitSocket(t, dir, plugin.KindStorage, "test")
+	c, err := plugin.DialStorage(dir, "test")
+	require.NoError(t, err)
+	defer c.Close()
+
+	_, err = c.Attach(t.Context(), microvm("a"))
+	var r *plugin.Refusal
+	require.ErrorAs(t, err, &r)
+	assert.Equal(t, "VolumeNotFound", r.Reason)
+
+	s.err = errors.New("disk busy")
+	err = c.Release(t.Context(), "m")
+	require.Error(t, err)
+	assert.False(t, errors.As(err, &r))
+	_, err = c.Attach(t.Context(), microvm("a"))
+	require.Error(t, err)
+	assert.False(t, errors.As(err, &r))
+}
+
+func TestServe_RefusesASocketAnotherProcessServesAndReplacesAStaleOne(t *testing.T) {
+	dir := shortDir(t)
+	start(t, func(ctx context.Context) error {
+		return plugin.ServeNetwork(ctx, dir, "test", &network{policy: &plugin.NetworkPolicy{}})
+	})
+	waitSocket(t, dir, plugin.KindNetwork, "test")
+
+	err := plugin.ServeNetwork(t.Context(), dir, "test", &network{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "served by another process")
+
+	// A socket file nothing listens on is what a killed plugin leaves.
+	stale := filepath.Join(dir, "network-stale.sock")
+	require.NoError(t, os.WriteFile(stale, nil, 0o600))
+	start(t, func(ctx context.Context) error {
+		return plugin.ServeNetwork(ctx, dir, "stale", &network{policy: &plugin.NetworkPolicy{}})
+	})
+	waitSocket(t, dir, plugin.KindNetwork, "stale")
+	c, err := plugin.DialNetwork(dir, "stale")
+	require.NoError(t, err)
+	defer c.Close()
+	require.Eventually(t, func() bool {
+		_, err := c.Policy(t.Context(), microvm("a"))
+		return err == nil
+	}, 5*time.Second, 20*time.Millisecond)
+}
+
+func TestSocketPath_NamesTheKindAndRefusesANameThatLeavesTheDirectory(t *testing.T) {
+	p, err := plugin.SocketPath("/run/gaon/plugins", plugin.KindStorage, "local")
+	require.NoError(t, err)
+	assert.Equal(t, "/run/gaon/plugins/storage-local.sock", p)
+
+	for _, name := range []string{"", "../x", "a/b", "A", "-a", "a-", "a.b"} {
+		_, err := plugin.SocketPath("/d", plugin.KindNetwork, name)
+		assert.Error(t, err, "name %q", name)
+	}
+	_, err = plugin.SocketPath("", plugin.KindNetwork, "a")
+	assert.Error(t, err)
+}

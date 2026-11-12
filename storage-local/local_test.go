@@ -1,4 +1,4 @@
-package storage_test
+package storagelocal_test
 
 import (
 	"context"
@@ -13,13 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/lib/api"
-	"github.com/garamsh/gaon/node-agent/internal/clock"
-	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
-	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
-	"github.com/garamsh/gaon/node-agent/internal/microvms"
-	"github.com/garamsh/gaon/node-agent/internal/microvms/network"
-	"github.com/garamsh/gaon/node-agent/internal/microvms/storage"
-	"github.com/garamsh/mvmd/lib/runtimeapi"
+	"github.com/garamsh/gaon/lib/plugin"
+	storagelocal "github.com/garamsh/gaon/storage-local"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
@@ -28,21 +23,15 @@ const node = "n1"
 var image = "registry.example/app@sha256:" + strings.Repeat("a", 64)
 
 type rig struct {
-	gaon  *fakegaon.Server
-	mvmd  *fakemvmd.Server
-	rt    v1alpha2.RuntimeServiceClient
-	local *storage.Local
+	gaon  *fakeVolumes
+	mvmd  *fakeDisks
+	local *storagelocal.Local
 }
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
-	clk := clock.System{}
-	r := &rig{gaon: fakegaon.New(t), mvmd: fakemvmd.New(t, clk)}
-	conn, err := runtimeapi.Dial(context.Background(), r.mvmd.Socket)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
-	r.rt = v1alpha2.NewRuntimeServiceClient(conn)
-	r.local = storage.NewLocal(node, 10*time.Millisecond, api.NewClient(r.gaon.URL, nil), r.rt, clk, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r := &rig{gaon: newFakeVolumes(), mvmd: newFakeDisks()}
+	r.local = storagelocal.NewLocal(node, 10*time.Millisecond, r.gaon, r.mvmd, storagelocal.SystemSleeper{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return r
 }
 
@@ -106,9 +95,9 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	require.Eventually(t, cond, 5*time.Second, 5*time.Millisecond, what)
 }
 
-func refusal(t *testing.T, err error) *microvms.Refusal {
+func refusal(t *testing.T, err error) *plugin.Refusal {
 	t.Helper()
-	var ref *microvms.Refusal
+	var ref *plugin.Refusal
 	require.ErrorAs(t, err, &ref)
 	return ref
 }
@@ -124,7 +113,7 @@ func TestLocal_AttachMakesTheDiskAndBindsTheVolumeToTheMicroVM(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, disks, 1)
-	assert.Equal(t, "volume-data", disks[0].GetDiskId())
+	assert.Equal(t, "volume-data", disks[0].DiskID)
 	disk, ok := r.mvmd.Disk("volume-data")
 	require.True(t, ok)
 	assert.EqualValues(t, 10<<20, disk.GetSizeBytes())
@@ -153,7 +142,7 @@ func TestLocal_AttachIsRepeatableForTheSameMicroVMAndEpoch(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, first, 1, "a Volume named twice is one disk")
-	assert.Equal(t, first[0].GetDiskId(), second[0].GetDiskId())
+	assert.Equal(t, first[0].DiskID, second[0].DiskID)
 	assert.Equal(t, []string{"CreateDisk volume-data"}, r.mvmd.Calls(), "the disk is made once")
 	assert.Equal(t, api.VolumeBound, r.volume(t, "data").Status.Phase, "the second call writes Bound again")
 	assert.Equal(t, &api.Attachment{MicroVMName: "db", BindingEpoch: 1}, r.volume(t, "data").Status.Attachment)
@@ -173,11 +162,11 @@ func TestLocal_AttachRefusesAVolumeItCannotServeAndServesTheOnesItCan(t *testing
 		seed   []api.Volume
 		reason string
 	}{
-		{"a missing Volume", "missing", nil, storage.ReasonVolumeNotFound},
-		{"a Volume of another class", "other-class", []api.Volume{other}, storage.ReasonUnsupportedStorageClass},
-		{"a Volume being deleted", "deleting", []api.Volume{deleting}, storage.ReasonVolumeNotUsable},
-		{"a Volume pinned to another Node", "elsewhere", []api.Volume{volume("elsewhere", "n2")}, storage.ReasonVolumeNotUsable},
-		{"a Volume attached to another MicroVM at the same epoch", "in-use", []api.Volume{inUse}, storage.ReasonVolumeInUse},
+		{"a missing Volume", "missing", nil, storagelocal.ReasonVolumeNotFound},
+		{"a Volume of another class", "other-class", []api.Volume{other}, storagelocal.ReasonUnsupportedStorageClass},
+		{"a Volume being deleted", "deleting", []api.Volume{deleting}, storagelocal.ReasonVolumeNotUsable},
+		{"a Volume pinned to another Node", "elsewhere", []api.Volume{volume("elsewhere", "n2")}, storagelocal.ReasonVolumeNotUsable},
+		{"a Volume attached to another MicroVM at the same epoch", "in-use", []api.Volume{inUse}, storagelocal.ReasonVolumeInUse},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -199,7 +188,7 @@ func TestLocal_AttachRefusesAVolumeItCannotServeAndServesTheOnesItCan(t *testing
 			r.gaon.SetMicroVM(control)
 			disks, err := r.local.Attach(context.Background(), &control)
 			require.NoError(t, err, "control: a MicroVM naming only the good Volume is served")
-			assert.Equal(t, "volume-good", disks[0].GetDiskId())
+			assert.Equal(t, "volume-good", disks[0].DiskID)
 		})
 	}
 }
@@ -229,7 +218,7 @@ func TestLocal_AttachWritesFailedAndRefusesWhenTheDiskCannotBeMade(t *testing.T)
 
 	_, err := r.local.Attach(context.Background(), &m)
 
-	assert.Equal(t, storage.ReasonVolumeFailed, refusal(t, err).Reason)
+	assert.Equal(t, storagelocal.ReasonVolumeFailed, refusal(t, err).Reason)
 	assert.Equal(t, api.VolumeFailed, r.volume(t, "data").Status.Phase)
 	assert.Nil(t, r.volume(t, "data").Status.Attachment)
 
@@ -247,7 +236,7 @@ func TestLocal_AttachWritesFailedOnlyForTheOutcomeKindsThatRefuseTheDisk(t *test
 
 	r.mvmd.FailDiskCreatesWith(v1alpha2.OutcomeKind_OUTCOME_KIND_FAILED)
 	_, err := r.local.Attach(context.Background(), &m)
-	assert.Equal(t, storage.ReasonVolumeFailed, refusal(t, err).Reason)
+	assert.Equal(t, storagelocal.ReasonVolumeFailed, refusal(t, err).Reason)
 	assert.Equal(t, api.VolumeFailed, r.volume(t, "data").Status.Phase)
 
 	// Control: a kind outside REJECTED, PRECONDITION_FAILED and FAILED is
@@ -256,7 +245,7 @@ func TestLocal_AttachWritesFailedOnlyForTheOutcomeKindsThatRefuseTheDisk(t *test
 	r.mvmd.FailDiskCreatesWith(v1alpha2.OutcomeKind_OUTCOME_KIND_UNSUPPORTED)
 	_, err = r.local.Attach(context.Background(), &m)
 	require.Error(t, err)
-	var ref *microvms.Refusal
+	var ref *plugin.Refusal
 	assert.False(t, errors.As(err, &ref), "the error is not a refusal")
 	assert.Equal(t, api.VolumePending, r.volume(t, "data").Status.Phase, "no Failed is written")
 
@@ -326,15 +315,13 @@ func TestLocal_RunWritesBoundWhileAMicroVMHoldsTheDiskAndReleasedKeepingTheAttac
 	v.Status = api.VolumeStatus{Phase: api.VolumeAvailable, Attachment: attachment, Capacity: "10485760"}
 	r.gaon.SetVolume(v)
 	r.mvmd.AddDisk("volume-data", 10<<20)
-	_, err := r.mvmd.CreateMachine(context.Background(), &v1alpha2.CreateMachineRequest{MachineId: "db-e1", Disks: []*v1alpha2.DiskAttachment{{DiskId: "volume-data"}}})
-	require.NoError(t, err)
+	r.mvmd.Hold("db-e1", "volume-data")
 	r.run(t)
 
 	eventually(t, "data is Bound", r.phase("data", api.VolumeBound))
 	assert.Equal(t, attachment, r.volume(t, "data").Status.Attachment)
 
-	_, err = r.mvmd.DeleteMachine(context.Background(), &v1alpha2.DeleteMachineRequest{MachineId: "db-e1"})
-	require.NoError(t, err)
+	r.mvmd.Drop("db-e1")
 	eventually(t, "data is Released", r.phase("data", api.VolumeReleased))
 	assert.Equal(t, attachment, r.volume(t, "data").Status.Attachment, "Released keeps the attachment")
 }
@@ -360,8 +347,7 @@ func TestLocal_RunDeletesTheDiskAndRemovesOnlyItsFinalizerOfAVolumeNoMicroVMHold
 	r.mvmd.AddDisk("volume-a-unowned", 10<<20)
 	r.mvmd.AddDisk("volume-b-free", 10<<20)
 	r.mvmd.AddDisk("volume-c-elsewhere", 10<<20)
-	_, err := r.mvmd.CreateMachine(context.Background(), &v1alpha2.CreateMachineRequest{MachineId: "db-e1", Disks: []*v1alpha2.DiskAttachment{{DiskId: "volume-a-held"}}})
-	require.NoError(t, err)
+	r.mvmd.Hold("db-e1", "volume-a-held")
 	before := r.volume(t, "b-free")
 	r.run(t)
 
@@ -394,8 +380,7 @@ func TestLocal_RunLetsAVolumeGoWhenItsLastFinalizerGoesAndKeepsAHeldOneUntilThen
 		r.mvmd.AddDisk("volume-"+name, 10<<20)
 		r.gaon.MarkVolumeDeleting(name)
 	}
-	_, err := r.mvmd.CreateMachine(context.Background(), &v1alpha2.CreateMachineRequest{MachineId: "db-e1", Disks: []*v1alpha2.DiskAttachment{{DiskId: "volume-a-held"}}})
-	require.NoError(t, err)
+	r.mvmd.Hold("db-e1", "volume-a-held")
 	r.run(t)
 
 	eventually(t, "b-free is gone", func() bool { _, ok := r.gaon.Volume("b-free"); return !ok })
@@ -404,43 +389,8 @@ func TestLocal_RunLetsAVolumeGoWhenItsLastFinalizerGoesAndKeepsAHeldOneUntilThen
 	_, exists := r.gaon.Volume("a-held")
 	assert.True(t, exists, "control: the held Volume stays")
 
-	_, err = r.mvmd.DeleteMachine(context.Background(), &v1alpha2.DeleteMachineRequest{MachineId: "db-e1"})
-	require.NoError(t, err)
+	r.mvmd.Drop("db-e1")
 	eventually(t, "a-held is gone", func() bool { _, ok := r.gaon.Volume("a-held"); return !ok })
 	_, ok = r.mvmd.Disk("volume-a-held")
 	assert.False(t, ok)
-}
-
-func TestLocal_ServesAMicroVMThroughTheAgentFromCreateToDelete(t *testing.T) {
-	r := newRig(t)
-	r.mvmd.Arm(time.Hour, 1)
-	r.gaon.SetVolume(volume("data", node))
-	clk := clock.System{}
-	def, err := network.NewDefault(nil, nil)
-	require.NoError(t, err)
-	svc := microvms.NewService(node, microvms.Params{
-		Resync: 20 * time.Millisecond, Retry: 20 * time.Millisecond, ReadTimeout: time.Second,
-		RestartBackoff: time.Hour, RestartBackoffMax: time.Hour, RestartResetAfter: time.Hour,
-	}, api.NewClient(r.gaon.URL, nil), r.rt, def, r.local, clk, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { svc.Run(ctx); close(done) }()
-	t.Cleanup(func() { cancel(); <-done })
-	r.run(t)
-	r.gaon.SetMicroVM(microvmUsing("db", 1, "data"))
-
-	eventually(t, "db runs with the disk", func() bool {
-		m, ok := r.mvmd.Machine("db-e1")
-		return ok && m.GetState() == v1alpha2.MachineState_MACHINE_STATE_RUNNING && len(m.GetDisks()) == 1
-	})
-	eventually(t, "data is Bound to db", func() bool {
-		v := r.volume(t, "data")
-		return v.Status.Phase == api.VolumeBound && v.Status.Attachment != nil && v.Status.Attachment.MicroVMName == "db"
-	})
-
-	r.gaon.DeleteMicroVM("db")
-	eventually(t, "data is Released once db is gone", r.phase("data", api.VolumeReleased))
-	assert.Equal(t, &api.Attachment{MicroVMName: "db", BindingEpoch: 1}, r.volume(t, "data").Status.Attachment)
-	_, ok := r.mvmd.Disk("volume-data")
-	assert.True(t, ok, "the disk outlives the MicroVM")
 }

@@ -12,20 +12,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/lib/plugin"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
 	"github.com/garamsh/gaon/node-agent/internal/microvms"
-	"github.com/garamsh/gaon/node-agent/internal/microvms/network"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
-
-// withNetwork starts the service with the built-in default network plugin
-// holding the given prefixes.
-func withNetwork(t *testing.T, egress, ingress []string) func(*env) {
-	t.Helper()
-	n, err := network.NewDefault(egress, ingress)
-	require.NoError(t, err)
-	return func(e *env) { e.network = n }
-}
 
 func failedWith(t *testing.T, e *env, name, reason string) api.Condition {
 	t.Helper()
@@ -37,80 +28,109 @@ func failedWith(t *testing.T, e *env, name, reason string) api.Condition {
 	return s.Conditions[0]
 }
 
-func TestNetwork_CreatesAMicroVMWithThePolicyOfTheFlagsAndItsPorts(t *testing.T) {
-	e := start(t, true, nil, withNetwork(t, []string{"10.0.0.0/8", "2001:db8::/32"}, []string{"192.168.0.0/16"}))
-	web := microvm("web", 1, node, api.RunAlways)
-	web.Spec.Ports = []int32{80, 443}
-	e.gaon.SetMicroVM(web)
-	e.gaon.SetMicroVM(microvm("quiet", 1, node, api.RunAlways))
+// fixedNetwork returns one policy for every MicroVM.
+type fixedNetwork struct{ policy *plugin.NetworkPolicy }
+
+func (n fixedNetwork) Policy(context.Context, *api.MicroVM) (*plugin.NetworkPolicy, error) {
+	return n.policy, nil
+}
+
+func TestNetwork_CreatesAMicroVMWithThePolicyThePluginReturnedInMvmdsTerms(t *testing.T) {
+	policy := &plugin.NetworkPolicy{
+		Egress: []plugin.NetworkRule{{Prefix: "10.0.0.0/8", Protocol: plugin.Any}, {Prefix: "2001:db8::/32", Protocol: plugin.UDP, Ports: []plugin.PortRange{{First: 53, Last: 53}}}},
+		Ingress: []plugin.NetworkRule{{Prefix: "192.168.0.0/16", Protocol: plugin.TCP, Ports: []plugin.PortRange{{First: 80, Last: 80}, {First: 8000, Last: 8100}}},
+			{Prefix: "10.1.0.0/16", Protocol: plugin.ICMP}, {Prefix: "fd00::/8", Protocol: plugin.ICMPv6}},
+	}
+	e := start(t, true, nil, func(e *env) { e.network = fixedNetwork{policy} })
+	e.gaon.SetMicroVM(microvm("web", 1, node, api.RunAlways))
 
 	eventually(t, "web-e1 runs", e.running("web-e1"))
-	eventually(t, "quiet-e1 runs", e.running("quiet-e1"))
 
-	tcp := func(port uint32) *v1alpha2.NetworkRule {
-		return &v1alpha2.NetworkRule{
-			Prefix: "192.168.0.0/16", Protocol: v1alpha2.Protocol_PROTOCOL_TCP,
-			Ports: []*v1alpha2.PortRange{{First: port, Last: port}},
-		}
-	}
 	want := &v1alpha2.NetworkPolicy{
 		Egress: []*v1alpha2.NetworkRule{
 			{Prefix: "10.0.0.0/8", Protocol: v1alpha2.Protocol_PROTOCOL_ANY},
-			{Prefix: "2001:db8::/32", Protocol: v1alpha2.Protocol_PROTOCOL_ANY},
+			{Prefix: "2001:db8::/32", Protocol: v1alpha2.Protocol_PROTOCOL_UDP, Ports: []*v1alpha2.PortRange{{First: 53, Last: 53}}},
 		},
-		Ingress: []*v1alpha2.NetworkRule{tcp(80), tcp(443)},
+		Ingress: []*v1alpha2.NetworkRule{
+			{Prefix: "192.168.0.0/16", Protocol: v1alpha2.Protocol_PROTOCOL_TCP, Ports: []*v1alpha2.PortRange{{First: 80, Last: 80}, {First: 8000, Last: 8100}}},
+			{Prefix: "10.1.0.0/16", Protocol: v1alpha2.Protocol_PROTOCOL_ICMP},
+			{Prefix: "fd00::/8", Protocol: v1alpha2.Protocol_PROTOCOL_ICMPV6},
+		},
 	}
 	got, _ := e.mvmd.Machine("web-e1")
 	assert.True(t, proto.Equal(want, got.GetNetworkPolicy()), "got %v", got.GetNetworkPolicy())
-
-	quiet, _ := e.mvmd.Machine("quiet-e1")
-	assert.Len(t, quiet.GetNetworkPolicy().GetEgress(), 2, "control: egress does not depend on the ports")
-	assert.Empty(t, quiet.GetNetworkPolicy().GetIngress(), "a MicroVM with no ports accepts nothing")
 }
 
-func TestNetwork_WithNoPrefixesThePolicyIsEmpty(t *testing.T) {
-	e := start(t, true, nil)
-	web := microvm("web", 1, node, api.RunAlways)
-	web.Spec.Ports = []int32{80}
-	e.gaon.SetMicroVM(web)
+func TestNetwork_ANilPolicyCreatesTheMicroVMIsolated(t *testing.T) {
+	e := start(t, true, nil, func(e *env) { e.network = fixedNetwork{nil} })
+	e.gaon.SetMicroVM(microvm("web", 1, node, api.RunAlways))
 
 	eventually(t, "web-e1 runs", e.running("web-e1"))
 	got, _ := e.mvmd.Machine("web-e1")
 	assert.Empty(t, got.GetNetworkPolicy().GetEgress())
-	assert.Empty(t, got.GetNetworkPolicy().GetIngress(), "a port opens nothing until an ingress prefix is given")
+	assert.Empty(t, got.GetNetworkPolicy().GetIngress())
 }
 
-func TestNetwork_FailsAMicroVMNamingANetworkItDoesNotServe(t *testing.T) {
-	e := start(t, true, nil)
-	other := microvm("other", 1, node, api.RunAlways)
-	other.Spec.Networks = []string{"default", "tenant-b"}
-	e.gaon.SetMicroVM(other)
-	named := microvm("named", 1, node, api.RunAlways)
-	named.Spec.Networks = []string{"default"}
-	e.gaon.SetMicroVM(named)
-	e.gaon.SetMicroVM(microvm("none", 1, node, api.RunAlways))
-
-	c := failedWith(t, e, "other", network.ReasonUnknownNetwork)
-	assert.Contains(t, c.Message, "tenant-b")
-	eventually(t, "control: a MicroVM naming default runs", e.running("named-e1"))
-	eventually(t, "control: a MicroVM naming no network runs", e.running("none-e1"))
-	assert.NotContains(t, e.mvmd.Calls(), "CreateMachine other-e1", "a refused MicroVM is never created, so it never runs unprotected")
+// absentNetwork fails every call as a plugin that is not running does, until
+// it is set to answer.
+type absentNetwork struct {
+	mu     sync.Mutex
+	absent bool
 }
 
-func TestNetwork_FailsAMicroVMWithAPortMvmdWouldRefuse(t *testing.T) {
-	e := start(t, true, nil, withNetwork(t, nil, []string{"10.0.0.0/8"}))
-	for name, port := range map[string]int32{"zero": 0, "negative": -1, "high": 70000, "above": 65536, "first": 1, "last": 65535} {
-		m := microvm(name, 1, node, api.RunAlways)
-		m.Spec.Ports = []int32{port}
-		e.gaon.SetMicroVM(m)
+func (n *absentNetwork) Policy(context.Context, *api.MicroVM) (*plugin.NetworkPolicy, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.absent {
+		return nil, errors.New("rpc error: code = Unavailable desc = connection refused")
 	}
+	return &plugin.NetworkPolicy{}, nil
+}
 
-	for _, name := range []string{"zero", "negative", "high", "above"} {
-		failedWith(t, e, name, microvms.ReasonInvalidSpec)
-		assert.NotContains(t, e.mvmd.Calls(), "CreateMachine "+name+"-e1")
-	}
-	eventually(t, "control: port 1 runs", e.running("first-e1"))
-	eventually(t, "control: port 65535 runs", e.running("last-e1"))
+func (n *absentNetwork) set(absent bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.absent = absent
+}
+
+func TestNetwork_ANetworkPluginThatIsNotRunningLeavesTheMicroVMPendingWithTheReasonUntilItAnswers(t *testing.T) {
+	n := &absentNetwork{absent: true}
+	e := start(t, true, nil, func(e *env) { e.network = n })
+	e.gaon.SetMicroVM(microvm("web", 1, node, api.RunAlways))
+
+	eventually(t, "web is Pending with the plugin's reason", func() bool {
+		s := e.gaon.MicroVM("web").Status
+		return len(s.Conditions) == 1 && s.Conditions[0].Reason == microvms.ReasonNetworkPluginUnavailable
+	})
+	s := e.gaon.MicroVM("web").Status
+	assert.Equal(t, api.MicroVMPending, s.Phase)
+	assert.Equal(t, api.ConditionFalse, s.Conditions[0].Status)
+	assert.Contains(t, s.Conditions[0].Message, "connection refused")
+	assert.NotContains(t, e.mvmd.Calls(), "CreateMachine web-e1", "no MicroVM is created before its network policy is known")
+
+	n.set(false)
+	eventually(t, "web runs once the plugin answers", e.running("web-e1"))
+	eventually(t, "the condition follows", e.phase("web", 1, api.MicroVMRunning))
+	assert.Equal(t, microvms.ReasonRunning, e.gaon.MicroVM("web").Status.Conditions[0].Reason)
+}
+
+// absentStorage fails every Attach as a plugin that is not running does.
+type absentStorage struct{ noDisks }
+
+func (absentStorage) Attach(context.Context, *api.MicroVM) ([]plugin.DiskAttachment, error) {
+	return nil, errors.New("rpc error: code = Unavailable desc = connection refused")
+}
+
+func TestStorage_AStoragePluginThatIsNotRunningLeavesTheMicroVMPendingWithTheReason(t *testing.T) {
+	e := start(t, true, nil, func(e *env) { e.storage = absentStorage{} })
+	e.gaon.SetMicroVM(microvm("db", 1, node, api.RunAlways))
+
+	eventually(t, "db is Pending with the plugin's reason", func() bool {
+		s := e.gaon.MicroVM("db").Status
+		return len(s.Conditions) == 1 && s.Conditions[0].Reason == microvms.ReasonStoragePluginUnavailable
+	})
+	assert.Equal(t, api.MicroVMPending, e.gaon.MicroVM("db").Status.Phase)
+	assert.NotContains(t, e.mvmd.Calls(), "CreateMachine db-e1")
 }
 
 // refusingNetwork refuses the MicroVMs named in refuse and fails with a plain
@@ -121,7 +141,7 @@ type refusingNetwork struct {
 	flaky  map[string]bool
 }
 
-func (n *refusingNetwork) Policy(_ context.Context, m *api.MicroVM) (*v1alpha2.NetworkPolicy, error) {
+func (n *refusingNetwork) Policy(_ context.Context, m *api.MicroVM) (*plugin.NetworkPolicy, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if r, ok := n.refuse[m.Metadata.Name]; ok {
@@ -131,7 +151,7 @@ func (n *refusingNetwork) Policy(_ context.Context, m *api.MicroVM) (*v1alpha2.N
 		n.flaky[m.Metadata.Name] = false
 		return nil, errors.New("the plugin is not ready")
 	}
-	return &v1alpha2.NetworkPolicy{}, nil
+	return &plugin.NetworkPolicy{}, nil
 }
 
 func TestNetwork_ARefusalFailsTheMicroVMWithThePluginsReasonAndAnotherErrorIsRetried(t *testing.T) {
@@ -157,7 +177,7 @@ type ledgerStorage struct {
 	released []string
 }
 
-func (s *ledgerStorage) Attach(_ context.Context, m *api.MicroVM) ([]*v1alpha2.DiskAttachment, error) {
+func (s *ledgerStorage) Attach(_ context.Context, m *api.MicroVM) ([]plugin.DiskAttachment, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.refuse[m.Metadata.Name] {
@@ -165,7 +185,7 @@ func (s *ledgerStorage) Attach(_ context.Context, m *api.MicroVM) ([]*v1alpha2.D
 	}
 	s.attached = append(s.attached, m.Metadata.Name)
 	s.mvmd.AddDisk("disk-"+m.Metadata.Name, 1<<20)
-	return []*v1alpha2.DiskAttachment{{DiskId: "disk-" + m.Metadata.Name, ReadOnly: true}}, nil
+	return []plugin.DiskAttachment{{DiskID: "disk-" + m.Metadata.Name, ReadOnly: true}}, nil
 }
 
 func (s *ledgerStorage) Release(_ context.Context, id string) error {

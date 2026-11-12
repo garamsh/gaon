@@ -11,7 +11,10 @@ use (
 	./controllers
 	./gaon-cli
 	./lib/api
+	./lib/plugin
+	./network-default
 	./node-agent
 	./scheduler
+	./storage-local
 	./tooling/e2e
 )

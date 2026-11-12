@@ -1,0 +1,100 @@
+// The gaon plugin API, version v1alpha1: how the Node Agent asks a network
+// plugin and a storage plugin, each a process of its own on a Unix socket,
+// before it creates a MicroVM. Its meaning is fixed by
+// docs/architecture/node-agent.md §Plugins; this file is the encoding.
+syntax = "proto3";
+
+package gaon.plugin.v1alpha1;
+
+option go_package = "github.com/garamsh/gaon/lib/plugin/v1alpha1;pluginv1alpha1";
+
+// Refusal is a plugin's verdict that it does not serve a MicroVM, and never
+// will. The agent fails the MicroVM with the reason and the message and does
+// not retry. An error of the call is not a verdict: the agent retries it.
+message Refusal {
+  // A CamelCase reason, which becomes the Ready condition's reason.
+  string reason = 1;
+  string message = 2;
+}
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_TCP = 1;
+  PROTOCOL_UDP = 2;
+  PROTOCOL_ICMP = 3;
+  PROTOCOL_ICMPV6 = 4;
+  PROTOCOL_ANY = 5;
+}
+
+// PortRange is the ports first to last, both included.
+message PortRange {
+  uint32 first = 1;
+  uint32 last = 2;
+}
+
+// NetworkRule is one entry of a policy's egress or ingress list: a packet
+// passes if any rule of its direction matches.
+message NetworkRule {
+  // An IPv4 prefix (a.b.c.d/n) or an IPv6 prefix (x:x::/n).
+  string prefix = 1;
+  Protocol protocol = 2;
+  // Empty means every port; only TCP and UDP rules may set it.
+  repeated PortRange ports = 3;
+}
+
+// NetworkPolicy is what a MicroVM is created with. An empty policy blocks all
+// traffic to and from outside the node.
+message NetworkPolicy {
+  repeated NetworkRule egress = 1;
+  repeated NetworkRule ingress = 2;
+}
+
+// DiskAttachment is one disk the node holds, attached to a MicroVM.
+message DiskAttachment {
+  string disk_id = 1;
+  bool read_only = 2;
+}
+
+// NetworkService is served by a network plugin.
+service NetworkService {
+  // Policy returns the policy a MicroVM is created with.
+  rpc Policy(PolicyRequest) returns (PolicyResponse);
+}
+
+message PolicyRequest {
+  // The MicroVM, as the JSON of the resource API's v1alpha1 MicroVM.
+  bytes microvm = 1;
+}
+
+message PolicyResponse {
+  // Set when the plugin does not serve the MicroVM; policy is then unset.
+  Refusal refusal = 1;
+  NetworkPolicy policy = 2;
+}
+
+// StorageService is served by a storage plugin.
+service StorageService {
+  // Attach readies the MicroVM's volumes and returns its disks. It is
+  // repeatable for the same MicroVM and epoch.
+  rpc Attach(AttachRequest) returns (AttachResponse);
+  // Release gives back what Attach readied for an mvmd machine identifier. It
+  // is repeatable and is also called for an identifier Attach never saw.
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+}
+
+message AttachRequest {
+  // The MicroVM, as the JSON of the resource API's v1alpha1 MicroVM.
+  bytes microvm = 1;
+}
+
+message AttachResponse {
+  // Set when the plugin does not serve the MicroVM; disks is then empty.
+  Refusal refusal = 1;
+  repeated DiskAttachment disks = 2;
+}
+
+message ReleaseRequest {
+  string machine_id = 1;
+}
+
+message ReleaseResponse {}

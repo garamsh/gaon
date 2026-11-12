@@ -46,6 +46,13 @@ func (s *service) reconcile(ctx context.Context, name string) error {
 	}
 	o, err := s.ensure(ctx, &m)
 	if err != nil {
+		if o.waitReason != "" {
+			// A plugin that does not answer is visible in the MicroVM's
+			// condition while the call is retried.
+			if rerr := s.report(ctx, name, o); rerr != nil {
+				err = errors.Join(err, rerr)
+			}
+		}
 		return fmt.Errorf("microvm %s: %w", name, err)
 	}
 	return s.report(ctx, name, o)
@@ -157,15 +164,19 @@ func (s *service) create(ctx context.Context, m *api.MicroVM) (outcome, error) {
 	if err != nil {
 		return outcome{failure: err, failReason: ReasonInvalidSpec}, nil
 	}
-	if req.NetworkPolicy, err = s.network.Policy(ctx, m); err != nil {
-		return refused("network", err)
+	policy, err := s.network.Policy(ctx, m)
+	if err != nil {
+		return refused("network", ReasonNetworkPluginUnavailable, err)
 	}
+	req.NetworkPolicy = policyToRuntime(policy)
 	if _, err := s.runtime.PullImage(ctx, &v1alpha2.PullImageRequest{Image: image}); err != nil {
 		return outcome{}, fmt.Errorf("pull %s: %w", image.GetDigest(), err)
 	}
-	if req.Disks, err = s.storage.Attach(ctx, m); err != nil {
-		return refused("storage", err)
+	disks, err := s.storage.Attach(ctx, m)
+	if err != nil {
+		return refused("storage", ReasonStoragePluginUnavailable, err)
 	}
+	req.Disks = disksToRuntime(disks)
 	created, err := s.runtime.CreateMachine(ctx, req)
 	switch {
 	case err == nil:
@@ -185,13 +196,15 @@ func (s *service) create(ctx context.Context, m *api.MicroVM) (outcome, error) {
 }
 
 // refused makes the outcome of a plugin's error: a *Refusal is the MicroVM's
-// failure, any other error is returned to be retried.
-func refused(plugin string, err error) (outcome, error) {
+// failure. Any other error, such as a plugin that is not running, is returned
+// to be retried, with an outcome that waits for the plugin under reason.
+func refused(kind, reason string, err error) (outcome, error) {
 	var r *Refusal
 	if errors.As(err, &r) {
 		return outcome{failure: r, failReason: r.Reason}, nil
 	}
-	return outcome{}, fmt.Errorf("%s plugin: %w", plugin, err)
+	return outcome{waitReason: reason, waitMessage: fmt.Sprintf("the %s plugin did not serve the call, which is retried: %v", kind, err)},
+		fmt.Errorf("%s plugin: %w", kind, err)
 }
 
 // rejection is mvmd's refusal of a create, reported as the MicroVM's failure.
