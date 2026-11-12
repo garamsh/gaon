@@ -33,7 +33,7 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 
 ### Config shape
 
-- **argv plus files.** Every gaon service binary takes flags, and the certificate files are named by the TLS flags. The API server's flags are in [apiserver.md](./apiserver.md) §Running and the Node Agent's in [node-agent.md](./node-agent.md) §Configuration. The scheduler takes `-api`, `-interval` and the TLS flags of `lib/api`, and the controllers take `-api`, `-lease-margin`, `-default-lease-duration` and the same TLS flags (`scheduler/cmd/gaon-scheduler/main.go`, `controllers/cmd/gaon-controllers/main.go`).
+- **argv plus files.** Every gaon service binary takes flags, and the certificate files are named by the TLS flags. The API server's flags are in [apiserver.md](./apiserver.md) §Running and the Node Agent's in [node-agent.md](./node-agent.md) §Configuration. The scheduler takes `-api`, `-interval` and the TLS flags of `lib/api`, and the controllers take `-api`, `-lease-margin`, `-default-lease-duration`, `-signing-cert`, `-signing-key`, `-signing-duration` and the same TLS flags (`scheduler/cmd/gaon-scheduler/main.go`, `controllers/cmd/gaon-controllers/main.go`).
 - **Environment variables are a Node Agent fallback only.** Of the four services, only `gaon-node-agent` reads `GAON_*` variables, and a flag given wins over its variable ([node-agent.md](./node-agent.md) §Configuration). A Node's config sets flags for every service.
 
 ### Versioning
