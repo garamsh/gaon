@@ -283,10 +283,12 @@ func TestRun_ReportsFailedWhenMvmdRejectsTheCreateForAnUnknownKernel(t *testing.
 	bad := machine("bad", 1, node, api.RunAlways)
 	bad.Spec.Kernel = "missing"
 	e.gaon.SetMachine(bad)
-	e.gaon.SetMachine(machine("good", 1, node, api.RunAlways))
+	good := machine("good", 1, node, api.RunAlways)
+	good.Spec.Kernel = "default"
+	e.gaon.SetMachine(good)
 
 	eventually(t, "status Failed", e.phase("bad", 1, api.MachineFailed))
-	eventually(t, "control: a Machine with no kernel runs", e.running("good-e1"))
+	eventually(t, "control: a Machine naming an offered kernel runs", e.running("good-e1"))
 	s := e.gaon.Machine("bad").Status
 	require.Len(t, s.Conditions, 1)
 	assert.Equal(t, machines.ReasonRejected, s.Conditions[0].Reason)
