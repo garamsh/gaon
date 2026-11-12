@@ -165,6 +165,39 @@ All three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, with `a
 - **The claims** are `iss`, `sub` (`gaon:serviceaccount:<name>`), `aud`, `iat`, `exp` (after `iat` by at most 86400 seconds), and `gaon.garam.sh`, with `serviceaccount` and `microvm`, each `{name, uid}`. The token authenticates as the subject, and RBAC binds it like any user. The signing algorithm, keys, issuer URL, discovery document, JWKS and the authentication of a bearer token are not part of this contract yet.
 - **The types** are in `lib/api/`: `Secret`, `ConfigMap`, `ServiceAccount` and their lists, `TokenRequest`, `BoundObject`, `TokenClaims`, `NewTokenClaims`, and, on `MicroVM`, `ReferencesSecret` and `ReferencesConfigMap`. `Client` has `Put`, `Get`, `List`, `Watch` and `Delete` for each kind, and `CreateServiceAccountToken`.
 
+### Service, Endpoints and NetworkPolicy
+
+The three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, modelled on Kubernetes' Service, Endpoints and NetworkPolicy, and served by the core ([ADR 0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md)). The contract is in `lib/api/`; the API server's serving of them, the endpoints controller and enforcement in the network plugin are later issues.
+
+- **`Service`** has `spec` and `status`. A name is a DNS label of at most 63 characters that starts with a letter, because DNS names it. `spec`:
+  - `selector`, a map of labels that selects MicroVMs by equality; empty, it selects none and the Service's Endpoints is written by its user.
+  - `ports`, each with `name`, `protocol` (`TCP` or `UDP`), `port` (1 to 65535) and `targetPort`, a number from 1 to 65535 or a port name of at most 15 characters that a MicroVM declares in `spec.ports`; absent, it is `port`. A name is required when there is more than one port, and is a DNS label of at most 63 characters. A name is unique, and so is a `port` with its `protocol`. A Service that is not headless has at least one port.
+  - `type`, `ClusterIP` or `LoadBalancer`; empty is `ClusterIP`.
+  - `clusterIP`, empty to have an address allocated, an address of the service prefix to ask for it, or `None` for a headless Service, which has no address and is not a `LoadBalancer`.
+  - `loadBalancerIP`, an address of the LAN pool to ask for, or empty to have one allocated; only for `LoadBalancer`.
+  - An address is a global unicast one: not unspecified, loopback, link-local or multicast, and with no zone.
+  - `status.loadBalancer.ingress` is written by the API server only, at most one `ip`, and only for `LoadBalancer`; an update keeps the stored status. `type`, `clusterIP` and `loadBalancerIP` never change once stored, compared as written, so `clusterIP` empty at an update is a change.
+- **Allocation.**
+  - **Where each range is set.** The API server takes the service prefix in `--service-cluster-ip-range` and the LAN pool in `--load-balancer-pool`, each a CIDR, and two ranges that overlap are a start-up error. All three API servers (ADR 0023) are started with the same values. The service prefix is virtual: no Node or router carries it. The LAN pool is addresses of the machines' LAN that naru and the network plugin answer for.
+  - **Who allocates and when.** The API server that serves the `PUT` that creates the Service allocates, in that write and no other, and writes the result into `spec.clusterIP` and `status.loadBalancer`. A Service of `type: LoadBalancer` takes a `clusterIP` as well as a LAN address. A requested address outside its range is `Invalid`. An address another object holds, or a full range, is `Conflict`.
+  - **Where the allocation lives.** Each held address is a key in the Store, `/allocations/service-ip/<address>` and `/allocations/lan/<address>`, whose value is the name of the Service. The Service and the keys for its addresses are created in one Store transaction that requires every key to be absent, and are deleted in the one that removes the Service. Nothing is held in an API server's memory, so a restart loses nothing and two API servers cannot hand out one address: the second transaction fails its compare and retries with another address, at most 5 times, then answers `Conflict`.
+  - **A gateway's LAN address.** A gateway (decision D18 of goal #117) holds a specific pool address by being, or owning, a `LoadBalancer` Service whose `loadBalancerIP` names it. The pool refuses a second holder, and the address is released when that Service is deleted. The Gateway kind itself is not part of this contract.
+- **`Endpoints`** has `metadata` and `subsets`, and no `spec` or `status`; it is named for the Service it serves. Each subset has `addresses` and `ports`, both non-empty: an address is an `ip` and a `targetRef` that, when present, is a MicroVM of `compute.gaon.garam.sh/v1alpha1` with a name; a port is an optional `name` (the Service port's), a `port` and a `protocol`, unique by name and by port with protocol. A MicroVM whose named `targetPort` resolves to a different number than another's is in a different subset. An Endpoints holds at most 1000 addresses across its subsets.
+  - **Who writes it.** The endpoints controller writes the Endpoints of a Service that has a `selector`, and runs only while it holds a coordination Lease (ADR 0023). It lists a MicroVM that the selector selects, that has no `deletionTimestamp`, whose `Ready` condition is `True`, and whose `status.addresses` has an address. The user writes the Endpoints of a Service that has none. The Endpoints a controller owns is deleted with its Service.
+- **`NetworkPolicy`** has `spec` and no `status`. A name is a DNS subdomain as for other kinds. `spec`:
+  - `podSelector`, a `LabelSelector` over MicroVMs, with `matchLabels` and `matchExpressions` (`key`, `operator` of `In`, `NotIn`, `Exists` or `DoesNotExist`, and `values`: at least one for `In` and `NotIn`, none for the others). The empty selector selects every MicroVM.
+  - `policyTypes`, `Ingress` and `Egress`, each at most once. Empty, it is `Ingress`, and `Egress` as well when `egress` has rules. A direction with rules requires its type, and a type with no rules allows nothing.
+  - `ingress` rules with `from` and `ports`, and `egress` rules with `to` and `ports`. A peer has exactly one of `podSelector`, a `LabelSelector` over MicroVMs, and `ipBlock`, a `cidr` in canonical form with no host bits and `except` prefixes of the same family that lie inside it and are narrower. A port is a `protocol` of `TCP` or `UDP` and a number from 1 to 65535. An empty `from`, `to` or `ports` allows every peer or every port.
+  - **Semantics.** A MicroVM that no policy selects for a direction is unrestricted in it. A MicroVM that some policy selects for a direction allows only the traffic that at least one of the policies selecting it for that direction allows. Policies only allow, so they add.
+- **Departures from Kubernetes.** Each is a choice of ADR 0027:
+  - No namespace: the kinds are cluster-scoped and a NetworkPolicy has no `namespaceSelector`.
+  - `Endpoints` rather than `EndpointSlice`.
+  - A Service is of type `ClusterIP` or `LoadBalancer`; there is no `NodePort` and no `ExternalName`, and no `sessionAffinity`, `externalIPs`, `externalTrafficPolicy`, `ipFamilies`, `publishNotReadyAddresses` or `loadBalancerClass`.
+  - Protocols are `TCP` and `UDP`; there is no `SCTP`.
+  - `loadBalancerIP` is not deprecated; it is the request for a LAN address, which the API server grants from its own pool.
+  - A NetworkPolicy port has no `endPort` and no named port, and a rule has no `namespaceSelector` in a peer.
+- **The types** are in `lib/api/`: `Service`, `ServiceList`, `ServiceSpec`, `ServicePort`, `ServiceStatus`, `LoadBalancerStatus`, `LoadBalancerIngress`, `ServiceType`, `Endpoints`, `EndpointsList`, `EndpointSubset`, `EndpointAddress`, `EndpointPort`, `NetworkPolicy`, `NetworkPolicyList`, `NetworkPolicySpec`, `IngressRule`, `EgressRule`, `NetworkPolicyPeer`, `IPBlock`, `NetworkPolicyPort`, `PolicyType`, `LabelSelector`, `LabelSelectorRequirement` and `LabelSelectorOp`. `LabelSelector.Selector` returns the `Selector` of §Metadata. `Client` has `Put`, `Get`, `List`, `Watch` and `Delete` for each kind.
+
 ### Invariants
 
 | # | Invariant | Writer it constrains |
@@ -224,6 +257,15 @@ Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where
 | `DELETE /serviceaccounts/{name}` | users | delete it |
 | `GET /serviceaccounts`, `GET /serviceaccounts/{name}`, `GET /serviceaccounts?watch=true` | all | list, read one, subscribe |
 | `POST /serviceaccounts/{name}/token` | users, controllers; the Node Agent for a MicroVM bound to its Node | request a token bound to a MicroVM (§Secret, ConfigMap and ServiceAccount) |
+| `PUT /services/{name}` | users | create a Service, without a version, which allocates its addresses; change its `spec`, with one; `type`, `clusterIP` and `loadBalancerIP` cannot change |
+| `DELETE /services/{name}` | users | delete it and release its addresses |
+| `GET /services`, `GET /services/{name}`, `GET /services?watch=true` | all | list, read one, subscribe |
+| `PUT /endpoints/{name}` | the endpoints controller for a Service with a `selector`; users for one without | create the Endpoints named for a Service, without a version; change its `subsets`, with one |
+| `DELETE /endpoints/{name}` | the endpoints controller, users | delete it |
+| `GET /endpoints`, `GET /endpoints/{name}`, `GET /endpoints?watch=true` | all | list, read one, subscribe |
+| `PUT /networkpolicies/{name}` | users | create a NetworkPolicy, without a version; change its `spec`, with one |
+| `DELETE /networkpolicies/{name}` | users | delete it |
+| `GET /networkpolicies`, `GET /networkpolicies/{name}`, `GET /networkpolicies?watch=true` | all | list, read one, subscribe |
 
 Every list and watch path in this section takes `labelSelector` (§Metadata).
 
@@ -394,9 +436,18 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - **Numbers:** measuring the provisional values in §Lease and fencing, the restart backoff and the `lastActiveTime` minimum interval (Discussion #2 section 6 item 13).
 - **Store growth and compaction interval:** [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
 - **Placement of Namespace** in an API group.
-- **The schemas of the default extensions** (MicroVMSet, MicroVMDeployment, Job, Service, Gateway, Autoscaler) in `apps.gaon.garam.sh`: none is written yet.
+- **The schemas of the default extensions** (MicroVMSet, MicroVMDeployment, Job, Gateway, Autoscaler) in `apps.gaon.garam.sh`: none is written yet.
+- **§Naming and groups against ADR 0027:** its list of default extensions still names Service and NetworkPolicy, and Network as an extension a Driver interprets; Service, Endpoints and NetworkPolicy are core kinds of the compute group (§Service, Endpoints and NetworkPolicy). The owner of that section reconciles it.
+- **Serving Service, Endpoints and NetworkPolicy:**
+  - The Node authorizer's rule for them, and the bootstrap roles' rules: whether a Node reads Services, Endpoints and NetworkPolicies beyond the `GET` of §Authorization.
+  - CLI short names.
+  - Dual-stack Services and `SCTP`: one address per Service and `TCP` and `UDP` only.
+  - Whether an Endpoints lists a MicroVM that is not `Ready` (`publishNotReadyAddresses`).
+  - More than one LAN pool or service prefix.
+  - What an API server does when started with a different `--service-cluster-ip-range` or `--load-balancer-pool` than another's.
+  - Whether a NetworkPolicy exempts traffic between a MicroVM and its own Node, as Kubernetes' plugins do for the kubelet's probes.
 - **More than one version of a custom resource,** which needs conversion, and the `scale` subresource and the schema keywords outside §CustomResourceDefinition's list.
-- **Webhook selection and calling:** selectors by label or namespace, a reinvocation policy, a service reference for `clientConfig` and a status code from the webhook wait for a need and, for the last, for a Service resource; the API server's calling of webhooks is the next issue.
+- **Webhook selection and calling:** selectors by label or namespace, a reinvocation policy, a service reference for `clientConfig` and a status code from the webhook wait for a need and, for the service reference, for the serving of Service (§Service, Endpoints and NetworkPolicy); the API server's calling of webhooks is the next issue.
 - **Namespaced roles:** `Role` and `RoleBinding` wait for the namespace decision above; only the cluster-scoped kinds exist.
 - **Event expiry:** how long an Event stays, and whether the count of Events is limited.
 - **Out of the contract by decision:** Discussion #2 section 6 items 5, 6 and 12 (tenancy, the immediate-bind default, deployment features).

@@ -65,6 +65,13 @@ const (
 	KindServiceAccountList = "ServiceAccountList"
 	KindTokenRequest       = "TokenRequest"
 
+	KindService           = "Service"
+	KindServiceList       = "ServiceList"
+	KindEndpoints         = "Endpoints"
+	KindEndpointsList     = "EndpointsList"
+	KindNetworkPolicy     = "NetworkPolicy"
+	KindNetworkPolicyList = "NetworkPolicyList"
+
 	KindCertificateSigningRequest     = "CertificateSigningRequest"
 	KindCertificateSigningRequestList = "CertificateSigningRequestList"
 
