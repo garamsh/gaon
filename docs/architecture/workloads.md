@@ -1,8 +1,8 @@
 # Workloads
 
-What `gaon-workloads` does: it registers the kind `Job` and runs a Job's MicroVMs to completion. The unit is `workloads/` and its binary is `gaon-workloads`. It is a client of the public resource API through `lib/api` and imports no other unit's `internal/` packages.
+What `gaon-workloads` does: it registers the kinds `Job` and `CronJob`, runs a Job's MicroVMs to completion and creates a Job from a CronJob at each scheduled time. The unit is `workloads/` and its binary is `gaon-workloads`. It is a client of the public resource API through `lib/api` and imports no other unit's `internal/` packages.
 
-Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-registers-and-runs-to-completion-as-a-client-of-the-public-api.md), [ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md) for the definition and [ADR 0018](./adr/0018-metadata-gains-uid-labels-and-owner-references-lists-take-a-label-selector-lease-and-event-are-new-kinds-and-a-role-rule-may-carry-a-label-selector.md) for `uid`, owner references and label-selector rules.
+Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-registers-and-runs-to-completion-as-a-client-of-the-public-api.md), [ADR 0025](./adr/0025-a-cronjob-is-a-kind-the-workloads-unit-runs-by-creating-a-job-from-its-template-at-each-scheduled-time-only-while-it-leads.md) for the CronJob, [ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md) for the definition and [ADR 0018](./adr/0018-metadata-gains-uid-labels-and-owner-references-lists-take-a-label-selector-lease-and-event-are-new-kinds-and-a-role-rule-may-carry-a-label-selector.md) for `uid`, owner references and label-selector rules.
 
 ## Current decisions
 
@@ -12,9 +12,14 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 - **Spec**: `completions` (required, at least 1), `backoffLimit` (at least 0; absent is 0) and `template`, a MicroVM spec. The unit forces `runStrategy` to `Once` and clears `nodeName` and `bindingEpoch` in what it creates.
 - **Status**: `active`, `succeeded`, `failed` and `conditions`. A finished Job has one True condition, `Complete` (`CompletionsReached`) or `Failed` (`BackoffLimitExceeded` or `InvalidTemplate`).
 
+- **`CronJob`** of the same group and version, plural `cronjobs`, cluster scoped, with a `status` subresource.
+- **Spec**: `schedule` (required), five numeric fields, minute, hour, day of month, month, day of week, in UTC; each is `*`, a number, a range `a-b` (a range whose start is above its end wraps), a list, or a step `/n` after `*` or a range; 7 is Sunday; with both day fields restricted a day matching either counts. `jobTemplate` (required), a Job spec. `historyLimit` (at least 1; absent is 3).
+- **Status**: `lastScheduleTime`, the latest time dealt with.
+- **The schedule is validated by the schema's `pattern`**, which the API server applies on create and update and which names `spec.schedule` in the refusal. The parser the unit runs and the pattern are built from one table.
+
 ### Registration
 
-- At start the unit reads the definition `jobs.workloads.gaon.garam.sh`: it creates it when absent, updates it at the stored `resourceVersion` when its spec differs, and writes nothing when equal. A failure to register makes the process exit with the error.
+- At start the unit reads the definitions `jobs.workloads.gaon.garam.sh` and `cronjobs.workloads.gaon.garam.sh`, each in turn: it creates it when absent, updates it at the stored `resourceVersion` when its spec differs, and writes nothing when equal. A failure to register makes the process exit with the error.
 - The definition carries the label `workloads.gaon.garam.sh/managed-by=gaon-workloads`, which the unit's role names.
 
 ### The run
@@ -26,6 +31,15 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 - **A template the API refuses** (`Invalid`) fails the Job with `InvalidTemplate`, whatever the backoff limit.
 - **A finished Job is left alone.** Its MicroVMs are kept until the Job is deleted, then the garbage collector removes them.
 
+### The schedule
+
+- **Each sweep** also lists the CronJobs. A CronJob with no `lastScheduleTime` gets it set to now and runs nothing that sweep. Otherwise the unit takes the latest scheduled time after `lastScheduleTime` and up to now, read from the `Clock`.
+- **Missed runs are skipped.** Of the times that passed (a restart, a term without a leader) only the latest runs, once; the others are not owed.
+- **Concurrency is Forbid.** When a Job the CronJob owns (by `apiVersion`, `kind`, `name` and `uid`, not being deleted) is unfinished, the time is skipped and logged and is not owed later. Another CronJob's Jobs do not count.
+- **A Job is named `<cronjob>-<unix minute>`**, owned by the CronJob with its `uid`, with the labels `managed-by=gaon-workloads`, `workloads.gaon.garam.sh/cronjob=<name>` and `workloads.gaon.garam.sh/scheduled-minute=<unix minute>`; its spec is the template. `AlreadyExists` counts as created, which is what makes a time run once when two instances race or a creator stopped before writing the status.
+- **History.** After a run, the finished Jobs the CronJob owns beyond `historyLimit` are deleted, oldest scheduled minute first. Unfinished Jobs and other CronJobs' Jobs are kept.
+- **A schedule the unit cannot read** runs nothing and is logged; the other CronJobs are unaffected.
+
 ### Election
 
 - **It acts only while it holds the coordination Lease `gaon-workloads`**, as `gaon-scheduler` and `gaon-controllers` do ([ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md)): it runs on each control-plane Node and the others poll the Lease and do nothing else, not even registering the kind. Each term, from taking the Lease to losing it, runs a new service that registers and sweeps from the Store's state; a term that ends cancels the sweep.
@@ -35,7 +49,7 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 ### Identity and role
 
 - The certificate's common name is `gaon-workloads`. `workloads/deploy/rbac.yaml` holds the ClusterRole and ClusterRoleBinding `gaon:workloads`; an administrator applies it with `gaon apply -f`. Without it the unit is refused.
-- The role: `create` and `update` of definitions labeled `managed-by=gaon-workloads`; `get` of definitions with no selector; `create`, `get` and `list` of MicroVMs labeled `managed-by=gaon-workloads`; `get`, `list`, `watch` of `jobs`; `update` of `jobs/status`; `get`, `create` and `update` of `leases` of the coordination group, which a rule cannot narrow to the Lease `gaon-workloads` because a rule names no object and a `get` of an absent Lease is judged on no labels.
+- The role: `create` and `update` of definitions labeled `managed-by=gaon-workloads`; `get` of definitions with no selector; `create`, `get` and `list` of MicroVMs labeled `managed-by=gaon-workloads`; `get`, `list`, `watch` of `jobs`; `create` and `delete` of `jobs` labeled `managed-by=gaon-workloads`; `update` of `jobs/status`; `list` of `cronjobs` and `update` of `cronjobs/status`; `get`, `create` and `update` of `leases` of the coordination group, which a rule cannot narrow to the Lease `gaon-workloads` because a rule names no object and a `get` of an absent Lease is judged on no labels.
 - **A `get` of an absent object is judged on no labels**, so a selector rule refuses it. The unselected `get` of definitions is what lets the unit find its definition is missing. `resource-api.md` §Authorization allows only what the Node authorizer or a bound role allows under `RBAC`, so the server's requirement of the RBAC `get` is what the document states.
 
 ### Deployment
@@ -54,4 +68,7 @@ Basis: [ADR 0024](./adr/0024-a-job-is-a-custom-resource-kind-the-workloads-unit-
 - **A name held by an unlabeled MicroVM stalls the Job**: the unit cannot list it, so each sweep's create answers `AlreadyExists` and is logged. A generated name suffix would remove it.
 - **Sweeping, not watching.** A reaction takes up to one interval. The kind serves `watch`.
 - **No `parallelism`**: one MicroVM at a time.
+- **A CronJob has one policy**: Forbid, with skip and no catch-up. `Allow`, `Replace`, a catch-up window and a time zone are not offered.
+- **A new CronJob waits** up to a sweep for its first sight, then up to a minute for its first run.
+- **Clocks at a handover.** A name per time keeps a time from running twice, not from running early or late when two instances' clocks differ.
 - **The definition is rewritten at start** when it differs, which overwrites an operator's edit.

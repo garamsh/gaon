@@ -22,6 +22,7 @@ type fakeAPI struct {
 	mu               sync.Mutex
 	definitions      map[string]*api.CustomResourceDefinition
 	jobs             map[string]*api.CustomObject
+	cronjobs         map[string]*api.CustomObject
 	microvms         map[string]*api.MicroVM
 	definitionWrites int
 	statusWrites     int
@@ -32,7 +33,7 @@ type fakeAPI struct {
 func newFakeAPI(t *testing.T) *fakeAPI {
 	f := &fakeAPI{
 		t: t, definitions: map[string]*api.CustomResourceDefinition{}, jobs: map[string]*api.CustomObject{},
-		microvms: map[string]*api.MicroVM{}, nextRV: 100,
+		cronjobs: map[string]*api.CustomObject{}, microvms: map[string]*api.MicroVM{}, nextRV: 100,
 	}
 	mux := http.NewServeMux()
 	ext := "/apis/" + api.APIExtensionsGroupVersion + "/customresourcedefinitions/{name}"
@@ -41,6 +42,11 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 	jobs := "/apis/" + job.APIVersion + "/jobs"
 	mux.HandleFunc("GET "+jobs, f.listJobs)
 	mux.HandleFunc("PUT "+jobs+"/{name}/status", f.putJobStatus)
+	mux.HandleFunc("PUT "+jobs+"/{name}", f.putJob)
+	mux.HandleFunc("DELETE "+jobs+"/{name}", f.deleteJob)
+	cronjobs := "/apis/" + job.APIVersion + "/cronjobs"
+	mux.HandleFunc("GET "+cronjobs, f.listCronJobs)
+	mux.HandleFunc("PUT "+cronjobs+"/{name}/status", f.putCronJobStatus)
 	mvms := "/apis/" + api.GroupVersion + "/microvms"
 	mux.HandleFunc("GET "+mvms, f.listMicroVMs)
 	mux.HandleFunc("PUT "+mvms+"/{name}", f.putMicroVM)

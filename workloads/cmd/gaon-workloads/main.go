@@ -26,6 +26,7 @@ type config struct {
 	httpClient *http.Client
 	jobs       job.Config
 	leader     *api.LeaderElectionFlags
+	clock      job.Clock
 }
 
 // parseFlags reads the flags in args and builds the HTTP client the --tls
@@ -48,7 +49,7 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 	if err != nil {
 		return config{}, err
 	}
-	return config{server: strings.TrimSuffix(*server, "/"), httpClient: httpClient, jobs: job.Config{Interval: *interval}, leader: leader}, nil
+	return config{server: strings.TrimSuffix(*server, "/"), httpClient: httpClient, jobs: job.Config{Interval: *interval}, leader: leader, clock: systemclock.Clock{}}, nil
 }
 
 func main() {
@@ -85,10 +86,14 @@ func run(ctx context.Context, cfg config, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	cronjobs, err := api.NewCustomResourceClient(cfg.server, cfg.httpClient, job.CronJobType)
+	if err != nil {
+		return err
+	}
 	definitions := api.NewClient(cfg.server+"/apis/"+api.APIExtensionsGroupVersion, cfg.httpClient)
 	managed := api.Selector{{Key: job.ManagedByLabel, Operator: api.SelectorIn, Values: []string{job.Manager}}}
 	microvms := api.NewClient(computeRoot, cfg.httpClient, api.WithLabelSelector(managed))
 	return api.RunLeading(ctx, elector, func(ctx context.Context) error {
-		return job.NewService(definitions, jobs, microvms, systemclock.Clock{}, cfg.jobs, log).Run(ctx)
+		return job.NewService(definitions, jobs, cronjobs, microvms, cfg.clock, cfg.jobs, log).Run(ctx)
 	})
 }

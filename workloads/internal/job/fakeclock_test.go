@@ -26,6 +26,13 @@ func (c *fakeClock) Now() time.Time {
 	return c.now
 }
 
+// set moves the time Now reports.
+func (c *fakeClock) set(t time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = t
+}
+
 // After counts the call and returns a channel that fires on the next tick.
 func (c *fakeClock) After(time.Duration) <-chan time.Time {
 	c.mu.Lock()

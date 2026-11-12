@@ -10,10 +10,19 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// register creates the Job definition, or brings the stored one to this
-// version's spec, and leaves it alone when it already matches.
+// register registers each kind the unit serves.
 func (s *service) register(ctx context.Context) error {
-	want := Definition()
+	for _, want := range []*api.CustomResourceDefinition{Definition(), CronJobDefinition()} {
+		if err := s.registerDefinition(ctx, want); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// registerDefinition creates the definition, or brings the stored one to this
+// version's spec, and leaves it alone when it already matches.
+func (s *service) registerDefinition(ctx context.Context, want *api.CustomResourceDefinition) error {
 	have, err := s.definitions.GetCustomResourceDefinition(ctx, want.Metadata.Name)
 	switch {
 	case errors.Is(err, api.ErrNotFound):

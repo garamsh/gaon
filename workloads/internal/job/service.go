@@ -16,17 +16,19 @@ type Config struct {
 
 // Service runs Jobs.
 type Service interface {
-	// Run registers the Job kind, then sweeps every Config.Interval: for each
-	// Job that has not finished it counts the MicroVMs the Job owns, creates
-	// the next one when none is running and more are needed, and writes the
-	// counts and the completion condition to the status. It returns when ctx
-	// ends, or at once when the kind cannot be registered.
+	// Run registers the Job and CronJob kinds, then sweeps every
+	// Config.Interval: for each Job that has not finished it counts the
+	// MicroVMs the Job owns, creates the next one when none is running and more
+	// are needed, and writes the counts and the completion condition to the
+	// status; for each CronJob it creates the Job of a time that has come. It
+	// returns when ctx ends, or at once when a kind cannot be registered.
 	Run(ctx context.Context) error
 }
 
 type service struct {
 	definitions *api.Client
 	jobs        *api.CustomResourceClient
+	cronjobs    *api.CustomResourceClient
 	microvms    *api.Client
 	clock       Clock
 	cfg         Config
@@ -34,10 +36,11 @@ type service struct {
 }
 
 // NewService returns a Service. definitions is a client rooted at the
-// apiextensions group, jobs the client of the Job kind, and microvms a client
-// rooted at the compute group that lists only the MicroVMs the unit wrote.
-func NewService(definitions *api.Client, jobs *api.CustomResourceClient, microvms *api.Client, clock Clock, cfg Config, log *slog.Logger) Service {
-	return &service{definitions: definitions, jobs: jobs, microvms: microvms, clock: clock, cfg: cfg, log: log}
+// apiextensions group, jobs and cronjobs the clients of the Job and CronJob
+// kinds, and microvms a client rooted at the compute group that lists only the
+// MicroVMs the unit wrote.
+func NewService(definitions *api.Client, jobs, cronjobs *api.CustomResourceClient, microvms *api.Client, clock Clock, cfg Config, log *slog.Logger) Service {
+	return &service{definitions: definitions, jobs: jobs, cronjobs: cronjobs, microvms: microvms, clock: clock, cfg: cfg, log: log}
 }
 
 func (s *service) Run(ctx context.Context) error {
