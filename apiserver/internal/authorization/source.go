@@ -12,9 +12,12 @@ import (
 type Source interface {
 	GetNode(ctx context.Context, name string) (*api.Node, error)
 	GetMicroVM(ctx context.Context, name string) (*api.MicroVM, error)
-	ListMicroVMs(ctx context.Context) (*api.MicroVMList, error)
+	ListMicroVMs(ctx context.Context, sel api.Selector) (*api.MicroVMList, error)
 	GetVolume(ctx context.Context, name string) (*api.Volume, error)
 	GetCertificateSigningRequest(ctx context.Context, name string) (*api.CertificateSigningRequest, error)
 	GetClusterRole(ctx context.Context, name string) (*api.ClusterRole, error)
-	ListClusterRoleBindings(ctx context.Context) (*api.ClusterRoleBindingList, error)
+	ListClusterRoleBindings(ctx context.Context, sel api.Selector) (*api.ClusterRoleBindingList, error)
+	// Labels returns the labels of the stored object named name of the
+	// resource in group, or nil where there is none.
+	Labels(ctx context.Context, group, resource, name string) (map[string]string, error)
 }

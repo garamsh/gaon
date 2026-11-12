@@ -1,6 +1,6 @@
 # ADR 0008: The API server authorizes certificate callers with cluster roles, bindings and a Node authorizer
 
-> Status: accepted
+> Status: accepted; the rules of gaon:scheduler and gaon:controllers in Decision 6 are superseded by ADR-0021
 > Date: 2026-11-12
 
 Drafted for garamsh/gaon#75, under goal garamsh/gaon#74. The design is the PM's, taken under the project owner's decisions in #74 (Kubernetes semantics, a gaon-native implementation, additive only, no namespaces) and recorded in #75 §Design. It amends [ADR 0005](./0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md), Decision 4. Enforcement in the API server is garamsh/gaon#76.

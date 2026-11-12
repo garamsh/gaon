@@ -18,7 +18,11 @@ func (a *rbac) AuthorizeMicroVMUpdate(ctx context.Context, c Caller, name string
 	if err != nil {
 		return err
 	}
-	if covers(held, api.Group, "microvms", string(api.VerbUpdate)) {
+	granted, err := a.allowed(ctx, held, Request{Group: api.Group, Resource: "microvms", Verb: api.VerbUpdate, Name: name, Labels: next.Metadata.Labels})
+	if err != nil {
+		return err
+	}
+	if granted {
 		return nil
 	}
 	old, err := a.src.GetMicroVM(ctx, name)
@@ -41,7 +45,7 @@ func finalizerOnly(old, next *api.MicroVM) bool {
 func comparable(m *api.MicroVM) []byte {
 	c := *m
 	c.Status = api.MicroVMStatus{}
-	c.Metadata.ResourceVersion, c.Metadata.Generation, c.Metadata.DeletionTimestamp = "", 0, nil
+	c.Metadata.ResourceVersion, c.Metadata.Generation, c.Metadata.DeletionTimestamp, c.Metadata.UID = "", 0, nil, ""
 	c.Metadata.Finalizers = slices.DeleteFunc(slices.Clone(m.Metadata.Finalizers), func(f string) bool { return f == NodeAgentFinalizer })
 	b, _ := json.Marshal(c)
 	return b

@@ -72,6 +72,9 @@ func (s *service) PutVolume(ctx context.Context, name string, v *api.Volume) (*a
 	if err := v.ValidateCreate(); err != nil {
 		return nil, err
 	}
+	if err := v.Metadata.ValidateCreate(); err != nil {
+		return nil, err
+	}
 	v.Metadata.Generation, v.Metadata.DeletionTimestamp = 1, nil
 	v.Status = api.VolumeStatus{Phase: api.VolumePending}
 	if err := validate(ctx, s, volumes, "", api.OperationCreate, v, nil); err != nil {
@@ -88,6 +91,10 @@ func (s *service) updateVolume(ctx context.Context, v *api.Volume) (*api.Volume,
 	if err := checkVersion(volumes.plural, v.Metadata.Name, v.Metadata.ResourceVersion, old.Metadata.ResourceVersion); err != nil {
 		return nil, err
 	}
+	if err := v.Metadata.ValidateUpdate(old.Metadata); err != nil {
+		return nil, err
+	}
+	v.Metadata.UID = old.Metadata.UID
 	if err := v.ValidateUpdate(old); err != nil {
 		return nil, err
 	}
@@ -141,14 +148,14 @@ func (s *service) GetVolume(ctx context.Context, name string) (*api.Volume, erro
 	return v, err
 }
 
-func (s *service) ListVolumes(ctx context.Context) (*api.VolumeList, error) {
-	items, rv, err := volumes.list(ctx, s.st)
+func (s *service) ListVolumes(ctx context.Context, sel api.Selector) (*api.VolumeList, error) {
+	items, rv, err := volumes.list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.VolumeList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindVolumeList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchVolumes(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return volumes.watch(ctx, s.st, rv)
+func (s *service) WatchVolumes(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+	return volumes.watch(ctx, s.st, rv, sel)
 }

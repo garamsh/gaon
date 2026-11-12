@@ -27,10 +27,55 @@ func (a *rbac) Authorize(ctx context.Context, c Caller, r Request) error {
 	if err != nil {
 		return err
 	}
-	if !covers(rules, r.Group, r.qualified(), string(r.Verb)) {
+	allowed, err := a.allowed(ctx, rules, r)
+	if err != nil {
+		return err
+	}
+	if !allowed {
 		return api.NewAPIError(api.ReasonForbidden, "%q may not %s in %q", c.User, r, r.Group)
 	}
 	return nil
+}
+
+// allowed reports whether one rule lists the group, the resource and the verb
+// of r and passes r through its label selector (ADR 0018, item 8). Rules are
+// judged one at a time, never combined. The stored labels are read once, and
+// only when a rule that has a selector needs them.
+func (a *rbac) allowed(ctx context.Context, rules []api.PolicyRule, r Request) (bool, error) {
+	var stored map[string]string
+	read := false
+	for _, rule := range rules {
+		if !listed(rule.APIGroups, r.Group) || !listed(rule.Resources, r.qualified()) || !listed(rule.Verbs, string(r.Verb)) {
+			continue
+		}
+		if rule.LabelSelector == "" {
+			return true, nil
+		}
+		switch {
+		case r.Verb == api.VerbList || r.Verb == api.VerbWatch:
+			if rule.AllowsSelector(r.Selector) {
+				return true, nil
+			}
+		case r.Verb == api.VerbCreate && r.Subresource == "":
+			if rule.AllowsLabels(r.Labels) {
+				return true, nil
+			}
+		default:
+			if !read {
+				var err error
+				if stored, err = a.src.Labels(ctx, r.Group, r.Resource, r.Name); err != nil {
+					return false, err
+				}
+				read = true
+			}
+			// An update of the object itself is judged on the labels it has
+			// and on the labels it would have.
+			if rule.AllowsLabels(stored) && (r.Verb != api.VerbUpdate || r.Subresource != "" || rule.AllowsLabels(r.Labels)) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func (a *rbac) AuthorizeRole(ctx context.Context, c Caller, wanted []api.PolicyRule) error {
@@ -42,14 +87,21 @@ func (a *rbac) AuthorizeRole(ctx context.Context, c Caller, wanted []api.PolicyR
 		for _, g := range rule.APIGroups {
 			for _, res := range rule.Resources {
 				for _, v := range rule.Verbs {
-					if !covers(held, g, res, string(v)) {
-						return api.NewAPIError(api.ReasonForbidden, "%q does not hold %s on %s in %q, which the role grants", c.User, v, res, g)
+					if !holds(held, g, res, string(v), rule) {
+						return api.NewAPIError(api.ReasonForbidden, "%q does not hold %s on %s in %q%s, which the role grants", c.User, v, res, g, selectorNote(rule))
 					}
 				}
 			}
 		}
 	}
 	return nil
+}
+
+func selectorNote(r api.PolicyRule) string {
+	if r.LabelSelector == "" {
+		return ""
+	}
+	return " for " + r.LabelSelector
 }
 
 func (a *rbac) AuthorizeBinding(ctx context.Context, c Caller, ref api.RoleRef) error {
@@ -66,7 +118,7 @@ func (a *rbac) AuthorizeBinding(ctx context.Context, c Caller, ref api.RoleRef) 
 // rules returns the rules of every ClusterRole a binding gives to c's user or
 // to one of its groups.
 func (a *rbac) rules(ctx context.Context, c Caller) ([]api.PolicyRule, error) {
-	bindings, err := a.src.ListClusterRoleBindings(ctx)
+	bindings, err := a.src.ListClusterRoleBindings(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -97,11 +149,18 @@ func (c Caller) isSubject(s api.Subject) bool {
 	return false
 }
 
-// covers reports whether a rule lists the group, the resource and the verb, or
-// holds the wildcard for each it does not list.
-func covers(rules []api.PolicyRule, group, resource, verb string) bool {
-	return slices.ContainsFunc(rules, func(r api.PolicyRule) bool {
-		return listed(r.APIGroups, group) && listed(r.Resources, resource) && listed(r.Verbs, verb)
+// holds reports whether a held rule lists the group, the resource and the
+// verb, or holds the wildcard for each it does not list, and is no narrower
+// than want: it has no label selector, or want's selector selects nothing it
+// does not. A rule of want that has no selector is held only through a rule
+// that has none.
+func holds(held []api.PolicyRule, group, resource, verb string, want api.PolicyRule) bool {
+	wantSel, err := want.Selector()
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(held, func(r api.PolicyRule) bool {
+		return listed(r.APIGroups, group) && listed(r.Resources, resource) && listed(r.Verbs, verb) && r.AllowsSelector(wantSel)
 	})
 }
 

@@ -41,14 +41,14 @@ func (s *service) GetClusterRole(ctx context.Context, name string) (*api.Cluster
 	return r, err
 }
 
-func (s *service) ListClusterRoles(ctx context.Context) (*api.ClusterRoleList, error) {
-	items, rv, err := clusterRoles.list(ctx, s.st)
+func (s *service) ListClusterRoles(ctx context.Context, sel api.Selector) (*api.ClusterRoleList, error) {
+	items, rv, err := clusterRoles.list(ctx, s.st, sel)
 	if err != nil {
 		return nil, err
 	}
 	return &api.ClusterRoleList{TypeMeta: api.TypeMeta{APIVersion: api.RBACGroupVersion, Kind: api.KindClusterRoleList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}, nil
 }
 
-func (s *service) WatchClusterRoles(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error) {
-	return clusterRoles.watch(ctx, s.st, rv)
+func (s *service) WatchClusterRoles(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error) {
+	return clusterRoles.watch(ctx, s.st, rv, sel)
 }

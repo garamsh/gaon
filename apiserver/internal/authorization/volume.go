@@ -14,7 +14,11 @@ func (a *rbac) AuthorizeVolumeUpdate(ctx context.Context, c Caller, name string,
 	if err != nil {
 		return err
 	}
-	if covers(held, api.Group, "volumes", string(api.VerbUpdate)) {
+	granted, err := a.allowed(ctx, held, Request{Group: api.Group, Resource: "volumes", Verb: api.VerbUpdate, Name: name, Labels: next.Metadata.Labels})
+	if err != nil {
+		return err
+	}
+	if granted {
 		return nil
 	}
 	old, err := a.src.GetVolume(ctx, name)
@@ -37,7 +41,7 @@ func volumeFinalizerOnly(old, next *api.Volume) bool {
 func comparableVolume(v *api.Volume) []byte {
 	c := *v
 	c.Status = api.VolumeStatus{}
-	c.Metadata.ResourceVersion, c.Metadata.Generation, c.Metadata.DeletionTimestamp = "", 0, nil
+	c.Metadata.ResourceVersion, c.Metadata.Generation, c.Metadata.DeletionTimestamp, c.Metadata.UID = "", 0, nil, ""
 	c.Metadata.Finalizers = slices.DeleteFunc(slices.Clone(v.Metadata.Finalizers), func(f string) bool { return f == NodeAgentFinalizer })
 	b, _ := json.Marshal(c)
 	return b

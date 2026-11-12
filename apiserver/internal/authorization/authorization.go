@@ -18,12 +18,17 @@ type Caller struct {
 
 // Request is a verb on a resource of an API group. Subresource is empty
 // except for the status and binding paths, and Name for a collection.
+// Labels are the labels of the object in the body of a create or an update,
+// and Selector is the label selector of a list or a watch: the two things a
+// rule with a label selector judges that are not stored.
 type Request struct {
 	Group       string
 	Resource    string
 	Subresource string
 	Verb        api.Verb
 	Name        string
+	Labels      map[string]string
+	Selector    api.Selector
 }
 
 // Authorizer allows a request or refuses it with a Forbidden error. Any other
