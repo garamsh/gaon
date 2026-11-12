@@ -15,6 +15,11 @@ type Config struct {
 	Listen string
 	// Endpoints are the etcd client endpoints of the cell's Store.
 	Endpoints []string
+	// EtcdCA, EtcdCert and EtcdKey are the paths of the CA that signs etcd's
+	// certificate and of the client certificate and key presented to etcd. All
+	// three are set or none is; with none, etcd is dialled without TLS
+	// configuration.
+	EtcdCA, EtcdCert, EtcdKey string
 	// DialTimeout bounds the connection to etcd at start.
 	DialTimeout time.Duration
 	// TLSClientCA, TLSCert and TLSKey are the paths of the CA that signs the
@@ -73,6 +78,9 @@ func ParseConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.AuthorizationMode, "authorization-mode", ModeAlwaysAllow, "AlwaysAllow, or RBAC: the Node authorizer, then cluster roles and bindings; RBAC needs the tls flags")
 	fs.StringVar(&cfg.ServiceAccountIssuer, "service-account-issuer", "", "the iss of service account tokens; given with service-account-signing-key-file")
 	fs.StringVar(&cfg.ServiceAccountSigningKeyFile, "service-account-signing-key-file", "", "PEM file of the EC P-256 key that signs service account tokens, the same on every API server; given with service-account-issuer")
+	fs.StringVar(&cfg.EtcdCA, "etcd-ca-file", "", "PEM file of the CA that signs etcd's certificate; given with etcd-cert-file and etcd-key-file")
+	fs.StringVar(&cfg.EtcdCert, "etcd-cert-file", "", "PEM file of the client certificate presented to etcd; given with etcd-ca-file and etcd-key-file")
+	fs.StringVar(&cfg.EtcdKey, "etcd-key-file", "", "PEM file of the client certificate's key; given with etcd-ca-file and etcd-cert-file")
 	fs.DurationVar(&cfg.DialTimeout, "etcd-dial-timeout", 5*time.Second, "time allowed to reach etcd at start")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -87,6 +95,9 @@ func ParseConfig(args []string) (Config, error) {
 	}
 	if cfg.DialTimeout <= 0 {
 		return Config{}, fmt.Errorf("etcd dial timeout %s is not positive", cfg.DialTimeout)
+	}
+	if err := cfg.validateEtcdTLS(); err != nil {
+		return Config{}, err
 	}
 	if err := cfg.tokenFileNeedsTLS(); err != nil {
 		return Config{}, err

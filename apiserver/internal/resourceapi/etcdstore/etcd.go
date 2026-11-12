@@ -4,6 +4,7 @@ package etcdstore
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"time"
@@ -20,10 +21,10 @@ type Store struct {
 	cli *clientv3.Client
 }
 
-// New connects to the etcd endpoints and checks that one answers, each within
-// timeout.
-func New(ctx context.Context, endpoints []string, timeout time.Duration) (*Store, error) {
-	cli, err := clientv3.New(clientv3.Config{Endpoints: endpoints, DialTimeout: timeout, Logger: zap.NewNop()})
+// New connects to the etcd endpoints, over tlsCfg where it is not nil, and
+// checks that one answers, each within timeout.
+func New(ctx context.Context, endpoints []string, timeout time.Duration, tlsCfg *tls.Config) (*Store, error) {
+	cli, err := clientv3.New(clientv3.Config{Endpoints: endpoints, DialTimeout: timeout, TLS: tlsCfg, Logger: zap.NewNop()})
 	if err != nil {
 		return nil, fmt.Errorf("connect to etcd: %w", err)
 	}

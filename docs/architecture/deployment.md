@@ -18,7 +18,7 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 - **The Nodes' etcd members form one cluster.** Each `gaon-apiserver` gets all three members' client endpoints, the same list on every Node, in `--etcd-endpoints`; it starts if any one answers. The cluster keeps its quorum with one Node down.
 - **Clients reach the API server through one address,** naru's virtual IP (garamsh/naru#59). The CLI's `--server`, the scheduler's and the controllers' `-api` and every Node Agent's `--api-server` name it; no client takes a list of addresses. The scheduler and the controllers each present their own client certificate, the same on every Node.
 - **The etcd version follows the API server's.** `gaon-apiserver` is built against etcd 3.6.16 and naru's etcd image takes its version from `apiserver/go.mod`, so a bump of one is a bump of both.
-- **etcd is dialled over plain HTTP.** `gaon-apiserver` has no etcd TLS flag (`apiserver/config.go`), and its default endpoint is `http://127.0.0.1:2379`. With three members the client and peer ports are on the Node network, which naru's configuration is to keep closed to everything but the Nodes of the control plane.
+- **etcd is dialled over TLS with a client certificate.** Each `gaon-apiserver` gets `--etcd-ca-file`, `--etcd-cert-file` and `--etcd-key-file`: the CA that signs etcd's certificate, and the client certificate and key it presents. With them it verifies etcd against the CA and speaks TLS 1.3 or later, so `https://` endpoints work; they are given together or not at all, and without them it dials as before and `http://` endpoints work. naru's configuration is to keep the members' client and peer ports closed to everything but the Nodes of the control plane.
 - **etcd's data persists across a reboot and an upgrade.** The Store holds every resource, so losing it loses them all ([ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md), its single member superseded by [ADR 0023](./adr/0023-the-control-plane-runs-on-three-nodes-over-a-three-member-etcd-and-the-scheduler-and-the-controllers-act-only-while-holding-a-coordination-lease.md)).
 - **The CLI is not a Node service.** `gaon` runs wherever an operator uses it ([cli.md](./cli.md)).
 
@@ -76,6 +76,5 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
 
 - **Garbage collection of CertificateSigningRequests.** The contract has no delete path, so requests stay in the Store ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md)).
 - **Growth beyond three members.** More members, or more than one cell, wait for their own ADR.
-- **etcd TLS.** The API server has no flag for etcd's client TLS, so the three members' client ports carry plain HTTP between the Nodes.
 - **Skew policy.** Which Node Agent and API server versions work together is left to `v1beta1`.
 - **Node API.** How gaon calls naru's node API to apply a config is not decided ([ADR 0002](./adr/0002-gaon-owns-the-node-agent-and-depends-one-way-on-mvmd-and-naru.md)).
