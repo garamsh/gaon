@@ -1,21 +1,24 @@
 package api
 
-// VerbAll, ResourceAll and APIGroupAll are the wildcard of a rule: it matches
-// every value of its field.
+// Verb is an action a rule grants on a resource.
+type Verb string
+
+// The verbs a rule grants. VerbAll matches every verb.
 const (
-	VerbAll     = "*"
-	ResourceAll = "*"
-	APIGroupAll = "*"
+	VerbAll    Verb = "*"
+	VerbGet    Verb = "get"
+	VerbList   Verb = "list"
+	VerbWatch  Verb = "watch"
+	VerbCreate Verb = "create"
+	VerbUpdate Verb = "update"
+	VerbDelete Verb = "delete"
 )
 
-// The verbs a rule grants, besides VerbAll.
+// ResourceAll and APIGroupAll are the wildcard of a rule: each matches every
+// value of its field.
 const (
-	VerbGet    = "get"
-	VerbList   = "list"
-	VerbWatch  = "watch"
-	VerbCreate = "create"
-	VerbUpdate = "update"
-	VerbDelete = "delete"
+	ResourceAll = "*"
+	APIGroupAll = "*"
 )
 
 // ClusterRole is a set of permissions, cluster-wide. It grants nothing until
@@ -40,7 +43,7 @@ type ClusterRoleList struct {
 type PolicyRule struct {
 	APIGroups []string `json:"apiGroups"`
 	Resources []string `json:"resources"`
-	Verbs     []string `json:"verbs"`
+	Verbs     []Verb   `json:"verbs"`
 }
 
 // Validate checks the identity of r and that each rule lists at least one

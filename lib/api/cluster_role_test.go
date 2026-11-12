@@ -16,19 +16,19 @@ func newClusterRole(name string) *api.ClusterRole {
 		Rules: []api.PolicyRule{{
 			APIGroups: []string{api.Group},
 			Resources: []string{"machines", "machines/status"},
-			Verbs:     []string{api.VerbGet, api.VerbList},
+			Verbs:     []api.Verb{api.VerbGet, api.VerbList},
 		}},
 	}
 }
 
 func TestClusterRoleValidateRefusesAnUnknownVerb(t *testing.T) {
 	good := newClusterRole("reader")
-	good.Rules[0].Verbs = []string{"get", "list", "watch", "create", "update", "delete", "*"}
+	good.Rules[0].Verbs = []api.Verb{"get", "list", "watch", "create", "update", "delete", "*"}
 	require.NoError(t, good.Validate(), "control: every known verb, and the wildcard, is accepted")
 
-	for _, verb := range []string{"", "patch", "Get", "bind", "escalate", "get*"} {
+	for _, verb := range []api.Verb{"", "patch", "Get", "bind", "escalate", "get*"} {
 		role := newClusterRole("reader")
-		role.Rules[0].Verbs = []string{"get", verb}
+		role.Rules[0].Verbs = []api.Verb{"get", verb}
 		assert.ErrorIs(t, role.Validate(), api.ErrInvalid, "verb %q", verb)
 	}
 }
@@ -47,7 +47,7 @@ func TestClusterRoleValidateRefusesARuleThatMatchesNothing(t *testing.T) {
 	}
 
 	wildcards := newClusterRole("admin")
-	wildcards.Rules = []api.PolicyRule{{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"*"}}}
+	wildcards.Rules = []api.PolicyRule{{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []api.Verb{"*"}}}
 	assert.NoError(t, wildcards.Validate(), "control: the wildcard is a value in each field")
 	empty := newClusterRole("empty")
 	empty.Rules = nil
@@ -80,7 +80,7 @@ func TestClientClusterRolePutGetListDelete(t *testing.T) {
 
 	update := *created
 	update.Rules = append([]api.PolicyRule{}, created.Rules...)
-	update.Rules[0].Verbs = []string{api.VerbWatch}
+	update.Rules[0].Verbs = []api.Verb{api.VerbWatch}
 	updated, err := c.PutClusterRole(ctx, &update)
 	require.NoError(t, err)
 	_, err = c.PutClusterRole(ctx, &update)
@@ -88,7 +88,7 @@ func TestClientClusterRolePutGetListDelete(t *testing.T) {
 
 	got, err := c.GetClusterRole(ctx, "reader")
 	require.NoError(t, err)
-	assert.Equal(t, []string{api.VerbWatch}, got.Rules[0].Verbs)
+	assert.Equal(t, []api.Verb{api.VerbWatch}, got.Rules[0].Verbs)
 
 	list, err := c.ListClusterRoles(ctx)
 	require.NoError(t, err)

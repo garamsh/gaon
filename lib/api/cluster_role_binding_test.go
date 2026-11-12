@@ -35,12 +35,12 @@ func TestClusterRoleBindingValidateRefusesAnEmptyRoleRef(t *testing.T) {
 }
 
 func TestClusterRoleBindingValidateRefusesAnUnknownSubjectKind(t *testing.T) {
-	for _, kind := range []string{api.SubjectUser, api.SubjectGroup} {
+	for _, kind := range []api.SubjectKind{api.SubjectUser, api.SubjectGroup} {
 		b := newClusterRoleBinding("b")
 		b.Subjects = []api.Subject{{Kind: kind, Name: "x"}}
 		assert.NoError(t, b.Validate(), "control: "+kind)
 	}
-	for _, kind := range []string{"", "ServiceAccount", "user", "Node"} {
+	for _, kind := range []api.SubjectKind{"", "ServiceAccount", "user", "Node"} {
 		b := newClusterRoleBinding("b")
 		b.Subjects = []api.Subject{{Kind: api.SubjectUser, Name: "alice"}, {Kind: kind, Name: "x"}}
 		assert.ErrorIs(t, b.Validate(), api.ErrInvalid, "kind %q", kind)
@@ -48,7 +48,7 @@ func TestClusterRoleBindingValidateRefusesAnUnknownSubjectKind(t *testing.T) {
 }
 
 func TestClusterRoleBindingValidateRefusesASubjectWithNoName(t *testing.T) {
-	for _, kind := range []string{api.SubjectUser, api.SubjectGroup} {
+	for _, kind := range []api.SubjectKind{api.SubjectUser, api.SubjectGroup} {
 		named := newClusterRoleBinding("b")
 		named.Subjects = []api.Subject{{Kind: kind, Name: "x"}}
 		assert.NoError(t, named.Validate(), "control: a named "+kind)

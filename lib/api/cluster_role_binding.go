@@ -1,9 +1,12 @@
 package api
 
+// SubjectKind says what a Subject names.
+type SubjectKind string
+
 // The kinds a Subject names.
 const (
-	SubjectUser  = "User"
-	SubjectGroup = "Group"
+	SubjectUser  SubjectKind = "User"
+	SubjectGroup SubjectKind = "Group"
 )
 
 // ClusterRoleBinding grants the permissions of one ClusterRole to its
@@ -32,8 +35,8 @@ type RoleRef struct {
 // Subject is a user, by the CN of its certificate, or a group, by an
 // Organization of its subject.
 type Subject struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
+	Kind SubjectKind `json:"kind"`
+	Name string      `json:"name"`
 }
 
 // Validate checks the identity of b, that its roleRef names a ClusterRole and
