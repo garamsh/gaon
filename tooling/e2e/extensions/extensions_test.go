@@ -182,12 +182,17 @@ func (c *cluster) agentsRegister(t *testing.T) {
 	ctx, cancel := within(5 * time.Minute)
 	defer cancel()
 	for _, n := range []string{smallNode, bigNode} {
-		require.Eventually(t, func() bool { _, err := c.admin.GetNode(ctx, n); return err == nil }, waitFor, pollEvery, n+" registers its Node")
-		node, err := c.admin.GetNode(ctx, n)
-		require.NoError(t, err)
-		node.Spec.Admitted = true
-		_, err = c.admin.PutNode(ctx, node)
-		require.NoError(t, err, "admit "+n)
+		// The agent writes the Node's status each second, which moves its
+		// version: a Conflict retries the read and the write.
+		require.Eventually(t, func() bool {
+			node, err := c.admin.GetNode(ctx, n)
+			if err != nil {
+				return false
+			}
+			node.Spec.Admitted = true
+			_, err = c.admin.PutNode(ctx, node)
+			return err == nil
+		}, waitFor, pollEvery, n+" registers its Node and is admitted")
 	}
 	for _, n := range []string{smallNode, bigNode} {
 		require.Eventually(t, func() bool { return c.eligible(ctx, n) }, waitFor, pollEvery, n+" is Admitted and Ready")
