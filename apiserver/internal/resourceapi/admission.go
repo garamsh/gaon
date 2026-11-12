@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"slices"
 	"strings"
 
 	"github.com/garamsh/gaon/apiserver/internal/admission"
@@ -24,7 +23,8 @@ func userOf(ctx context.Context) api.UserInfo {
 	return u
 }
 
-// webhookSource lists the webhooks the two configuration kinds hold.
+// webhookSource lists the webhooks the two configuration kinds hold. The Store
+// lists by key, so the configurations come in the order of their names.
 type webhookSource struct{ st Store }
 
 func (w webhookSource) Mutating(ctx context.Context) ([]admission.Hook, error) {
@@ -36,7 +36,7 @@ func (w webhookSource) Mutating(ctx context.Context) ([]admission.Hook, error) {
 	for _, c := range items {
 		hooks = appendHooks(hooks, c.Metadata.Name, c.Webhooks)
 	}
-	return sortedByConfiguration(hooks), nil
+	return hooks, nil
 }
 
 func (w webhookSource) Validating(ctx context.Context) ([]admission.Hook, error) {
@@ -48,20 +48,13 @@ func (w webhookSource) Validating(ctx context.Context) ([]admission.Hook, error)
 	for _, c := range items {
 		hooks = appendHooks(hooks, c.Metadata.Name, c.Webhooks)
 	}
-	return sortedByConfiguration(hooks), nil
+	return hooks, nil
 }
 
 func appendHooks(hooks []admission.Hook, configuration string, webhooks []api.Webhook) []admission.Hook {
 	for _, w := range webhooks {
 		hooks = append(hooks, admission.Hook{Configuration: configuration, Webhook: w})
 	}
-	return hooks
-}
-
-// sortedByConfiguration orders hooks by the name of their configuration and
-// keeps the order of the webhooks within one.
-func sortedByConfiguration(hooks []admission.Hook) []admission.Hook {
-	slices.SortStableFunc(hooks, func(a, b admission.Hook) int { return strings.Compare(a.Configuration, b.Configuration) })
 	return hooks
 }
 
