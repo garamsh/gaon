@@ -32,7 +32,7 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 
 ### Machine
 
-- **`spec`:** image, kernel, resources (requests and limits for cpu and memory), root disk size, volumes and mounts, networks, ports, `runStrategy`, `idleTimeoutSeconds`, `nodeSelector`, `requiredCapabilities`.
+- **`spec`:** image, kernel (the name of a kernel the node offers, empty for the node's default; the node agent fails a Machine naming one the node does not offer, with reason `Rejected`), resources (requests and limits for cpu and memory), root disk size, volumes and mounts, networks, ports, `runStrategy`, `idleTimeoutSeconds`, `nodeSelector`, `requiredCapabilities`.
 - **`runStrategy`:** `Always`, `RerunOnFailure`, `Once`, `OnDemand`, `Halted`.
 - **Set by `/binding` only:** `spec.nodeName` and `spec.bindingEpoch`. The first binding sets the epoch to 1, and each binding sets it to the current epoch plus one.
 - **Mutable:** `runStrategy`, `idleTimeoutSeconds`, `resources` and `volumes`, as far as the Driver supports a change while running. Everything else is replaced by a new Machine; MachineDeployment does rolling updates.

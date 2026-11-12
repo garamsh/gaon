@@ -3,6 +3,7 @@ package fakemvmd
 import (
 	"context"
 	"os"
+	"slices"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -48,6 +49,9 @@ func (s *Server) CreateMachine(_ context.Context, r *v1alpha2.CreateMachineReque
 	if s.MaxVCPUs > 0 && r.GetResources().GetCpuCount() > s.MaxVCPUs {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED, "cpu count is above the driver's max_vcpus")
 	}
+	if k := r.GetKernel(); k != "" && len(s.Kernels) > 0 && !slices.Contains(s.Kernels, k) {
+		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED, "the node offers no kernel "+k)
+	}
 	if _, ok := s.machines[r.GetMachineId()]; ok {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_CONFLICT, "machine exists")
 	}
@@ -55,6 +59,7 @@ func (s *Server) CreateMachine(_ context.Context, r *v1alpha2.CreateMachineReque
 		Id:        r.GetMachineId(),
 		State:     v1alpha2.MachineState_MACHINE_STATE_CREATED,
 		Resources: r.GetResources(),
+		Kernel:    r.GetKernel(),
 		Addresses: []string{"10.0.0.2"},
 	}
 	s.machines[m.Id] = m
