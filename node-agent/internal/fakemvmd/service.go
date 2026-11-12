@@ -140,8 +140,8 @@ func (s *Server) CreateDisk(_ context.Context, r *v1alpha2.CreateDiskRequest) (*
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.record("CreateDisk", r.GetDiskId())
-	if s.failDisks {
-		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED, "the node cannot make the disk")
+	if s.diskFailure != v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED {
+		return nil, v1alpha2.NewError(s.diskFailure, "the node cannot make the disk")
 	}
 	if _, ok := s.disks[r.GetDiskId()]; ok {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_CONFLICT, "disk exists")

@@ -49,7 +49,7 @@ type Server struct {
 	capacity    *v1alpha2.NodeCapacity
 	failDeletes bool
 	disks       map[string]*v1alpha2.Disk
-	failDisks   bool
+	diskFailure v1alpha2.OutcomeKind
 	records     map[string]*v1alpha2.ExecRecord
 	silent      map[string]bool
 }
@@ -164,7 +164,18 @@ func (s *Server) FailDeletes(on bool) {
 func (s *Server) FailDiskCreates(on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.failDisks = on
+	s.diskFailure = v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED
+	if on {
+		s.diskFailure = v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED
+	}
+}
+
+// FailDiskCreatesWith makes every CreateDisk fail with an error of kind, until
+// it is called with OUTCOME_KIND_UNSPECIFIED.
+func (s *Server) FailDiskCreatesWith(kind v1alpha2.OutcomeKind) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.diskFailure = kind
 }
 
 // AddDisk makes a disk no Machine holds, as a storage plugin does through

@@ -2,6 +2,7 @@ package storage_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -236,6 +237,54 @@ func TestLocal_AttachWritesFailedAndRefusesWhenTheDiskCannotBeMade(t *testing.T)
 	_, err = r.local.Attach(context.Background(), &m)
 	require.NoError(t, err, "control: the same Machine is served once the disk can be made")
 	assert.Equal(t, api.VolumeBound, r.volume(t, "data").Status.Phase)
+}
+
+func TestLocal_AttachWritesFailedOnlyForTheOutcomeKindsThatRefuseTheDisk(t *testing.T) {
+	r := newRig(t)
+	r.gaon.SetVolume(volume("data", node))
+	m := machineUsing("db", 1, "data")
+	r.gaon.SetMachine(m)
+
+	r.mvmd.FailDiskCreatesWith(v1alpha2.OutcomeKind_OUTCOME_KIND_FAILED)
+	_, err := r.local.Attach(context.Background(), &m)
+	assert.Equal(t, storage.ReasonVolumeFailed, refusal(t, err).Reason)
+	assert.Equal(t, api.VolumeFailed, r.volume(t, "data").Status.Phase)
+
+	// Control: a kind outside REJECTED, PRECONDITION_FAILED and FAILED is
+	// retried, not written as Failed.
+	r.gaon.SetVolume(volume("data", node))
+	r.mvmd.FailDiskCreatesWith(v1alpha2.OutcomeKind_OUTCOME_KIND_UNSUPPORTED)
+	_, err = r.local.Attach(context.Background(), &m)
+	require.Error(t, err)
+	var ref *machines.Refusal
+	assert.False(t, errors.As(err, &ref), "the error is not a refusal")
+	assert.Equal(t, api.VolumePending, r.volume(t, "data").Status.Phase, "no Failed is written")
+
+	r.mvmd.FailDiskCreatesWith(v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED)
+	_, err = r.local.Attach(context.Background(), &m)
+	require.NoError(t, err, "served once creates succeed")
+	assert.Equal(t, api.VolumeBound, r.volume(t, "data").Status.Phase)
+}
+
+func TestLocal_AttachRoundsAFractionalSizeUpToWholeBytes(t *testing.T) {
+	r := newRig(t)
+	v := volume("data", node)
+	v.Spec.Storage = "1001m"
+	r.gaon.SetVolume(v)
+	whole := volume("whole", node)
+	whole.Spec.Storage = "3"
+	r.gaon.SetVolume(whole)
+	m := machineUsing("db", 1, "data", "whole")
+	r.gaon.SetMachine(m)
+
+	_, err := r.local.Attach(context.Background(), &m)
+
+	require.NoError(t, err)
+	disk, ok := r.mvmd.Disk("volume-data")
+	require.True(t, ok)
+	assert.EqualValues(t, 2, disk.GetSizeBytes(), "1.001 bytes is 2")
+	disk, _ = r.mvmd.Disk("volume-whole")
+	assert.EqualValues(t, 3, disk.GetSizeBytes(), "control: a whole number is not rounded")
 }
 
 func TestLocal_RunWritesAvailableWithCapacityOnceTheDiskExists(t *testing.T) {
