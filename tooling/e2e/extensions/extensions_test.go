@@ -126,16 +126,6 @@ func startCluster(t *testing.T, binDir string) *cluster {
 		cpus   uint32
 		memory uint64
 	}{{smallNode, 4, 8 << 30}, {bigNode, 8, 16 << 30}} {
-		// The Node is admitted before its agent starts: the agent's first calls
-		// then meet an admitted Node, and no refusal is logged for the wait.
-		ctx, cancel := within(30 * time.Second)
-		_, err := c.admin.PutNode(ctx, &api.Node{
-			TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindNode},
-			Metadata: api.ObjectMeta{Name: n.name},
-			Spec:     api.NodeSpec{Admitted: true},
-		})
-		cancel()
-		require.NoError(t, err, "admit "+n.name)
 		m := startMvmd(t, dir, n.name, n.cpus, n.memory)
 		certs := filepath.Join(dir, n.name+"-certs")
 		require.NoError(t, os.Mkdir(certs, 0o700))
@@ -191,6 +181,14 @@ func (c *cluster) customClient(t *testing.T, id identity) *api.CustomResourceCli
 func (c *cluster) agentsRegister(t *testing.T) {
 	ctx, cancel := within(5 * time.Minute)
 	defer cancel()
+	for _, n := range []string{smallNode, bigNode} {
+		require.Eventually(t, func() bool { _, err := c.admin.GetNode(ctx, n); return err == nil }, waitFor, pollEvery, n+" registers its Node")
+		node, err := c.admin.GetNode(ctx, n)
+		require.NoError(t, err)
+		node.Spec.Admitted = true
+		_, err = c.admin.PutNode(ctx, node)
+		require.NoError(t, err, "admit "+n)
+	}
 	for _, n := range []string{smallNode, bigNode} {
 		require.Eventually(t, func() bool { return c.eligible(ctx, n) }, waitFor, pollEvery, n+" is Admitted and Ready")
 	}
