@@ -30,7 +30,7 @@ Every value is a flag with an environment variable as its fallback. A flag given
 | `--restart-backoff-max` | `GAON_RESTART_BACKOFF_MAX` | 5m | cap on the wait between two restarts, not below the backoff |
 | `--restart-reset-after` | `GAON_RESTART_RESET_AFTER` | 10m | how long a Machine must have run for the wait to start over at the backoff |
 | `--network-plugin` | `GAON_NETWORK_PLUGIN` | `default` | the network plugin, from those compiled in; an unknown name refuses the start |
-| `--storage-plugin` | `GAON_STORAGE_PLUGIN` | `none` | the storage plugin, from those compiled in; an unknown name refuses the start |
+| `--storage-plugin` | `GAON_STORAGE_PLUGIN` | `local` | the storage plugin, from those compiled in; an unknown name refuses the start |
 | `--egress-prefix` | `GAON_EGRESS_PREFIX` | none | repeatable; a CIDR a Machine may send to over any protocol, for the `default` network plugin; the variable is comma-separated and a flag replaces it |
 | `--ingress-prefix` | `GAON_INGRESS_PREFIX` | none | repeatable; a CIDR a Machine's ports accept TCP from, for the `default` network plugin; the variable is comma-separated and a flag replaces it |
 
@@ -82,7 +82,12 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 - **Refusal:** a plugin refuses a Machine with a reason and a message. The Machine is `Failed`, its `Ready` condition false with that reason and message, and mvmd is not asked to create it. Any other plugin error is retried at the next resync.
 - **Release:** `Storage.Release` is called with the mvmd identifier after the agent deletes a machine, and after mvmd rejects a create. It is repeatable and may be called for an identifier `Attach` never saw.
 - **`default` network:** a Machine naming no network or only `default` is served; any other network is refused with `UnknownNetwork`. Egress is one any-protocol rule for each `--egress-prefix`; ingress is a TCP rule for each port of `spec.ports` and each `--ingress-prefix`. With no prefixes the policy is empty, which mvmd reads as blocking all outside traffic. A prefix that is not an IPv4 or IPv6 CIDR refuses the start, and a port outside 1 to 65535 fails the Machine with `InvalidSpec`.
-- **`none` storage:** attaches no disk and refuses nothing.
+- **`none` storage:** attaches no disk and refuses nothing, and writes no Volume.
+- **`local` storage:** serves the Volumes of class `local` pinned to this Node ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md) Decisions 2, 4 and 5) as mvmd disks of `spec.storage` bytes, rounded up, named `volume-<Volume name>`, which mvmd formats ext4. It is the default.
+  - **Attach:** for each Volume the Machine names, once, it reads the Volume and refuses the Machine before writing anything if the Volume is missing (`VolumeNotFound`), is of another class (`UnsupportedStorageClass`), is being deleted or pinned to another Node (`VolumeNotUsable`), or is attached to another Machine at the same or a higher epoch (`VolumeInUse`). It then lists mvmd's disks, creates the disk only if none has the name, and writes the Volume's `status` as `Bound` with the attachment `{machineName, bindingEpoch}` and the disk's size as `capacity`, by compare-and-swap on the version read; a conflict is read again and decided again, up to three times. A disk mvmd refuses to create, with outcome kind `REJECTED`, `PRECONDITION_FAILED` or `FAILED`, writes the Volume `Failed` and refuses the Machine with `VolumeFailed`; any other error is retried at the next resync. A repeated call for the same Machine and epoch makes no disk, and writes `Bound` again only if the phase is no longer `Bound`.
+  - **Release:** does nothing. The disk lives until its Volume is deleted.
+  - **Status loop:** every resync the plugin lists the Volumes and mvmd's disks and, for each local Volume pinned to this Node and not being deleted, makes the disk if it is missing and writes `status` only when it differs: `Bound` while a Machine holds the disk and the Volume has an attachment, `Released` once none holds it and the attachment remains, which is kept, and `Available` with `capacity` while there has been no attachment; a disk that cannot be made is `Failed`. Between `Attach` and mvmd's create the disk is not yet held, so a round there writes `Released`, and the next `Attach` or round writes `Bound` again. A write that conflicts is left to the next round.
+  - **Deletion:** a Volume pinned to this Node with `deletionTimestamp` set and the agent's finalizer `compute.gaon.garam.sh/node-agent` has its disk deleted and the finalizer removed once mvmd reports no Machine holding the disk. The removal is `PUT /volumes/{name}` by compare-and-swap on the version read, changing only that entry of `metadata.finalizers`; the API server removes the Volume on the write that clears its last finalizer. A disk still held keeps the disk and the finalizer. A disk already absent is not an error. A Volume without the agent's finalizer, or pinned to another Node, is left alone.
 
 ### Machines
 
@@ -116,7 +121,7 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 ### What the agent does not do yet
 
 - `OnDemand` Machines, wake and suspend.
-- Volumes beyond the plugin's interface: the only storage plugin is `none`, so no Machine has a disk.
+- Mounting a Volume at its `mountPath`: mvmd's `DiskAttachment` carries a disk identifier and a read-only flag and no path, so the agent attaches the disk and does not pass the path. Volume classes other than `local`, and a `dataSource`, are refused or left `Pending` for a plugin that serves them.
 - The Node's `addresses`.
 - Calling naru.
 
@@ -127,6 +132,7 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 - The restart state is in memory because nothing the contract defines can hold it, and losing it costs one backoff, not a missed restart.
 - A clean record equal to the previous one counts as a failure because the cost of a wrong restart is one backoff, and of a wrong stop is a Machine that never runs again.
 - The exit is read once, at the first sight of the stopped state, so a log that changes afterwards cannot change the verdict.
+- The `local` plugin lists Volumes and disks every resync instead of watching because what to write depends on whether mvmd holds the disk, which no Volume event says.
 - The plugins are compiled in because a protocol to out-of-process ones has no design and nothing yet needs it; the policy is in the create request because mvmd takes it there, so it cannot be applied late.
 - The restart settings are flags with the recorded defaults because the contract fixes no values and a node's operator is the one who knows its workloads.
 - The epoch in the mvmd identifier makes rebinding to the same node a replacement rather than a reuse, so state of an older epoch cannot carry into a newer one.
@@ -135,4 +141,4 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 
 - **Entrypoint record across a start:** mvmd's documents do not say whether the console log an entrypoint's record is answered from is cleared when a Machine starts. The agent treats a clean record equal to the one it read at the Machine's previous exit as a failure, so a stale record cannot end the restarts; a Machine switched from `Always` to `RerunOnFailure` whose entrypoint keeps exiting cleanly is therefore restarted, at the backoff.
 - **Node addresses:** which addresses the agent reports.
-- **Leaked volumes:** a volume `Attach` readied is given back only when the agent removes the machine or mvmd rejects the create; one readied before the agent stopped and never created again is not found. A `Release` that fails after a rejected create is logged and not retried; the volume is given back only if the agent later removes that machine.
+- **Leaked disks:** the `local` plugin deletes a disk only for a Volume it sees being deleted with its finalizer. A `volume-` disk whose Volume the API no longer has, or never pinned to this Node, is not found and not deleted.

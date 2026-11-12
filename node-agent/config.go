@@ -12,6 +12,7 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/node-agent/internal/liveness"
 	"github.com/garamsh/gaon/node-agent/internal/machines"
+	"github.com/garamsh/gaon/node-agent/internal/machines/storage"
 )
 
 // Environment variables, each the fallback of the flag named beside it.
@@ -72,11 +73,13 @@ type Config struct {
 	// RestartResetAfter is how long a Machine runs before the wait starts
 	// again from RestartBackoff.
 	RestartResetAfter time.Duration
-	// Network decides the network policy each Machine is created with, and
-	// Storage the disks. They are the plugins --network-plugin and
-	// --storage-plugin name.
+	// Network decides the network policy each Machine is created with. It
+	// is the plugin --network-plugin names.
 	Network machines.Network
-	Storage machines.Storage
+	// StoragePlugin names the plugin that decides the disks of each Machine,
+	// from --storage-plugin. Run builds it, as it needs the API client and
+	// mvmd.
+	StoragePlugin string
 }
 
 // Defaults of the durations. δ's is provisional: it is not measured.
@@ -94,7 +97,7 @@ const (
 	defaultRestartResetAfter = 10 * time.Minute
 
 	defaultNetworkPlugin = "default"
-	defaultStoragePlugin = "none"
+	defaultStoragePlugin = storage.LocalName
 )
 
 // ParseConfig reads the flags in args. A flag not given falls back to its
@@ -187,9 +190,10 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	if c.Network, err = newNetwork(networkPlugin, egress, ingress); err != nil {
 		return Config{}, err
 	}
-	if c.Storage, err = newStorage(storagePlugin); err != nil {
+	if err = checkStoragePlugin(storagePlugin); err != nil {
 		return Config{}, err
 	}
+	c.StoragePlugin = storagePlugin
 	if tokenFile != "" || c.CertDir != "" {
 		token, err := bootstrapToken(tokenFile, c.CertDir, tlsFiles)
 		if err != nil {

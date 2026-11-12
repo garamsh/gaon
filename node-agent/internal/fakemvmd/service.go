@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -54,6 +55,18 @@ func (s *Server) CreateMachine(_ context.Context, r *v1alpha2.CreateMachineReque
 	}
 	if _, ok := s.machines[r.GetMachineId()]; ok {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_CONFLICT, "machine exists")
+	}
+	for _, a := range r.GetDisks() {
+		d, ok := s.disks[a.GetDiskId()]
+		switch {
+		case !ok:
+			return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED, "no disk "+a.GetDiskId())
+		case d.HolderMachineId != "":
+			return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_PRECONDITION_FAILED, "disk "+a.GetDiskId()+" is held by "+d.HolderMachineId)
+		}
+	}
+	for _, a := range r.GetDisks() {
+		s.disks[a.GetDiskId()].HolderMachineId = r.GetMachineId()
 	}
 	m := &v1alpha2.Machine{
 		Id:        r.GetMachineId(),
@@ -112,8 +125,58 @@ func (s *Server) DeleteMachine(_ context.Context, r *v1alpha2.DeleteMachineReque
 	if m.State == v1alpha2.MachineState_MACHINE_STATE_RUNNING || m.State == v1alpha2.MachineState_MACHINE_STATE_PAUSED {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_PRECONDITION_FAILED, "machine is running")
 	}
+	for _, d := range s.disks {
+		if d.HolderMachineId == r.GetMachineId() {
+			d.HolderMachineId = ""
+		}
+	}
 	delete(s.machines, r.GetMachineId())
 	return &v1alpha2.DeleteMachineResponse{}, nil
+}
+
+// CreateDisk makes a disk no Machine holds, and refuses an identifier mvmd
+// already holds.
+func (s *Server) CreateDisk(_ context.Context, r *v1alpha2.CreateDiskRequest) (*v1alpha2.CreateDiskResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.record("CreateDisk", r.GetDiskId())
+	if s.diskFailure != v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED {
+		return nil, v1alpha2.NewError(s.diskFailure, "the node cannot make the disk")
+	}
+	if _, ok := s.disks[r.GetDiskId()]; ok {
+		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_CONFLICT, "disk exists")
+	}
+	d := &v1alpha2.Disk{Id: r.GetDiskId(), SizeBytes: r.GetSizeBytes()}
+	s.disks[d.Id] = d
+	return &v1alpha2.CreateDiskResponse{Disk: proto.Clone(d).(*v1alpha2.Disk)}, nil
+}
+
+// ListDisks answers the disks ordered by identifier.
+func (s *Server) ListDisks(context.Context, *v1alpha2.ListDisksRequest) (*v1alpha2.ListDisksResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := &v1alpha2.ListDisksResponse{}
+	for _, d := range s.disks {
+		out.Disks = append(out.Disks, proto.Clone(d).(*v1alpha2.Disk))
+	}
+	slices.SortFunc(out.Disks, func(a, b *v1alpha2.Disk) int { return strings.Compare(a.Id, b.Id) })
+	return out, nil
+}
+
+// DeleteDisk deletes a disk no Machine holds.
+func (s *Server) DeleteDisk(_ context.Context, r *v1alpha2.DeleteDiskRequest) (*v1alpha2.DeleteDiskResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.record("DeleteDisk", r.GetDiskId())
+	d, ok := s.disks[r.GetDiskId()]
+	switch {
+	case !ok:
+		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such disk")
+	case d.HolderMachineId != "":
+		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_PRECONDITION_FAILED, "disk is held by "+d.HolderMachineId)
+	}
+	delete(s.disks, r.GetDiskId())
+	return &v1alpha2.DeleteDiskResponse{}, nil
 }
 
 func (s *Server) InspectMachine(_ context.Context, r *v1alpha2.InspectMachineRequest) (*v1alpha2.InspectMachineResponse, error) {

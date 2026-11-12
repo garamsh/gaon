@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
 	"github.com/garamsh/gaon/node-agent/internal/machines"
 	"github.com/garamsh/gaon/node-agent/internal/machines/network"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
@@ -146,8 +147,10 @@ func TestNetwork_ARefusalFailsTheMachineWithThePluginsReasonAndAnotherErrorIsRet
 }
 
 // ledgerStorage is a storage plugin that records what it was asked, and
-// attaches one disk named for each Machine.
+// attaches one disk named for each Machine, which it makes on mvmd as a real
+// plugin does.
 type ledgerStorage struct {
+	mvmd     *fakemvmd.Server
 	mu       sync.Mutex
 	refuse   map[string]bool
 	attached []string
@@ -161,6 +164,7 @@ func (s *ledgerStorage) Attach(_ context.Context, m *api.Machine) ([]*v1alpha2.D
 		return nil, &machines.Refusal{Reason: "VolumeNotFound", Message: "no volume for " + m.Metadata.Name}
 	}
 	s.attached = append(s.attached, m.Metadata.Name)
+	s.mvmd.AddDisk("disk-"+m.Metadata.Name, 1<<20)
 	return []*v1alpha2.DiskAttachment{{DiskId: "disk-" + m.Metadata.Name, ReadOnly: true}}, nil
 }
 
@@ -179,7 +183,7 @@ func (s *ledgerStorage) releasedIDs() []string {
 
 func TestStorage_CreatesAMachineWithTheDisksItAttached(t *testing.T) {
 	s := &ledgerStorage{}
-	e := start(t, true, nil, func(e *env) { e.storage = s })
+	e := start(t, true, nil, func(e *env) { e.storage, s.mvmd = s, e.mvmd })
 	e.gaon.SetMachine(machine("db", 1, node, api.RunAlways))
 
 	eventually(t, "db-e1 runs", e.running("db-e1"))
@@ -191,7 +195,7 @@ func TestStorage_CreatesAMachineWithTheDisksItAttached(t *testing.T) {
 
 func TestStorage_ARefusalFailsTheMachineBeforeMvmdIsAskedToCreateIt(t *testing.T) {
 	s := &ledgerStorage{refuse: map[string]bool{"lost": true}}
-	e := start(t, true, nil, func(e *env) { e.storage = s })
+	e := start(t, true, nil, func(e *env) { e.storage, s.mvmd = s, e.mvmd })
 	e.gaon.SetMachine(machine("lost", 1, node, api.RunAlways))
 	e.gaon.SetMachine(machine("found", 1, node, api.RunAlways))
 
@@ -204,7 +208,7 @@ func TestStorage_ARefusalFailsTheMachineBeforeMvmdIsAskedToCreateIt(t *testing.T
 func TestStorage_ReleasesWhatItAttachedWhenTheMachineIsRemovedAndWhenMvmdRejectsTheCreate(t *testing.T) {
 	s := &ledgerStorage{}
 	e := start(t, true, nil, func(e *env) {
-		e.storage = s
+		e.storage, s.mvmd = s, e.mvmd
 		e.mvmd.MaxVCPUs = 2
 	})
 	over := machine("over", 1, node, api.RunAlways)

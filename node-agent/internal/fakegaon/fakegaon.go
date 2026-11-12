@@ -27,6 +27,7 @@ type Server struct {
 	mu       sync.Mutex
 	rev      int64
 	machines map[string]api.Machine
+	volumes  map[string]api.Volume
 	nodes    map[string]api.Node
 	leases   map[string]api.Lease
 	log      []logged
@@ -54,6 +55,7 @@ func New(t testing.TB) *Server {
 func newServer() (*Server, *http.ServeMux) {
 	s := &Server{
 		machines: map[string]api.Machine{},
+		volumes:  map[string]api.Volume{},
 		nodes:    map[string]api.Node{},
 		leases:   map[string]api.Lease{},
 		csrs:     map[string]api.CertificateSigningRequest{},
@@ -65,6 +67,10 @@ func newServer() (*Server, *http.ServeMux) {
 	mux.HandleFunc("GET /machines/{name}", s.getMachine)
 	mux.HandleFunc("PUT /machines/{name}", s.putMachine)
 	mux.HandleFunc("PUT /machines/{name}/status", s.putMachineStatus)
+	mux.HandleFunc("GET /volumes", s.listVolumes)
+	mux.HandleFunc("GET /volumes/{name}", s.getVolume)
+	mux.HandleFunc("PUT /volumes/{name}", s.putVolume)
+	mux.HandleFunc("PUT /volumes/{name}/status", s.putVolumeStatus)
 	mux.HandleFunc("GET /nodes/{name}", s.getNode)
 	mux.HandleFunc("PUT /nodes/{name}", s.putNode)
 	mux.HandleFunc("PUT /nodes/{name}/status", s.putNodeStatus)

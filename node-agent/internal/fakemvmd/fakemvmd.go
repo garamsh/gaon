@@ -48,6 +48,8 @@ type Server struct {
 	sequence    uint64
 	capacity    *v1alpha2.NodeCapacity
 	failDeletes bool
+	disks       map[string]*v1alpha2.Disk
+	diskFailure v1alpha2.OutcomeKind
 	records     map[string]*v1alpha2.ExecRecord
 	silent      map[string]bool
 }
@@ -62,6 +64,7 @@ func New(t testing.TB, clk clock.Clock) *Server {
 		Socket:   filepath.Join(shortTempDir(t), "mvmd.sock"),
 		clock:    clk,
 		machines: map[string]*v1alpha2.Machine{},
+		disks:    map[string]*v1alpha2.Disk{},
 		records:  map[string]*v1alpha2.ExecRecord{},
 		silent:   map[string]bool{},
 		events:   make(chan *v1alpha2.WatchEventsResponse, 256),
@@ -78,7 +81,7 @@ func New(t testing.TB, clk clock.Clock) *Server {
 	return s
 }
 
-// Calls returns the lifecycle and image calls received, in order, each as
+// Calls returns the lifecycle, image and disk-making calls received, in order, each as
 // "<Call> <id>".
 func (s *Server) Calls() []string {
 	s.mu.Lock()
@@ -154,6 +157,44 @@ func (s *Server) FailDeletes(on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failDeletes = on
+}
+
+// FailDiskCreates makes every CreateDisk fail with a refusal while on is
+// true, as mvmd does for a disk it cannot make.
+func (s *Server) FailDiskCreates(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.diskFailure = v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED
+	if on {
+		s.diskFailure = v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED
+	}
+}
+
+// FailDiskCreatesWith makes every CreateDisk fail with an error of kind, until
+// it is called with OUTCOME_KIND_UNSPECIFIED.
+func (s *Server) FailDiskCreatesWith(kind v1alpha2.OutcomeKind) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.diskFailure = kind
+}
+
+// AddDisk makes a disk no Machine holds, as a storage plugin does through
+// CreateDisk, without recording a call.
+func (s *Server) AddDisk(id string, sizeBytes uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.disks[id] = &v1alpha2.Disk{Id: id, SizeBytes: sizeBytes}
+}
+
+// Disk returns a copy of the disk id, and whether mvmd holds it.
+func (s *Server) Disk(id string) (*v1alpha2.Disk, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.disks[id]
+	if !ok {
+		return nil, false
+	}
+	return proto.Clone(d).(*v1alpha2.Disk), true
 }
 
 // Arm applies a deadline renewal as a client of mvmd would.
