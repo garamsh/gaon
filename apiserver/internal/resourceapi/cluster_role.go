@@ -12,10 +12,13 @@ func (s *service) PutClusterRole(ctx context.Context, name string, r *api.Cluste
 	if err := checkName(name, r.Metadata.Name); err != nil {
 		return nil, err
 	}
+	if err := mutate(ctx, s, clusterRoles, "", operationOf(r.Metadata.ResourceVersion), r); err != nil {
+		return nil, err
+	}
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
-	return clusterRoles.put(ctx, s.st, r, func() error { return nil }, func(*api.ClusterRole) error { return nil })
+	return admittedPut(ctx, s, clusterRoles, r, func() error { return nil }, func(*api.ClusterRole) error { return nil })
 }
 
 // DeleteClusterRole removes the ClusterRole if rv is its current version.
@@ -25,6 +28,9 @@ func (s *service) DeleteClusterRole(ctx context.Context, name string, rv api.Res
 		return nil, err
 	}
 	if err := checkVersion(clusterRoles.plural, name, rv, r.Metadata.ResourceVersion); err != nil {
+		return nil, err
+	}
+	if err := admitDelete(ctx, s, clusterRoles, r); err != nil {
 		return nil, err
 	}
 	return r, clusterRoles.remove(ctx, s.st, r, rev)

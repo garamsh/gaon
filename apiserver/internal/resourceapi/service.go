@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/garamsh/gaon/apiserver/internal/admission"
 	"github.com/garamsh/gaon/lib/api"
 )
 
@@ -58,6 +59,18 @@ type Service interface {
 	ListCustomResourceDefinitions(ctx context.Context) (*api.CustomResourceDefinitionList, error)
 	WatchCustomResourceDefinitions(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
 
+	PutMutatingWebhookConfiguration(ctx context.Context, name string, c *api.MutatingWebhookConfiguration) (*api.MutatingWebhookConfiguration, error)
+	DeleteMutatingWebhookConfiguration(ctx context.Context, name string, rv api.ResourceVersion) (*api.MutatingWebhookConfiguration, error)
+	GetMutatingWebhookConfiguration(ctx context.Context, name string) (*api.MutatingWebhookConfiguration, error)
+	ListMutatingWebhookConfigurations(ctx context.Context) (*api.MutatingWebhookConfigurationList, error)
+	WatchMutatingWebhookConfigurations(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+
+	PutValidatingWebhookConfiguration(ctx context.Context, name string, c *api.ValidatingWebhookConfiguration) (*api.ValidatingWebhookConfiguration, error)
+	DeleteValidatingWebhookConfiguration(ctx context.Context, name string, rv api.ResourceVersion) (*api.ValidatingWebhookConfiguration, error)
+	GetValidatingWebhookConfiguration(ctx context.Context, name string) (*api.ValidatingWebhookConfiguration, error)
+	ListValidatingWebhookConfigurations(ctx context.Context) (*api.ValidatingWebhookConfigurationList, error)
+	WatchValidatingWebhookConfigurations(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+
 	PutCustomObject(ctx context.Context, p CustomPath, name string, o *api.CustomObject) (*api.CustomObject, error)
 	PutCustomObjectStatus(ctx context.Context, p CustomPath, name string, o *api.CustomObject) (*api.CustomObject, error)
 	DeleteCustomObject(ctx context.Context, p CustomPath, name string, rv api.ResourceVersion) (*api.CustomObject, error)
@@ -67,22 +80,31 @@ type Service interface {
 }
 
 var (
-	machines = kind[api.Machine]{"machines", func(m *api.Machine) *api.ObjectMeta { return &m.Metadata }, func(m *api.Machine) any { return m.Spec }}
-	volumes  = kind[api.Volume]{"volumes", func(v *api.Volume) *api.ObjectMeta { return &v.Metadata }, func(v *api.Volume) any { return v.Spec }}
-	nodes    = kind[api.Node]{"nodes", func(n *api.Node) *api.ObjectMeta { return &n.Metadata }, func(n *api.Node) any { return n.Spec }}
-	leases   = kind[api.Lease]{"leases", func(l *api.Lease) *api.ObjectMeta { return &l.Metadata }, func(l *api.Lease) any { return l.Spec }}
+	machines = kind[api.Machine]{"machines", func(m *api.Machine) *api.ObjectMeta { return &m.Metadata }, func(m *api.Machine) any { return m.Spec }, gvk(api.Group, api.KindMachine)}
+	volumes  = kind[api.Volume]{"volumes", func(v *api.Volume) *api.ObjectMeta { return &v.Metadata }, func(v *api.Volume) any { return v.Spec }, gvk(api.Group, api.KindVolume)}
+	nodes    = kind[api.Node]{"nodes", func(n *api.Node) *api.ObjectMeta { return &n.Metadata }, func(n *api.Node) any { return n.Spec }, gvk(api.Group, api.KindNode)}
+	leases   = kind[api.Lease]{"leases", func(l *api.Lease) *api.ObjectMeta { return &l.Metadata }, func(l *api.Lease) any { return l.Spec }, gvk(api.Group, api.KindLease)}
 
-	certificateSigningRequests = kind[api.CertificateSigningRequest]{"certificatesigningrequests", func(r *api.CertificateSigningRequest) *api.ObjectMeta { return &r.Metadata }, func(r *api.CertificateSigningRequest) any { return r.Spec }}
+	certificateSigningRequests = kind[api.CertificateSigningRequest]{"certificatesigningrequests", func(r *api.CertificateSigningRequest) *api.ObjectMeta { return &r.Metadata }, func(r *api.CertificateSigningRequest) any { return r.Spec }, gvk(api.Group, api.KindCertificateSigningRequest)}
 
-	clusterRoles        = kind[api.ClusterRole]{"clusterroles", func(r *api.ClusterRole) *api.ObjectMeta { return &r.Metadata }, func(r *api.ClusterRole) any { return r.Rules }}
-	clusterRoleBindings = kind[api.ClusterRoleBinding]{"clusterrolebindings", func(b *api.ClusterRoleBinding) *api.ObjectMeta { return &b.Metadata }, func(b *api.ClusterRoleBinding) any { return [2]any{b.RoleRef, b.Subjects} }}
+	clusterRoles        = kind[api.ClusterRole]{"clusterroles", func(r *api.ClusterRole) *api.ObjectMeta { return &r.Metadata }, func(r *api.ClusterRole) any { return r.Rules }, gvk(api.RBACGroup, api.KindClusterRole)}
+	clusterRoleBindings = kind[api.ClusterRoleBinding]{"clusterrolebindings", func(b *api.ClusterRoleBinding) *api.ObjectMeta { return &b.Metadata }, func(b *api.ClusterRoleBinding) any { return [2]any{b.RoleRef, b.Subjects} }, gvk(api.RBACGroup, api.KindClusterRoleBinding)}
 
-	customResourceDefinitions = kind[api.CustomResourceDefinition]{"customresourcedefinitions", func(d *api.CustomResourceDefinition) *api.ObjectMeta { return &d.Metadata }, func(d *api.CustomResourceDefinition) any { return d.Spec }}
+	mutatingWebhookConfigurations   = kind[api.MutatingWebhookConfiguration]{"mutatingwebhookconfigurations", func(c *api.MutatingWebhookConfiguration) *api.ObjectMeta { return &c.Metadata }, func(c *api.MutatingWebhookConfiguration) any { return c.Webhooks }, gvk(api.AdmissionRegistrationGroup, api.KindMutatingWebhookConfiguration)}
+	validatingWebhookConfigurations = kind[api.ValidatingWebhookConfiguration]{"validatingwebhookconfigurations", func(c *api.ValidatingWebhookConfiguration) *api.ObjectMeta { return &c.Metadata }, func(c *api.ValidatingWebhookConfiguration) any { return c.Webhooks }, gvk(api.AdmissionRegistrationGroup, api.KindValidatingWebhookConfiguration)}
+
+	customResourceDefinitions = kind[api.CustomResourceDefinition]{"customresourcedefinitions", func(d *api.CustomResourceDefinition) *api.ObjectMeta { return &d.Metadata }, func(d *api.CustomResourceDefinition) any { return d.Spec }, gvk(api.APIExtensionsGroup, api.KindCustomResourceDefinition)}
 )
 
+// gvk is the kind of a core or built-in group, at the one version the API has.
+func gvk(group, kind string) api.GroupVersionKind {
+	return api.GroupVersionKind{Group: group, Version: api.Version, Kind: kind}
+}
+
 type service struct {
-	st  Store
-	now func() time.Time
+	st    Store
+	now   func() time.Time
+	hooks *admission.Caller
 	// defs orders the writes of definitions, which take it whole, against the
 	// writes of objects, which share it: an object is not created under a
 	// definition that is being deleted, and a definition is not removed under
@@ -93,7 +115,7 @@ type service struct {
 // NewService returns the Service over st. now is the clock that stamps a
 // deletion.
 func NewService(st Store, now func() time.Time) Service {
-	return &service{st: st, now: now}
+	return &service{st: st, now: now, hooks: &admission.Caller{Source: webhookSource{st}}}
 }
 
 func (s *service) GetMachine(ctx context.Context, name string) (*api.Machine, error) {

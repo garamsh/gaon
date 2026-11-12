@@ -14,6 +14,9 @@ func (s *service) PutVolumeStatus(ctx context.Context, name string, next *api.Vo
 	if err := checkName(name, next.Metadata.Name); err != nil {
 		return nil, err
 	}
+	if err := mutate(ctx, s, volumes, "status", api.OperationUpdate, next); err != nil {
+		return nil, err
+	}
 	v, rev, err := volumes.get(ctx, s.st, name)
 	if err != nil {
 		return nil, err
@@ -29,7 +32,11 @@ func (s *service) PutVolumeStatus(ctx context.Context, name string, next *api.Vo
 			return nil, err
 		}
 	}
+	old := *v
 	v.Status = next.Status
+	if err := validate(ctx, s, volumes, "status", api.OperationUpdate, v, &old); err != nil {
+		return nil, err
+	}
 	return v, volumes.update(ctx, s.st, v, rev)
 }
 
