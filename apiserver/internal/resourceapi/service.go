@@ -4,6 +4,7 @@ package resourceapi
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/garamsh/gaon/lib/api"
@@ -50,6 +51,19 @@ type Service interface {
 	GetClusterRoleBinding(ctx context.Context, name string) (*api.ClusterRoleBinding, error)
 	ListClusterRoleBindings(ctx context.Context) (*api.ClusterRoleBindingList, error)
 	WatchClusterRoleBindings(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+
+	PutCustomResourceDefinition(ctx context.Context, name string, d *api.CustomResourceDefinition) (*api.CustomResourceDefinition, error)
+	DeleteCustomResourceDefinition(ctx context.Context, name string, rv api.ResourceVersion) (*api.CustomResourceDefinition, error)
+	GetCustomResourceDefinition(ctx context.Context, name string) (*api.CustomResourceDefinition, error)
+	ListCustomResourceDefinitions(ctx context.Context) (*api.CustomResourceDefinitionList, error)
+	WatchCustomResourceDefinitions(ctx context.Context, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
+
+	PutCustomObject(ctx context.Context, p CustomPath, name string, o *api.CustomObject) (*api.CustomObject, error)
+	PutCustomObjectStatus(ctx context.Context, p CustomPath, name string, o *api.CustomObject) (*api.CustomObject, error)
+	DeleteCustomObject(ctx context.Context, p CustomPath, name string, rv api.ResourceVersion) (*api.CustomObject, error)
+	GetCustomObject(ctx context.Context, p CustomPath, name string) (*api.CustomObject, error)
+	ListCustomObjects(ctx context.Context, p CustomPath) (*api.CustomObjectList, error)
+	WatchCustomObjects(ctx context.Context, p CustomPath, rv api.ResourceVersion) (<-chan api.WatchEvent, error)
 }
 
 var (
@@ -62,11 +76,18 @@ var (
 
 	clusterRoles        = kind[api.ClusterRole]{"clusterroles", func(r *api.ClusterRole) *api.ObjectMeta { return &r.Metadata }, func(r *api.ClusterRole) any { return r.Rules }}
 	clusterRoleBindings = kind[api.ClusterRoleBinding]{"clusterrolebindings", func(b *api.ClusterRoleBinding) *api.ObjectMeta { return &b.Metadata }, func(b *api.ClusterRoleBinding) any { return [2]any{b.RoleRef, b.Subjects} }}
+
+	customResourceDefinitions = kind[api.CustomResourceDefinition]{"customresourcedefinitions", func(d *api.CustomResourceDefinition) *api.ObjectMeta { return &d.Metadata }, func(d *api.CustomResourceDefinition) any { return d.Spec }}
 )
 
 type service struct {
 	st  Store
 	now func() time.Time
+	// defs orders the writes of definitions, which take it whole, against the
+	// writes of objects, which share it: an object is not created under a
+	// definition that is being deleted, and a definition is not removed under
+	// an object being created.
+	defs sync.RWMutex
 }
 
 // NewService returns the Service over st. now is the clock that stamps a

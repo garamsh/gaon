@@ -26,10 +26,18 @@ const root = "/apis/" + api.GroupVersion
 // rbacRoot is the root of the paths of ClusterRoles and ClusterRoleBindings.
 const rbacRoot = "/apis/" + api.RBACGroupVersion
 
+// extensionsRoot is the root of the paths of CustomResourceDefinitions.
+const extensionsRoot = "/apis/" + api.APIExtensionsGroupVersion
+
+// customRoot is the collection path of the objects of a registered kind: the
+// group, the version and the plural come from the request, and the definition
+// that matches them decides whether it is served.
+const customRoot = "/apis/{group}/{version}/{plural}"
+
 type traceKey struct{}
 
-// newHandler serves the paths of resource-api.md §Paths under root and
-// rbacRoot over svc, and answers NotFound to any other path. az authorizes
+// newHandler serves the paths of resource-api.md §Paths under root, rbacRoot,
+// extensionsRoot and customRoot over svc, and answers NotFound to any other path. az authorizes
 // each request a certificate holder makes. It is the one place that maps a
 // failure to an HTTP status.
 func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tokenSet, log *slog.Logger) http.Handler {
@@ -65,6 +73,20 @@ func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tok
 	mux.HandleFunc("DELETE "+rbacRoot+"/clusterrolebindings/{name}", h.guard(api.RBACGroup, "clusterrolebindings", fixed(api.VerbDelete), deleteObject(h, svc.DeleteClusterRoleBinding)))
 	mux.HandleFunc("GET "+rbacRoot+"/clusterrolebindings/{name}", h.guard(api.RBACGroup, "clusterrolebindings", fixed(api.VerbGet), get(h, svc.GetClusterRoleBinding)))
 	mux.HandleFunc("GET "+rbacRoot+"/clusterrolebindings", h.guard(api.RBACGroup, "clusterrolebindings", readVerb, listOrWatch(h, svc.ListClusterRoleBindings, svc.WatchClusterRoleBindings)))
+
+	mux.HandleFunc("PUT "+extensionsRoot+"/customresourcedefinitions/{name}", h.guard(api.APIExtensionsGroup, "customresourcedefinitions", putVerb, put(h, svc.PutCustomResourceDefinition)))
+	mux.HandleFunc("DELETE "+extensionsRoot+"/customresourcedefinitions/{name}", h.guard(api.APIExtensionsGroup, "customresourcedefinitions", fixed(api.VerbDelete), deleteObject(h, svc.DeleteCustomResourceDefinition)))
+	mux.HandleFunc("GET "+extensionsRoot+"/customresourcedefinitions/{name}", h.guard(api.APIExtensionsGroup, "customresourcedefinitions", fixed(api.VerbGet), get(h, svc.GetCustomResourceDefinition)))
+	mux.HandleFunc("GET "+extensionsRoot+"/customresourcedefinitions", h.guard(api.APIExtensionsGroup, "customresourcedefinitions", readVerb, listOrWatch(h, svc.ListCustomResourceDefinitions, svc.WatchCustomResourceDefinitions)))
+
+	custom := func(sub string) func(*http.Request) (string, string) {
+		return func(r *http.Request) (string, string) { return r.PathValue("group"), r.PathValue("plural") + sub }
+	}
+	mux.HandleFunc("PUT "+customRoot+"/{name}", h.guardBy(custom(""), putVerb, h.putCustomObject(svc.PutCustomObject)))
+	mux.HandleFunc("PUT "+customRoot+"/{name}/status", h.guardBy(custom("/status"), fixed(api.VerbUpdate), h.putCustomObject(svc.PutCustomObjectStatus)))
+	mux.HandleFunc("DELETE "+customRoot+"/{name}", h.guardBy(custom(""), fixed(api.VerbDelete), h.deleteCustomObject(svc)))
+	mux.HandleFunc("GET "+customRoot+"/{name}", h.guardBy(custom(""), fixed(api.VerbGet), h.getCustomObject(svc)))
+	mux.HandleFunc("GET "+customRoot, h.guardBy(custom(""), readVerb, h.listOrWatchCustomObjects(svc)))
 	return h.recoverPanics(h.authenticate(mux, tokens))
 }
 
@@ -125,7 +147,12 @@ func (id identity) caller() authorization.Caller {
 // bearer-token holder has reached only the routes of ADR 0007 and is not
 // authorized here.
 func (h *handler) guard(group, resource string, verb verbOf, next http.HandlerFunc) http.HandlerFunc {
-	name, sub, _ := strings.Cut(resource, "/")
+	return h.guardBy(func(*http.Request) (string, string) { return group, resource }, verb, next)
+}
+
+// guardBy is guard for a route whose group and resource the request names, as
+// those of a custom resource are.
+func (h *handler) guardBy(resourceOf func(*http.Request) (group, resource string), verb verbOf, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := callerOf(r)
 		if id.token {
@@ -134,6 +161,8 @@ func (h *handler) guard(group, resource string, verb verbOf, next http.HandlerFu
 		}
 		v, err := verb(r)
 		if err == nil {
+			group, resource := resourceOf(r)
+			name, sub, _ := strings.Cut(resource, "/")
 			err = h.az.Authorize(r.Context(), id.caller(), authorization.Request{Group: group, Resource: name, Subresource: sub, Verb: v, Name: r.PathValue("name")})
 		}
 		if err != nil {

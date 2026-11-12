@@ -28,6 +28,13 @@ func (k kind[T]) key(name string) string {
 	return k.prefix() + name
 }
 
+// own reports whether key holds an object of the kind. The Store keeps one
+// more key under a custom kind's prefix, with a slash after it, which a name
+// cannot hold: the signal that ends the watches of a deleted definition.
+func (k kind[T]) own(key string) bool {
+	return !strings.Contains(strings.TrimPrefix(key, k.prefix()), "/")
+}
+
 // get returns the stored object named name, at the version it is stored at.
 func (k kind[T]) get(ctx context.Context, st Store, name string) (*T, int64, error) {
 	e, err := st.Get(ctx, k.key(name))
@@ -143,6 +150,9 @@ func (k kind[T]) list(ctx context.Context, st Store) ([]T, api.ResourceVersion, 
 	}
 	items := make([]T, 0, len(entries))
 	for _, e := range entries {
+		if !k.own(e.Key) {
+			continue
+		}
 		obj, err := k.decode(e)
 		if err != nil {
 			return nil, "", err
@@ -167,6 +177,9 @@ func (k kind[T]) watch(ctx context.Context, st Store, rv api.ResourceVersion) (<
 	go func() {
 		defer close(out)
 		for ev := range in {
+			if ev.Err == nil && !k.own(ev.Entry.Key) {
+				return
+			}
 			converted := k.convert(ev)
 			select {
 			case out <- converted:
