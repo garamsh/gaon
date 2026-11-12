@@ -43,14 +43,14 @@ func TestBootstrap_TheRulesAreThoseOfADR0008(t *testing.T) {
 
 	read := []api.Verb{api.VerbGet, api.VerbList, api.VerbWatch}
 	assert.Equal(t, []api.PolicyRule{
-		{APIGroups: []string{api.Group}, Resources: []string{"machines", "nodes", "volumes"}, Verbs: read},
-		{APIGroups: []string{api.Group}, Resources: []string{"machines/binding"}, Verbs: []api.Verb{api.VerbCreate}},
-		{APIGroups: []string{api.Group}, Resources: []string{"machines/status"}, Verbs: []api.Verb{api.VerbUpdate}},
+		{APIGroups: []string{api.Group}, Resources: []string{"microvms", "nodes", "volumes"}, Verbs: read},
+		{APIGroups: []string{api.Group}, Resources: []string{"microvms/binding"}, Verbs: []api.Verb{api.VerbCreate}},
+		{APIGroups: []string{api.Group}, Resources: []string{"microvms/status"}, Verbs: []api.Verb{api.VerbUpdate}},
 	}, scheduler.Rules)
 	assert.Equal(t, []api.PolicyRule{
-		{APIGroups: []string{api.Group}, Resources: []string{"machines", "nodes", "leases", "certificatesigningrequests"}, Verbs: read},
-		{APIGroups: []string{api.Group}, Resources: []string{"machines"}, Verbs: []api.Verb{api.VerbCreate, api.VerbUpdate}},
-		{APIGroups: []string{api.Group}, Resources: []string{"machines/status", "nodes/status", "volumes/status", "certificatesigningrequests/status"}, Verbs: []api.Verb{api.VerbUpdate}},
+		{APIGroups: []string{api.Group}, Resources: []string{"microvms", "nodes", "leases", "certificatesigningrequests"}, Verbs: read},
+		{APIGroups: []string{api.Group}, Resources: []string{"microvms"}, Verbs: []api.Verb{api.VerbCreate, api.VerbUpdate}},
+		{APIGroups: []string{api.Group}, Resources: []string{"microvms/status", "nodes/status", "volumes/status", "certificatesigningrequests/status"}, Verbs: []api.Verb{api.VerbUpdate}},
 	}, controllers.Rules)
 	assert.Equal(t, []api.PolicyRule{{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []api.Verb{api.VerbAll}}}, adminRole.Rules)
 }
@@ -61,7 +61,7 @@ func TestBootstrap_NeverOverwritesAnObjectThatExistsAndCreatesOneThatIsMissing(t
 	_, admin := c.clients(t, addr, adminID)
 	edited, err := admin.GetClusterRole(ctx(t), "gaon:scheduler")
 	require.NoError(t, err)
-	edited.Rules = []api.PolicyRule{rule(api.Group, "machines", api.VerbGet)}
+	edited.Rules = []api.PolicyRule{rule(api.Group, "microvms", api.VerbGet)}
 	edited, err = admin.PutClusterRole(ctx(t), edited)
 	require.NoError(t, err)
 	retargeted, err := admin.GetClusterRoleBinding(ctx(t), "gaon:scheduler")

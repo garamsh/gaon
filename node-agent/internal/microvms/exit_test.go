@@ -1,4 +1,4 @@
-package machines
+package microvms
 
 // These tests are internal for the reason restart_test.go gives: the rig
 // drives reconcileAll on a clock that moves only when told to.
@@ -30,7 +30,7 @@ func TestOnce_AFailedExitIsFailedWithAReasonNamingTheExit(t *testing.T) {
 		{"a signal with code zero", func(*rig) {}, exited(0, 9), v1alpha2.MachineState_MACHINE_STATE_STOPPED, ReasonExitFailed, "signal 9"},
 		{"a record that says cut short", func(*rig) {}, notExited(v1alpha2.ExecStatus_EXEC_STATUS_CUT_SHORT), v1alpha2.MachineState_MACHINE_STATE_STOPPED, ReasonExitFailed, "CUT_SHORT"},
 		{"a read that ends with no record", func(r *rig) { r.mvmd.SilenceEntrypoint(rigID, true) }, nil, v1alpha2.MachineState_MACHINE_STATE_STOPPED, ReasonExitFailed, "no exit record"},
-		{"a faulted Machine", func(*rig) {}, nil, v1alpha2.MachineState_MACHINE_STATE_FAULTED, ReasonFaulted, "gone"},
+		{"a faulted MicroVM", func(*rig) {}, nil, v1alpha2.MachineState_MACHINE_STATE_FAULTED, ReasonFaulted, "gone"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -46,14 +46,14 @@ func TestOnce_AFailedExitIsFailedWithAReasonNamingTheExit(t *testing.T) {
 			r.clk.Advance(time.Hour)
 			r.mustRound()
 
-			s := r.gaon.Machine("m1").Status
-			assert.Equal(t, api.MachineFailed, s.Phase)
+			s := r.gaon.MicroVM("m1").Status
+			assert.Equal(t, api.MicroVMFailed, s.Phase)
 			require.Len(t, s.Conditions, 1)
 			assert.Equal(t, ConditionReady, s.Conditions[0].Type)
 			assert.Equal(t, api.ConditionFalse, s.Conditions[0].Status)
 			assert.Equal(t, tt.reason, s.Conditions[0].Reason)
 			assert.Contains(t, s.Conditions[0].Message, tt.message)
-			assert.Equal(t, 1, r.starts(), "a Once Machine is not started again")
+			assert.Equal(t, 1, r.starts(), "a Once MicroVM is not started again")
 			assert.EqualValues(t, 0, s.RestartCount)
 		})
 	}
@@ -68,44 +68,44 @@ func TestOnce_ACleanExitIsSucceeded(t *testing.T) {
 	r.clk.Advance(time.Hour)
 	r.mustRound()
 
-	s := r.gaon.Machine("m1").Status
-	assert.Equal(t, api.MachineSucceeded, s.Phase)
+	s := r.gaon.MicroVM("m1").Status
+	assert.Equal(t, api.MicroVMSucceeded, s.Phase)
 	require.Len(t, s.Conditions, 1)
 	assert.Equal(t, api.ConditionFalse, s.Conditions[0].Status)
 	assert.Equal(t, ReasonStopped, s.Conditions[0].Reason)
-	assert.Equal(t, 1, r.starts(), "a Once Machine is not started again")
+	assert.Equal(t, 1, r.starts(), "a Once MicroVM is not started again")
 }
 
-func TestOnce_AMachineStillRunningIsNotJudged(t *testing.T) {
+func TestOnce_AMicroVMStillRunningIsNotJudged(t *testing.T) {
 	r := newRig(t, nil)
 	r.begin(api.RunOnce)
 
 	r.mustRound()
 
-	assert.Equal(t, api.MachineRunning, r.gaon.Machine("m1").Status.Phase)
+	assert.Equal(t, api.MicroVMRunning, r.gaon.MicroVM("m1").Status.Phase)
 }
 
-// switchTo changes the run strategy of Machine m1 and gives it to the service.
+// switchTo changes the run strategy of MicroVM m1 and gives it to the service.
 func (r *rig) switchTo(strategy api.RunStrategy) {
 	r.t.Helper()
-	m := r.gaon.Machine("m1")
+	m := r.gaon.MicroVM("m1")
 	m.Spec.RunStrategy = strategy
 	r.put(m)
 }
 
-func TestOnce_AMachineStoppedForHaltedIsStartedWhenSwitchedToOnce(t *testing.T) {
+func TestOnce_AMicroVMStoppedForHaltedIsStartedWhenSwitchedToOnce(t *testing.T) {
 	r := newRig(t, nil)
 	r.begin(api.RunOnce)
 	r.switchTo(api.RunHalted)
 	r.mustRound()
 	r.requireState(v1alpha2.MachineState_MACHINE_STATE_STOPPED)
-	require.Equal(t, api.MachineStopped, r.gaon.Machine("m1").Status.Phase)
+	require.Equal(t, api.MicroVMStopped, r.gaon.MicroVM("m1").Status.Phase)
 
 	r.switchTo(api.RunOnce)
 	r.mustRound()
 
 	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
-	assert.Equal(t, api.MachineRunning, r.gaon.Machine("m1").Status.Phase)
+	assert.Equal(t, api.MicroVMRunning, r.gaon.MicroVM("m1").Status.Phase)
 	assert.Equal(t, 2, r.starts())
 }
 
@@ -114,7 +114,7 @@ func TestOnce_AnExitJudgedBeforeHaltedDoesNotJudgeTheRunAfterIt(t *testing.T) {
 	r.begin(api.RunOnce)
 	r.exit(exited(3, 0))
 	r.mustRound()
-	require.Equal(t, api.MachineFailed, r.gaon.Machine("m1").Status.Phase)
+	require.Equal(t, api.MicroVMFailed, r.gaon.MicroVM("m1").Status.Phase)
 	r.switchTo(api.RunHalted)
 	r.mustRound()
 	r.switchTo(api.RunOnce)
@@ -124,6 +124,6 @@ func TestOnce_AnExitJudgedBeforeHaltedDoesNotJudgeTheRunAfterIt(t *testing.T) {
 	r.exit(exited(0, 0))
 	r.mustRound()
 
-	assert.Equal(t, api.MachineSucceeded, r.gaon.Machine("m1").Status.Phase)
+	assert.Equal(t, api.MicroVMSucceeded, r.gaon.MicroVM("m1").Status.Phase)
 	assert.Equal(t, 2, r.starts())
 }

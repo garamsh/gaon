@@ -22,11 +22,11 @@ const (
 
 // NodeAgentFinalizer is the finalizer the API server adds to a local Volume
 // when it pins the Volume to a Node, and the Node's agent removes once no
-// Machine has the Volume attached and its disk is deleted. It is the name of
-// the Machine finalizer of the same owner.
+// MicroVM has the Volume attached and its disk is deleted. It is the name of
+// the MicroVM finalizer of the same owner.
 const NodeAgentFinalizer = Group + "/node-agent"
 
-// Volume is a disk a Machine can mount.
+// Volume is a disk a MicroVM can mount.
 type Volume struct {
 	TypeMeta
 	Metadata ObjectMeta   `json:"metadata"`
@@ -43,7 +43,7 @@ type VolumeList struct {
 
 // VolumeSpec is the desired state of a Volume. A user writes it at creation
 // and it is immutable after, except NodeName, which only the binding of a
-// Machine that uses the Volume sets.
+// MicroVM that uses the Volume sets.
 type VolumeSpec struct {
 	StorageClass string   `json:"storageClass,omitempty"`
 	AccessModes  []string `json:"accessModes,omitempty"`
@@ -59,10 +59,10 @@ type VolumeStatus struct {
 	Capacity   Quantity    `json:"capacity,omitempty"`
 }
 
-// Attachment names the Machine, and the epoch of its binding, that a Volume
+// Attachment names the MicroVM, and the epoch of its binding, that a Volume
 // is attached to.
 type Attachment struct {
-	MachineName  string `json:"machineName"`
+	MicroVMName  string `json:"microvmName"`
 	BindingEpoch Epoch  `json:"bindingEpoch"`
 }
 
@@ -92,7 +92,7 @@ func (v *Volume) Validate() error {
 }
 
 // ValidateCreate checks v as a create: Validate, and no nodeName, which only
-// the binding of a Machine sets.
+// the binding of a MicroVM sets.
 func (v *Volume) ValidateCreate() error {
 	if err := v.Validate(); err != nil {
 		return err
@@ -139,7 +139,7 @@ func (v *Volume) Pin(node string) error {
 // the binding of m to node, and returns the Volumes it changed. A name with
 // no Volume is ErrInvalid, and a Volume that refuses (see Pin) is
 // ErrConflict. On a refusal no Volume is changed.
-func (m *Machine) PinVolumes(node string, volumes map[string]*Volume) ([]*Volume, error) {
+func (m *MicroVM) PinVolumes(node string, volumes map[string]*Volume) ([]*Volume, error) {
 	var used []*Volume
 	seen := map[string]bool{}
 	for _, mv := range m.Spec.Volumes {
@@ -149,7 +149,7 @@ func (m *Machine) PinVolumes(node string, volumes map[string]*Volume) ([]*Volume
 		seen[mv.Name] = true
 		v, ok := volumes[mv.Name]
 		if !ok {
-			return nil, invalid("machine %q uses volume %q, which does not exist", m.Metadata.Name, mv.Name)
+			return nil, invalid("microvm %q uses volume %q, which does not exist", m.Metadata.Name, mv.Name)
 		}
 		probe := *v
 		if err := probe.Pin(node); err != nil {
@@ -178,16 +178,16 @@ func (v *Volume) ValidateStatus() error {
 	}
 }
 
-// Attach attaches v to the named Machine at its current epoch. It succeeds
+// Attach attaches v to the named MicroVM at its current epoch. It succeeds
 // only if v is not being deleted and is unattached or attached at a lower
 // epoch; otherwise it returns ErrConflict and leaves v unchanged.
-func (v *Volume) Attach(machine string, machineEpoch Epoch) error {
+func (v *Volume) Attach(microvm string, microvmEpoch Epoch) error {
 	if v.Metadata.DeletionTimestamp != nil {
 		return NewAPIError(ReasonConflict, "volume %q is being deleted", v.Metadata.Name)
 	}
-	if a := v.Status.Attachment; a != nil && a.BindingEpoch >= machineEpoch {
-		return NewAPIError(ReasonConflict, "volume %q is attached to machine %q at epoch %d", v.Metadata.Name, a.MachineName, a.BindingEpoch)
+	if a := v.Status.Attachment; a != nil && a.BindingEpoch >= microvmEpoch {
+		return NewAPIError(ReasonConflict, "volume %q is attached to microvm %q at epoch %d", v.Metadata.Name, a.MicroVMName, a.BindingEpoch)
 	}
-	v.Status.Attachment = &Attachment{MachineName: machine, BindingEpoch: machineEpoch}
+	v.Status.Attachment = &Attachment{MicroVMName: microvm, BindingEpoch: microvmEpoch}
 	return nil
 }

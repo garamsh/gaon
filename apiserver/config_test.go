@@ -67,12 +67,12 @@ func TestRun_RefusesANonLoopbackListener(t *testing.T) {
 
 func TestRun_StopsWhenItsContextEnds(t *testing.T) {
 	e := newEnv(t)
-	_, err := e.api.ListMachines(ctx(t))
+	_, err := e.api.ListMicroVMs(ctx(t))
 	require.NoError(t, err)
 
 	require.NoError(t, e.stop())
 
-	_, err = e.api.ListMachines(ctx(t))
+	_, err = e.api.ListMicroVMs(ctx(t))
 	assert.Error(t, err, "nothing answers after the stop")
 }
 

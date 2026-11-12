@@ -12,18 +12,18 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// The condition the Scheduler writes on a Machine it cannot place.
+// The condition the Scheduler writes on a MicroVM it cannot place.
 const (
 	ConditionScheduled  = "Scheduled"
 	ReasonUnschedulable = "Unschedulable"
 	ReasonExtenderError = "ExtenderError"
 )
 
-// Service binds Machines to Nodes.
+// Service binds MicroVMs to Nodes.
 type Service interface {
-	// Reconcile makes one pass: it binds each unbound Machine, and rebinds
-	// each Machine whose Node has LeaseExpired true, to a Node that fits it.
-	// A Machine changed by someone else meanwhile is left for the next pass.
+	// Reconcile makes one pass: it binds each unbound MicroVM, and rebinds
+	// each MicroVM whose Node has LeaseExpired true, to a Node that fits it.
+	// A MicroVM changed by someone else meanwhile is left for the next pass.
 	Reconcile(ctx context.Context) error
 	// Run reconciles at once and then every interval until ctx ends. It logs
 	// a failed pass and carries on.
@@ -75,9 +75,9 @@ func (s *service) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list nodes: %w", err)
 	}
-	machines, err := s.client.ListMachines(ctx)
+	microvms, err := s.client.ListMicroVMs(ctx)
 	if err != nil {
-		return fmt.Errorf("list machines: %w", err)
+		return fmt.Errorf("list microvms: %w", err)
 	}
 	var errs []error
 	volumes, err := s.listVolumes(ctx)
@@ -87,7 +87,7 @@ func (s *service) Reconcile(ctx context.Context) error {
 		}
 		errs = append(errs, err)
 	}
-	book, err := newLedger(nodes.Items, machines.Items)
+	book, err := newLedger(nodes.Items, microvms.Items)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func (s *service) Reconcile(ctx context.Context) error {
 		expired[nodes.Items[i].Metadata.Name] = leaseExpired(&nodes.Items[i])
 	}
 
-	items := slices.SortedFunc(slices.Values(machines.Items), func(a, b api.Machine) int {
+	items := slices.SortedFunc(slices.Values(microvms.Items), func(a, b api.MicroVM) int {
 		return strings.Compare(a.Metadata.Name, b.Metadata.Name)
 	})
 	for i := range items {
@@ -119,7 +119,7 @@ func (s *service) Reconcile(ctx context.Context) error {
 }
 
 // listVolumes returns the Volumes by name. After a failed list the map is nil,
-// and Machines that name a Volume wait for a pass where it succeeds.
+// and MicroVMs that name a Volume wait for a pass where it succeeds.
 func (s *service) listVolumes(ctx context.Context) (map[string]*api.Volume, error) {
 	list, err := s.client.ListVolumes(ctx)
 	if err != nil {
@@ -135,14 +135,14 @@ func (s *service) listVolumes(ctx context.Context) (map[string]*api.Volume, erro
 // place binds m to the Node choose picks. An unbound m that fits none, or whose
 // placement failed on an extender, gets a Scheduled condition saying why; a
 // rebound m keeps the status of its dead Node's epoch, which nobody rewrites.
-func (s *service) place(ctx context.Context, book *ledger, m *api.Machine, vols volumeNeed, rebinding bool) error {
+func (s *service) place(ctx context.Context, book *ledger, m *api.MicroVM, vols volumeNeed, rebinding bool) error {
 	r, err := requests(m)
 	if err != nil {
 		return err
 	}
 	node, refused, err := s.choose(ctx, book, m, demand{req: r, volumes: vols})
 	if err != nil {
-		s.log.Warn("not placed", "machine", m.Metadata.Name, "err", err)
+		s.log.Warn("not placed", "microvm", m.Metadata.Name, "err", err)
 		if rebinding {
 			return nil
 		}
@@ -156,7 +156,7 @@ func (s *service) place(ctx context.Context, book *ledger, m *api.Machine, vols 
 			"no Node fits: %d of %d Nodes are Admitted, Ready and not LeaseExpired; requests cpu %q, memory %q; %s",
 			book.eligible, len(book.names), m.Spec.Resources.Requests.CPU, m.Spec.Resources.Requests.Memory, refused))
 	}
-	_, err = s.client.BindMachine(ctx, m.Metadata.Name, api.Binding{
+	_, err = s.client.BindMicroVM(ctx, m.Metadata.Name, api.Binding{
 		ResourceVersion: m.Metadata.ResourceVersion,
 		NodeName:        node,
 		BindingEpoch:    m.Spec.BindingEpoch + 1,
@@ -165,16 +165,16 @@ func (s *service) place(ctx context.Context, book *ledger, m *api.Machine, vols 
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("bind machine %s: %w", m.Metadata.Name, err)
+		return fmt.Errorf("bind microvm %s: %w", m.Metadata.Name, err)
 	}
 	book.take(node, r)
-	s.log.Info("bound", "machine", m.Metadata.Name, "node", node, "epoch", m.Spec.BindingEpoch+1)
+	s.log.Info("bound", "microvm", m.Metadata.Name, "node", node, "epoch", m.Spec.BindingEpoch+1)
 	return nil
 }
 
 // report writes m's Scheduled condition as false with the reason and message
 // given, unless it already says that.
-func (s *service) report(ctx context.Context, m *api.Machine, reason, message string) error {
+func (s *service) report(ctx context.Context, m *api.MicroVM, reason, message string) error {
 	want := api.Condition{Type: ConditionScheduled, Status: api.ConditionFalse, Reason: reason, Message: message}
 	next := *m
 	next.Status.Conditions = slices.Clone(m.Status.Conditions)
@@ -188,14 +188,14 @@ func (s *service) report(ctx context.Context, m *api.Machine, reason, message st
 		next.Status.Conditions[i] = want
 	}
 	if next.Status.Phase == "" {
-		next.Status.Phase = api.MachinePending
+		next.Status.Phase = api.MicroVMPending
 	}
-	_, err := s.client.PutMachineStatus(ctx, &next)
+	_, err := s.client.PutMicroVMStatus(ctx, &next)
 	if lostRace(err) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("report machine %s as %s: %w", m.Metadata.Name, reason, err)
+		return fmt.Errorf("report microvm %s as %s: %w", m.Metadata.Name, reason, err)
 	}
 	return nil
 }
@@ -204,7 +204,7 @@ func sameCondition(a, b api.Condition) bool {
 	return a.Status == b.Status && a.Reason == b.Reason && a.Message == b.Message
 }
 
-// lostRace reports whether err says the Machine changed or went away since
+// lostRace reports whether err says the MicroVM changed or went away since
 // it was read, which the next pass sees for itself.
 func lostRace(err error) bool {
 	return errors.Is(err, api.ErrConflict) || errors.Is(err, api.ErrNotFound)

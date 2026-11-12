@@ -8,19 +8,19 @@ import (
 	"slices"
 
 	"github.com/garamsh/gaon/lib/api"
-	"github.com/garamsh/gaon/node-agent/internal/machines"
+	"github.com/garamsh/gaon/node-agent/internal/microvms"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
 // Name is the network the Default plugin serves and the name that selects it.
 const Name = "default"
 
-// ReasonUnknownNetwork is the reason of a Machine that names a network the
+// ReasonUnknownNetwork is the reason of a MicroVM that names a network the
 // plugin does not serve.
 const ReasonUnknownNetwork = "UnknownNetwork"
 
 // Default serves the network "default": egress to the operator's prefixes,
-// and ingress to a Machine's ports from the operator's prefixes. With no
+// and ingress to a MicroVM's ports from the operator's prefixes. With no
 // prefixes the policy is empty, which mvmd reads as blocking all outside
 // traffic.
 type Default struct {
@@ -53,20 +53,20 @@ func parsePrefixes(direction string, in []string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
-// Policy implements machines.Network. A Machine naming a network other than
+// Policy implements microvms.Network. A MicroVM naming a network other than
 // "default" is refused with ReasonUnknownNetwork, and one naming a port
-// outside 1 to 65535, which mvmd would refuse, with machines.ReasonInvalidSpec.
-func (d *Default) Policy(_ context.Context, m *api.Machine) (*v1alpha2.NetworkPolicy, error) {
+// outside 1 to 65535, which mvmd would refuse, with microvms.ReasonInvalidSpec.
+func (d *Default) Policy(_ context.Context, m *api.MicroVM) (*v1alpha2.NetworkPolicy, error) {
 	if i := slices.IndexFunc(m.Spec.Networks, func(n string) bool { return n != Name }); i >= 0 {
-		return nil, &machines.Refusal{
+		return nil, &microvms.Refusal{
 			Reason:  ReasonUnknownNetwork,
 			Message: fmt.Sprintf("spec.networks names %q; this node serves only %q", m.Spec.Networks[i], Name),
 		}
 	}
 	for _, port := range m.Spec.Ports {
 		if port < 1 || port > 65535 {
-			return nil, &machines.Refusal{
-				Reason:  machines.ReasonInvalidSpec,
+			return nil, &microvms.Refusal{
+				Reason:  microvms.ReasonInvalidSpec,
 				Message: fmt.Sprintf("spec.ports holds %d, want 1 to 65535", port),
 			}
 		}

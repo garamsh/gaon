@@ -24,7 +24,7 @@ func countingServer(t *testing.T) (url string, requests *atomic.Int32) {
 	requests = &atomic.Int32{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
-		_, _ = w.Write([]byte(`{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"MachineList","metadata":{"resourceVersion":"1"},"items":[]}`))
+		_, _ = w.Write([]byte(`{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"MicroVMList","metadata":{"resourceVersion":"1"},"items":[]}`))
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL, requests
@@ -100,9 +100,9 @@ func TestRun_ReachesAMutualTLSServerFromTheConfigFileAlone(t *testing.T) {
 		env  environment
 		args []string
 	}{
-		{"default path", environment{home: home}, []string{"get", "machine"}},
-		{"GAON_CONFIG", environment{config: other}, []string{"get", "machine"}},
-		{"--config", environment{}, []string{"--config", other, "get", "machine"}},
+		{"default path", environment{home: home}, []string{"get", "microvm"}},
+		{"GAON_CONFIG", environment{config: other}, []string{"get", "microvm"}},
+		{"--config", environment{}, []string{"--config", other, "get", "microvm"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -134,9 +134,9 @@ func TestRun_FindsTheConfigFileByFlagThenEnvironmentThenDefault(t *testing.T) {
 		args []string
 		hits [3]int32 // default, environment, flag
 	}{
-		{"default alone", environment{home: home}, []string{"get", "machine"}, [3]int32{1, 0, 0}},
-		{"environment over default", environment{home: home, config: envFile}, []string{"get", "machine"}, [3]int32{0, 1, 0}},
-		{"flag over environment and default", environment{home: home, config: envFile}, []string{"--config", flagFile, "get", "machine"}, [3]int32{0, 0, 1}},
+		{"default alone", environment{home: home}, []string{"get", "microvm"}, [3]int32{1, 0, 0}},
+		{"environment over default", environment{home: home, config: envFile}, []string{"get", "microvm"}, [3]int32{0, 1, 0}},
+		{"flag over environment and default", environment{home: home, config: envFile}, []string{"--config", flagFile, "get", "microvm"}, [3]int32{0, 0, 1}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -164,10 +164,10 @@ func TestRun_AFlagOrGAONServerOverridesTheFilesServer(t *testing.T) {
 		args []string
 		hits [3]int32 // file, environment, flag
 	}{
-		{"control: neither, the file's server", environment{}, []string{"--config", file, "get", "machine"}, [3]int32{1, 0, 0}},
-		{"GAON_SERVER", environment{server: envURL}, []string{"--config", file, "get", "machine"}, [3]int32{0, 1, 0}},
-		{"--server", environment{}, []string{"--config", file, "--server", flagURL, "get", "machine"}, [3]int32{0, 0, 1}},
-		{"--server over GAON_SERVER", environment{server: envURL}, []string{"--config", file, "--server", flagURL, "get", "machine"}, [3]int32{0, 0, 1}},
+		{"control: neither, the file's server", environment{}, []string{"--config", file, "get", "microvm"}, [3]int32{1, 0, 0}},
+		{"GAON_SERVER", environment{server: envURL}, []string{"--config", file, "get", "microvm"}, [3]int32{0, 1, 0}},
+		{"--server", environment{}, []string{"--config", file, "--server", flagURL, "get", "microvm"}, [3]int32{0, 0, 1}},
+		{"--server over GAON_SERVER", environment{server: envURL}, []string{"--config", file, "--server", flagURL, "get", "microvm"}, [3]int32{0, 0, 1}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -192,7 +192,7 @@ func TestRun_ATLSFlagOverridesTheSameFileOfTheConfigFile(t *testing.T) {
 		a.requests.Store(0)
 		file := writeFile(t, t.TempDir(), "config", mtlsConfig(a, a.ca, a.cert, a.key))
 
-		code, _, stderr := runGaon(t, environment{}, "--config", file, "get", "machine")
+		code, _, stderr := runGaon(t, environment{}, "--config", file, "get", "microvm")
 
 		assert.Equal(t, command.ExitOK, code, stderr)
 		assert.Equal(t, int32(1), a.requests.Load())
@@ -210,7 +210,7 @@ func TestRun_ATLSFlagOverridesTheSameFileOfTheConfigFile(t *testing.T) {
 			a.requests.Store(0)
 			file := writeFile(t, t.TempDir(), "config", mtlsConfig(a, a.ca, a.cert, a.key))
 
-			code, _, _ := runGaon(t, environment{}, "--config", file, tt.flag, tt.value, "get", "machine")
+			code, _, _ := runGaon(t, environment{}, "--config", file, tt.flag, tt.value, "get", "microvm")
 
 			assert.Equal(t, command.ExitUsage, code)
 			assert.Zero(t, a.requests.Load())
@@ -221,11 +221,11 @@ func TestRun_ATLSFlagOverridesTheSameFileOfTheConfigFile(t *testing.T) {
 		a.requests.Store(0)
 		file := writeFile(t, t.TempDir(), "config", mtlsConfig(a, notACA, missing, missing))
 
-		code, _, _ := runGaon(t, environment{}, "--config", file, "get", "machine")
+		code, _, _ := runGaon(t, environment{}, "--config", file, "get", "microvm")
 		assert.Equal(t, command.ExitUsage, code, "control: the file alone is refused")
 		assert.Zero(t, a.requests.Load())
 
-		code, _, stderr := runGaon(t, environment{}, append([]string{"--config", file}, append(a.flags(), "get", "machine")...)...)
+		code, _, stderr := runGaon(t, environment{}, append([]string{"--config", file}, append(a.flags(), "get", "microvm")...)...)
 		assert.Equal(t, command.ExitOK, code, stderr)
 		assert.Equal(t, int32(1), a.requests.Load())
 	})
@@ -236,7 +236,7 @@ func TestRun_ResolvesFilePathsOfTheConfigFileAgainstItsDirectory(t *testing.T) {
 	dir := filepath.Dir(a.ca)
 	file := writeFile(t, dir, "config", mtlsConfig(a, filepath.Base(a.ca), filepath.Base(a.cert), filepath.Base(a.key)))
 
-	code, _, stderr := runGaon(t, environment{}, "--config", file, "get", "machine")
+	code, _, stderr := runGaon(t, environment{}, "--config", file, "get", "microvm")
 
 	assert.Equal(t, command.ExitOK, code, stderr)
 	assert.Equal(t, int32(1), a.withCerts.Load())
@@ -266,12 +266,12 @@ func TestRun_RefusesAConfigFileThatIsMissingOrDoesNotFit(t *testing.T) {
 			bad := writeFile(t, dir, "bad.yaml", strings.ReplaceAll(tt.bad, "SERVER", url))
 			good := writeFile(t, dir, "good.yaml", strings.ReplaceAll(tt.good, "SERVER", url))
 
-			code, _, stderr := runGaon(t, environment{}, "--config", bad, "get", "machine")
+			code, _, stderr := runGaon(t, environment{}, "--config", bad, "get", "microvm")
 			assert.Equal(t, command.ExitUsage, code)
 			assert.Contains(t, stderr, bad)
 			assert.Zero(t, hits.Load())
 
-			code, _, stderr = runGaon(t, environment{}, "--config", good, "get", "machine")
+			code, _, stderr = runGaon(t, environment{}, "--config", good, "get", "microvm")
 			assert.Equal(t, command.ExitOK, code, "control: the fixed file is accepted: "+stderr)
 			assert.Equal(t, int32(1), hits.Load())
 		})
@@ -281,7 +281,7 @@ func TestRun_RefusesAConfigFileThatIsMissingOrDoesNotFit(t *testing.T) {
 		hits.Store(0)
 		bad := writeFile(t, t.TempDir(), "bad.yaml", "clusters: [\n")
 
-		code, _, stderr := runGaon(t, environment{}, "--config", bad, "--server", url, "get", "machine")
+		code, _, stderr := runGaon(t, environment{}, "--config", bad, "--server", url, "get", "microvm")
 
 		assert.Equal(t, command.ExitUsage, code)
 		assert.Contains(t, stderr, bad)
@@ -298,8 +298,8 @@ func TestRun_RefusesAMissingConfigFileOnlyWhenSomethingNamedIt(t *testing.T) {
 		env  environment
 		args []string
 	}{
-		{"--config", environment{}, []string{"--config", missing, "--server", url, "get", "machine"}},
-		{"GAON_CONFIG", environment{config: missing}, []string{"--server", url, "get", "machine"}},
+		{"--config", environment{}, []string{"--config", missing, "--server", url, "get", "microvm"}},
+		{"GAON_CONFIG", environment{config: missing}, []string{"--server", url, "get", "microvm"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -316,7 +316,7 @@ func TestRun_RefusesAMissingConfigFileOnlyWhenSomethingNamedIt(t *testing.T) {
 	t.Run("control: a missing default file is no file", func(t *testing.T) {
 		hits.Store(0)
 
-		code, _, stderr := runGaon(t, environment{}, "--server", url, "get", "machine")
+		code, _, stderr := runGaon(t, environment{}, "--server", url, "get", "microvm")
 
 		assert.Equal(t, command.ExitOK, code, stderr)
 		assert.Equal(t, int32(1), hits.Load())
@@ -327,7 +327,7 @@ func TestRun_NamesTheConfigFileWhenNoServerIsGiven(t *testing.T) {
 	// A file with no current context gives no server.
 	file := writeFile(t, t.TempDir(), "config", "clusters: []\n")
 
-	code, _, stderr := runGaon(t, environment{}, "--config", file, "get", "machine")
+	code, _, stderr := runGaon(t, environment{}, "--config", file, "get", "microvm")
 
 	assert.Equal(t, command.ExitUsage, code)
 	assert.Contains(t, stderr, "current-context")
@@ -357,7 +357,7 @@ contexts:
 	assert.Equal(t, command.ExitOK, code, stderr)
 	assert.Equal(t, "first\n", stdout)
 
-	code, _, stderr = runGaon(t, environment{}, "--config", file, "get", "machine")
+	code, _, stderr = runGaon(t, environment{}, "--config", file, "get", "microvm")
 	require.Equal(t, command.ExitOK, code, stderr)
 	assert.Equal(t, [2]int32{1, 0}, [2]int32{aHits.Load(), bHits.Load()})
 
@@ -367,7 +367,7 @@ contexts:
 	code, stdout, _ = runGaon(t, environment{}, "--config", file, "config", "current-context")
 	assert.Equal(t, command.ExitOK, code)
 	assert.Equal(t, "second\n", stdout)
-	code, _, stderr = runGaon(t, environment{}, "--config", file, "get", "machine")
+	code, _, stderr = runGaon(t, environment{}, "--config", file, "get", "microvm")
 	require.Equal(t, command.ExitOK, code, stderr)
 	assert.Equal(t, [2]int32{1, 1}, [2]int32{aHits.Load(), bHits.Load()}, "the next command reaches the second context's server")
 
@@ -432,7 +432,7 @@ func TestRun_NeverPrintsTheContentOfACredentialFile(t *testing.T) {
 	badKey := writeFile(t, t.TempDir(), "key.pem", secret+"\n")
 	file := writeFile(t, t.TempDir(), "config", mtlsConfig(a, a.ca, a.cert, badKey))
 
-	code, stdout, stderr := runGaon(t, environment{}, "--config", file, "get", "machine")
+	code, stdout, stderr := runGaon(t, environment{}, "--config", file, "get", "microvm")
 
 	assert.Equal(t, command.ExitUsage, code, "setup: the key does not fit")
 	assert.NotContains(t, stdout+stderr, secret)

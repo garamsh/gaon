@@ -152,7 +152,7 @@ func (e extenderFile) build() (*extender, error) {
 		return nil, err
 	}
 	client.Timeout = timeout
-	// A redirect would send the Machine to a host the file never named.
+	// A redirect would send the MicroVM to a host the file never named.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &extender{
 		urlPrefix:      e.URLPrefix,

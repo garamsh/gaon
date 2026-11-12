@@ -30,19 +30,19 @@ func (e *env) createVolume(t *testing.T, name string) *api.Volume {
 	return created
 }
 
-// boundMachine creates a Machine bound to a node at the given epoch.
-func (e *env) boundMachine(t *testing.T, name string, epoch api.Epoch) *api.Machine {
+// boundMicroVM creates a MicroVM bound to a node at the given epoch.
+func (e *env) boundMicroVM(t *testing.T, name string, epoch api.Epoch) *api.MicroVM {
 	t.Helper()
-	m := e.createMachine(t, machine(name))
+	m := e.createMicroVM(t, microvm(name))
 	for i := api.Epoch(1); i <= epoch; i++ {
 		m = e.bind(t, m, "n1", i)
 	}
 	return m
 }
 
-func attached(v *api.Volume, machine string, epoch api.Epoch) *api.Volume {
+func attached(v *api.Volume, microvm string, epoch api.Epoch) *api.Volume {
 	next := *v
-	next.Status = api.VolumeStatus{Phase: api.VolumeBound, Attachment: &api.Attachment{MachineName: machine, BindingEpoch: epoch}}
+	next.Status = api.VolumeStatus{Phase: api.VolumeBound, Attachment: &api.Attachment{MicroVMName: microvm, BindingEpoch: epoch}}
 	return &next
 }
 
@@ -75,9 +75,9 @@ func TestPutVolumeStatus_IsCompareAndSwapAndValidated(t *testing.T) {
 	assert.Equal(t, api.VolumeReleased, got.Status.Phase)
 }
 
-func TestPutVolumeStatus_AttachesAtTheMachinesEpoch(t *testing.T) {
+func TestPutVolumeStatus_AttachesAtTheMicroVMsEpoch(t *testing.T) {
 	e := newEnv(t)
-	e.boundMachine(t, "m1", 1)
+	e.boundMicroVM(t, "m1", 1)
 	v := e.createVolume(t, "v1")
 
 	got, err := e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 1))
@@ -86,23 +86,23 @@ func TestPutVolumeStatus_AttachesAtTheMachinesEpoch(t *testing.T) {
 	assert.Equal(t, api.Epoch(1), got.Status.Attachment.BindingEpoch)
 }
 
-func TestPutVolumeStatus_AttachmentNamesCurrentEpochOfAnExistingMachine(t *testing.T) {
+func TestPutVolumeStatus_AttachmentNamesCurrentEpochOfAnExistingMicroVM(t *testing.T) {
 	e := newEnv(t)
-	e.boundMachine(t, "m1", 2)
+	e.boundMicroVM(t, "m1", 2)
 	v := e.createVolume(t, "v1")
 
 	_, err := e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 1))
-	assert.ErrorIs(t, err, api.ErrInvalid, "an epoch that is not the machine's current one")
+	assert.ErrorIs(t, err, api.ErrInvalid, "an epoch that is not the microvm's current one")
 	_, err = e.api.PutVolumeStatus(ctx(t), attached(v, "absent", 1))
-	assert.ErrorIs(t, err, api.ErrInvalid, "no such machine")
+	assert.ErrorIs(t, err, api.ErrInvalid, "no such microvm")
 	_, err = e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 2))
 	assert.NoError(t, err)
 }
 
 func TestPutVolumeStatus_AttachedAtAnEqualOrHigherEpochIsAConflict(t *testing.T) {
 	e := newEnv(t)
-	e.boundMachine(t, "m1", 1)
-	e.boundMachine(t, "m2", 1)
+	e.boundMicroVM(t, "m1", 1)
+	e.boundMicroVM(t, "m2", 1)
 	v := e.createVolume(t, "v1")
 	held, err := e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 1))
 	require.NoError(t, err)
@@ -115,21 +115,21 @@ func TestPutVolumeStatus_AttachedAtAnEqualOrHigherEpochIsAConflict(t *testing.T)
 	require.NoError(t, err, "a higher epoch takes it")
 	assert.Equal(t, api.Epoch(2), moved.Status.Attachment.BindingEpoch)
 
-	e.boundMachine(t, "m3", 1)
+	e.boundMicroVM(t, "m3", 1)
 	_, err = e.api.PutVolumeStatus(ctx(t), attached(moved, "m3", 1))
 	assert.ErrorIs(t, err, api.ErrConflict, "a lower epoch does not take it")
 }
 
-func mustGet(t *testing.T, e *env, name string) *api.Machine {
+func mustGet(t *testing.T, e *env, name string) *api.MicroVM {
 	t.Helper()
-	m, err := e.api.GetMachine(ctx(t), name)
+	m, err := e.api.GetMicroVM(ctx(t), name)
 	require.NoError(t, err)
 	return m
 }
 
 func TestPutVolumeStatus_UnchangedAttachmentIsNotReattached(t *testing.T) {
 	e := newEnv(t)
-	e.boundMachine(t, "m1", 1)
+	e.boundMicroVM(t, "m1", 1)
 	v := e.createVolume(t, "v1")
 	held, err := e.api.PutVolumeStatus(ctx(t), attached(v, "m1", 1))
 	require.NoError(t, err)

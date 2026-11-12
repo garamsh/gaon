@@ -18,9 +18,9 @@ import (
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
 	"github.com/garamsh/gaon/node-agent/internal/liveness"
-	"github.com/garamsh/gaon/node-agent/internal/machines"
-	"github.com/garamsh/gaon/node-agent/internal/machines/network"
-	"github.com/garamsh/gaon/node-agent/internal/machines/storage"
+	"github.com/garamsh/gaon/node-agent/internal/microvms"
+	"github.com/garamsh/gaon/node-agent/internal/microvms/network"
+	"github.com/garamsh/gaon/node-agent/internal/microvms/storage"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
@@ -169,7 +169,7 @@ func TestParseConfig_ChoosesPluginsAndPrefixesByFlagOrEnvironment(t *testing.T) 
 	assert.NoError(t, err, "a --egress-prefix replaces the environment's, which is not parsed then")
 }
 
-func TestRun_RegistersTheNodeRenewsItsLeaseAndRunsABoundMachine(t *testing.T) {
+func TestRun_RegistersTheNodeRenewsItsLeaseAndRunsABoundMicroVM(t *testing.T) {
 	clk := clock.System{}
 	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clk)
 	defaultNetwork, err := network.NewDefault(nil, nil)
@@ -184,9 +184,9 @@ func TestRun_RegistersTheNodeRenewsItsLeaseAndRunsABoundMachine(t *testing.T) {
 	go func() { done <- nodeagent.Run(ctx, cfg, clk, slog.New(slog.NewTextHandler(io.Discard, nil))) }()
 	t.Cleanup(func() { cancel(); <-done })
 
-	gaon.SetMachine(api.Machine{
+	gaon.SetMicroVM(api.MicroVM{
 		Metadata: api.ObjectMeta{Name: "m1"},
-		Spec: api.MachineSpec{
+		Spec: api.MicroVMSpec{
 			Image:        "registry.example/app@sha256:" + strings.Repeat("b", 64),
 			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "1", Memory: "512Mi"}},
 			RunStrategy:  api.RunAlways,
@@ -196,23 +196,23 @@ func TestRun_RegistersTheNodeRenewsItsLeaseAndRunsABoundMachine(t *testing.T) {
 	})
 
 	require.Eventually(t, func() bool {
-		s := gaon.Machine("m1").Status
-		return s.Phase == api.MachineRunning && s.BindingEpoch == 1
-	}, 5*time.Second, 10*time.Millisecond, "the bound Machine runs, which needs the deadline armed by the renewal loop")
+		s := gaon.MicroVM("m1").Status
+		return s.Phase == api.MicroVMRunning && s.BindingEpoch == 1
+	}, 5*time.Second, 10*time.Millisecond, "the bound MicroVM runs, which needs the deadline armed by the renewal loop")
 	require.Eventually(t, func() bool {
 		n, ok := gaon.Node("n1")
 		return ok && n.Status.Capacity.CPU == "8"
-	}, 5*time.Second, 10*time.Millisecond, "the Node's status is written by its own loop, independent of the Machine")
+	}, 5*time.Second, 10*time.Millisecond, "the Node's status is written by its own loop, independent of the MicroVM")
 	lease, ok := gaon.Lease("n1")
 	require.True(t, ok)
 	assert.Equal(t, "n1", lease.Spec.Holder)
 	renewals := mvmd.Renewals()
 	require.NotEmpty(t, renewals)
 	assert.Equal(t, 5*time.Second, renewals[0].Length)
-	assert.Equal(t, v1alpha2.MachineState_MACHINE_STATE_RUNNING, mustMachine(t, mvmd, "m1-e1").GetState())
+	assert.Equal(t, v1alpha2.MachineState_MACHINE_STATE_RUNNING, mustMicroVM(t, mvmd, "m1-e1").GetState())
 }
 
-func TestRun_CreatesAMachineWithThePolicyOfTheFlags(t *testing.T) {
+func TestRun_CreatesAMicroVMWithThePolicyOfTheFlags(t *testing.T) {
 	clk := clock.System{}
 	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clk)
 	cfg, err := nodeagent.ParseConfig([]string{
@@ -225,9 +225,9 @@ func TestRun_CreatesAMachineWithThePolicyOfTheFlags(t *testing.T) {
 	go func() { done <- nodeagent.Run(ctx, cfg, clk, slog.New(slog.NewTextHandler(io.Discard, nil))) }()
 	t.Cleanup(func() { cancel(); <-done })
 
-	gaon.SetMachine(api.Machine{
+	gaon.SetMicroVM(api.MicroVM{
 		Metadata: api.ObjectMeta{Name: "m1"},
-		Spec: api.MachineSpec{
+		Spec: api.MicroVMSpec{
 			Image:        "registry.example/app@sha256:" + strings.Repeat("b", 64),
 			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "1", Memory: "512Mi"}},
 			RunStrategy:  api.RunAlways,
@@ -238,9 +238,9 @@ func TestRun_CreatesAMachineWithThePolicyOfTheFlags(t *testing.T) {
 	})
 
 	require.Eventually(t, func() bool {
-		return gaon.Machine("m1").Status.Phase == api.MachineRunning
+		return gaon.MicroVM("m1").Status.Phase == api.MicroVMRunning
 	}, 5*time.Second, 10*time.Millisecond)
-	policy := mustMachine(t, mvmd, "m1-e1").GetNetworkPolicy()
+	policy := mustMicroVM(t, mvmd, "m1-e1").GetNetworkPolicy()
 	require.Len(t, policy.GetEgress(), 1)
 	assert.Equal(t, "10.0.0.0/8", policy.GetEgress()[0].GetPrefix())
 	require.Len(t, policy.GetIngress(), 1)
@@ -270,7 +270,7 @@ func runAgentWithStorage(t *testing.T, gaon *fakegaon.Server, mvmd *fakemvmd.Ser
 	t.Cleanup(func() { cancel(); <-done })
 }
 
-func mustNetwork(t *testing.T) machines.Network {
+func mustNetwork(t *testing.T) microvms.Network {
 	t.Helper()
 	n, err := network.NewDefault(nil, nil)
 	require.NoError(t, err)
@@ -291,7 +291,7 @@ func TestRun_MakesNoRequestThatNeedsItsNodeBeforeTheNodeExists(t *testing.T) {
 	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clock.System{})
 	gaon.RequireNode("n1")
 	gaon.HoldNodeCreation(true)
-	assert.Equal(t, http.StatusForbidden, statusCode(t, http.MethodGet, gaon.URL+"/machines"), "control: the server refuses a Machine list while the Node is absent")
+	assert.Equal(t, http.StatusForbidden, statusCode(t, http.MethodGet, gaon.URL+"/microvms"), "control: the server refuses a MicroVM list while the Node is absent")
 	assert.Equal(t, http.StatusUnprocessableEntity, statusCode(t, http.MethodPut, gaon.URL+"/leases/n1"), "control: and a Lease write")
 	require.Len(t, gaon.Refused(), 2, "the controls were refused for the Node's absence")
 	_, ok := gaon.Node("n1")
@@ -304,9 +304,9 @@ func TestRun_MakesNoRequestThatNeedsItsNodeBeforeTheNodeExists(t *testing.T) {
 	assert.Empty(t, gaon.LeaseWrites())
 
 	gaon.HoldNodeCreation(false)
-	gaon.SetMachine(api.Machine{
+	gaon.SetMicroVM(api.MicroVM{
 		Metadata: api.ObjectMeta{Name: "m1"},
-		Spec: api.MachineSpec{
+		Spec: api.MicroVMSpec{
 			Image:        "registry.example/app@sha256:" + strings.Repeat("b", 64),
 			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "1", Memory: "512Mi"}},
 			RunStrategy:  api.RunAlways,
@@ -316,8 +316,8 @@ func TestRun_MakesNoRequestThatNeedsItsNodeBeforeTheNodeExists(t *testing.T) {
 	})
 	require.Eventually(t, func() bool {
 		_, leased := gaon.Lease("n1")
-		return leased && gaon.Machine("m1").Status.Phase == api.MachineRunning
-	}, 5*time.Second, 10*time.Millisecond, "once the Node exists the Lease is written and the Machine runs")
+		return leased && gaon.MicroVM("m1").Status.Phase == api.MicroVMRunning
+	}, 5*time.Second, 10*time.Millisecond, "once the Node exists the Lease is written and the MicroVM runs")
 	assert.Len(t, gaon.Refused(), 2, "no request of the agent's was refused")
 }
 
@@ -326,12 +326,12 @@ func TestRun_StartsAtOnceWhenItsNodeAlreadyExists(t *testing.T) {
 	gaon.RequireNode("n1")
 	gaon.HoldNodeCreation(true)
 	gaon.SetNode(api.Node{Metadata: api.ObjectMeta{Name: "n1"}})
-	assert.Equal(t, http.StatusOK, statusCode(t, http.MethodGet, gaon.URL+"/machines"), "control: with the Node present the server answers")
+	assert.Equal(t, http.StatusOK, statusCode(t, http.MethodGet, gaon.URL+"/microvms"), "control: with the Node present the server answers")
 
 	runAgent(t, gaon, mvmd)
-	gaon.SetMachine(api.Machine{
+	gaon.SetMicroVM(api.MicroVM{
 		Metadata: api.ObjectMeta{Name: "m1"},
-		Spec: api.MachineSpec{
+		Spec: api.MicroVMSpec{
 			Image:        "registry.example/app@sha256:" + strings.Repeat("b", 64),
 			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "1", Memory: "512Mi"}},
 			RunStrategy:  api.RunAlways,
@@ -341,13 +341,13 @@ func TestRun_StartsAtOnceWhenItsNodeAlreadyExists(t *testing.T) {
 	})
 	require.Eventually(t, func() bool {
 		_, leased := gaon.Lease("n1")
-		return leased && gaon.Machine("m1").Status.Phase == api.MachineRunning
-	}, 5*time.Second, 10*time.Millisecond, "the Lease is written and the Machine runs with Node creation held")
+		return leased && gaon.MicroVM("m1").Status.Phase == api.MicroVMRunning
+	}, 5*time.Second, 10*time.Millisecond, "the Lease is written and the MicroVM runs with Node creation held")
 	assert.Zero(t, gaon.NodeCreations(), "no create was asked for")
 	assert.Empty(t, gaon.Refused())
 }
 
-func mustMachine(t *testing.T, m *fakemvmd.Server, id string) *v1alpha2.Machine {
+func mustMicroVM(t *testing.T, m *fakemvmd.Server, id string) *v1alpha2.Machine {
 	t.Helper()
 	got, ok := m.Machine(id)
 	require.True(t, ok)

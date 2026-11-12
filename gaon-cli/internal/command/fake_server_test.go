@@ -18,7 +18,7 @@ import (
 
 // listKinds names the list kind of each collection the fake serves.
 var listKinds = map[string]string{
-	"machines": api.KindMachineList,
+	"microvms": api.KindMicroVMList,
 	"nodes":    api.KindNodeList,
 	"leases":   api.KindLeaseList,
 	"volumes":  "VolumeList",

@@ -13,20 +13,20 @@ import (
 func newAdmissionRequest(op api.Operation) *api.AdmissionRequest {
 	q := &api.AdmissionRequest{
 		UID:       "705ab4f5-6393-11e8-b7cc-42010a800002",
-		Kind:      api.GroupVersionKind{Group: api.Group, Version: api.Version, Kind: "Machine"},
-		Resource:  api.GroupVersionResource{Group: api.Group, Version: api.Version, Resource: "machines"},
+		Kind:      api.GroupVersionKind{Group: api.Group, Version: api.Version, Kind: "MicroVM"},
+		Resource:  api.GroupVersionResource{Group: api.Group, Version: api.Version, Resource: "microvms"},
 		Name:      "m1",
 		Operation: op,
 		UserInfo:  api.UserInfo{Username: "alice", Groups: []string{"dev"}},
 	}
 	switch op {
 	case api.OperationCreate:
-		q.Object = json.RawMessage(`{"kind":"Machine"}`)
+		q.Object = json.RawMessage(`{"kind":"MicroVM"}`)
 	case api.OperationUpdate:
-		q.Object = json.RawMessage(`{"kind":"Machine"}`)
-		q.OldObject = json.RawMessage(`{"kind":"Machine"}`)
+		q.Object = json.RawMessage(`{"kind":"MicroVM"}`)
+		q.OldObject = json.RawMessage(`{"kind":"MicroVM"}`)
 	case api.OperationDelete:
-		q.OldObject = json.RawMessage(`{"kind":"Machine"}`)
+		q.OldObject = json.RawMessage(`{"kind":"MicroVM"}`)
 	}
 	return q
 }
@@ -85,7 +85,7 @@ func TestAdmissionRequestValidateRefusesWhatItCannotDescribe(t *testing.T) {
 }
 
 func TestAdmissionRequestValidateChecksObjectsPerOperation(t *testing.T) {
-	obj := json.RawMessage(`{"kind":"Machine"}`)
+	obj := json.RawMessage(`{"kind":"MicroVM"}`)
 	cases := []struct {
 		op          api.Operation
 		object, old json.RawMessage
@@ -181,6 +181,6 @@ func TestAdmissionReviewJSON(t *testing.T) {
 	req := newReviewOf(newAdmissionRequest(api.OperationUpdate))
 	raw, err = json.Marshal(req)
 	require.NoError(t, err)
-	assert.Contains(t, string(raw), `"object":{"kind":"Machine"}`, "object is embedded JSON, not a string")
+	assert.Contains(t, string(raw), `"object":{"kind":"MicroVM"}`, "object is embedded JSON, not a string")
 	assert.NotContains(t, string(raw), `"response"`)
 }

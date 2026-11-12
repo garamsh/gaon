@@ -38,8 +38,8 @@ type ClusterRoleList struct {
 
 // PolicyRule grants the verbs on the resources of the API groups. A request
 // matches it when each of its group, resource and verb is listed or the list
-// holds the wildcard. A resource is a name such as "machines", and a
-// subresource is written "machines/status".
+// holds the wildcard. A resource is a name such as "microvms", and a
+// subresource is written "microvms/status".
 type PolicyRule struct {
 	APIGroups []string `json:"apiGroups"`
 	Resources []string `json:"resources"`

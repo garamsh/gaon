@@ -1,6 +1,6 @@
 # ADR 0003: The v1alpha1 resource API fixes one writer per section and a per-node Lease
 
-> Status: accepted
+> Status: accepted; its use of Machine for the workload kind is superseded by ADR-0017
 > Date: 2026-11-11
 
 Drafted for garamsh/gaon#2. The contract basis is section 4 of garamsh/discussions Discussion #2 ([comment](https://github.com/garamsh/discussions/discussions/2#discussioncomment-19288320)), decided by the project owner in the gaon PM session of 2026-11-08. The decisions that fix its open points are the project owner's, taken in the gaon PM session of 2026-11-11 and recorded on garamsh/gaon#2 (the issue's Context and the PM comment of that date).

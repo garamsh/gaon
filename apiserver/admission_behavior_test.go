@@ -12,10 +12,10 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// imageOf returns the image of the Machine in a call's object.
+// imageOf returns the image of the MicroVM in a call's object.
 func imageOf(t *testing.T, raw json.RawMessage) string {
 	t.Helper()
-	var m api.Machine
+	var m api.MicroVM
 	require.NoError(t, json.Unmarshal(raw, &m))
 	return m.Spec.Image
 }
@@ -26,11 +26,11 @@ func TestAdmission_AMutatingPatchIsAppliedBeforeTheServersOwnValidation(t *testi
 	w.answer = func(c call) *api.AdmissionResponse {
 		return patch(c, `[{"op":"replace","path":"/spec/runStrategy","value":"Always"}]`)
 	}
-	e.mutating(t, "fix", w.hook("a.hooks.example", "/", "machines"))
-	m := machine("m1")
+	e.mutating(t, "fix", w.hook("a.hooks.example", "/", "microvms"))
+	m := microvm("m1")
 	m.Spec.RunStrategy = ""
 
-	created, err := e.api.PutMachine(ctx(t), m)
+	created, err := e.api.PutMicroVM(ctx(t), m)
 
 	require.NoError(t, err, "the body is invalid until the patch is applied")
 	assert.Equal(t, api.RunAlways, created.Spec.RunStrategy)
@@ -43,18 +43,18 @@ func TestAdmission_AValidatingWebhookSeesThePatchedObjectAfterTheServersValidati
 	patchTo := func(ops string) {
 		mut.answer = func(c call) *api.AdmissionResponse { return patch(c, ops) }
 	}
-	e.mutating(t, "patch", mut.hook("a.hooks.example", "/", "machines"))
-	e.validating(t, "watch", val.hook("b.hooks.example", "/", "machines"))
+	e.mutating(t, "patch", mut.hook("a.hooks.example", "/", "microvms"))
+	e.validating(t, "watch", val.hook("b.hooks.example", "/", "microvms"))
 
 	// A patch that makes the body invalid is refused before any validating call.
 	patchTo(`[{"op":"replace","path":"/spec/runStrategy","value":"Bogus"}]`)
-	_, err := e.api.PutMachine(ctx(t), machine("m1"))
+	_, err := e.api.PutMicroVM(ctx(t), microvm("m1"))
 	assert.ErrorIs(t, err, api.ErrInvalid)
 	assert.Empty(t, val.received(), "the server's validation comes before the validating webhooks")
 
 	// Control: a valid patch reaches the validating webhook, patched.
 	patchTo(setImage)
-	_, err = e.api.PutMachine(ctx(t), machine("m1"))
+	_, err = e.api.PutMicroVM(ctx(t), microvm("m1"))
 	require.NoError(t, err)
 	require.Len(t, val.received(), 1)
 	assert.Equal(t, "patched", imageOf(t, val.received()[0].review.Request.Object))
@@ -75,10 +75,10 @@ func TestAdmission_AMutatingPatchIsSeenByTheNextWebhookInNameOrder(t *testing.T)
 		return allow(c)
 	}
 	// Registered in the opposite order to their names.
-	e.mutating(t, "b-config", w.hook("b.hooks.example", "/b", "machines"))
-	e.mutating(t, "a-config", w.hook("a.hooks.example", "/a", "machines"))
+	e.mutating(t, "b-config", w.hook("b.hooks.example", "/b", "microvms"))
+	e.mutating(t, "a-config", w.hook("a.hooks.example", "/a", "microvms"))
 
-	created, err := e.api.PutMachine(ctx(t), machine("m1"))
+	created, err := e.api.PutMicroVM(ctx(t), microvm("m1"))
 
 	require.NoError(t, err)
 	assert.Equal(t, "from-b", created.Spec.Image)
@@ -100,9 +100,9 @@ func TestAdmission_TheWebhooksOfOneConfigurationAreCalledInListedOrder(t *testin
 		return allow(c)
 	}
 	// The names sort the other way round.
-	e.mutating(t, "cfg", w.hook("z.hooks.example", "/first", "machines"), w.hook("a.hooks.example", "/second", "machines"))
+	e.mutating(t, "cfg", w.hook("z.hooks.example", "/first", "microvms"), w.hook("a.hooks.example", "/second", "microvms"))
 
-	created, err := e.api.PutMachine(ctx(t), machine("m1"))
+	created, err := e.api.PutMicroVM(ctx(t), microvm("m1"))
 
 	require.NoError(t, err)
 	assert.Equal(t, "from-second", created.Spec.Image)
@@ -123,15 +123,15 @@ func TestAdmission_AMutatingPatchThatChangesAnIdentityFieldIsAFailedCall(t *test
 				w.answer = func(c call) *api.AdmissionResponse {
 					return patch(c, `[{"op":"replace","path":"/spec/image","value":"patched"},`+ops[1:])
 				}
-				h := w.hook("a.hooks.example", "/", "machines")
+				h := w.hook("a.hooks.example", "/", "microvms")
 				h.FailurePolicy = policy
 				e.mutating(t, "cfg", h)
 
-				created, err := e.api.PutMachine(ctx(t), machine("m1"))
+				created, err := e.api.PutMicroVM(ctx(t), microvm("m1"))
 
 				if policy == api.FailurePolicyFail {
 					assert.ErrorIs(t, err, api.ErrInternalError)
-					_, err = e.api.GetMachine(ctx(t), "m1")
+					_, err = e.api.GetMicroVM(ctx(t), "m1")
 					assert.ErrorIs(t, err, api.ErrNotFound)
 					continue
 				}
@@ -145,9 +145,9 @@ func TestAdmission_AMutatingPatchThatChangesAnIdentityFieldIsAFailedCall(t *test
 		e := newEnv(t)
 		w := newWebhookServer(t)
 		w.answer = func(c call) *api.AdmissionResponse { return patch(c, setImage) }
-		e.mutating(t, "cfg", w.hook("a.hooks.example", "/", "machines"))
+		e.mutating(t, "cfg", w.hook("a.hooks.example", "/", "microvms"))
 
-		created, err := e.api.PutMachine(ctx(t), machine("m1"))
+		created, err := e.api.PutMicroVM(ctx(t), microvm("m1"))
 
 		require.NoError(t, err)
 		assert.Equal(t, "patched", created.Spec.Image)
@@ -156,16 +156,16 @@ func TestAdmission_AMutatingPatchThatChangesAnIdentityFieldIsAFailedCall(t *test
 
 func TestAdmission_AnIdentityPatchOnAnUpdateIsAFailedCall(t *testing.T) {
 	e := newEnv(t)
-	created := e.createMachine(t, machine("m1"))
+	created := e.createMicroVM(t, microvm("m1"))
 	w := newWebhookServer(t)
 	w.answer = func(c call) *api.AdmissionResponse {
 		return patch(c, `[{"op":"replace","path":"/metadata/resourceVersion","value":"1"}]`)
 	}
-	e.mutating(t, "cfg", w.hook("a.hooks.example", "/", "machines"))
+	e.mutating(t, "cfg", w.hook("a.hooks.example", "/", "microvms"))
 	next := *created
 	next.Spec.IdleTimeoutSeconds = 30
 
-	_, err := e.api.PutMachine(ctx(t), &next)
+	_, err := e.api.PutMicroVM(ctx(t), &next)
 
 	assert.ErrorIs(t, err, api.ErrInternalError)
 }
@@ -183,26 +183,26 @@ func TestAdmission_ARefusalIsForbiddenWhateverTheStatusCodeSays(t *testing.T) {
 				refuse := true
 				w.answer = func(c call) *api.AdmissionResponse {
 					if refuse {
-						return deny(c, http.StatusConflict, "no machines today")
+						return deny(c, http.StatusConflict, "no microvms today")
 					}
 					return allow(c)
 				}
-				h := w.hook("refuse.hooks.example", "/", "machines")
+				h := w.hook("refuse.hooks.example", "/", "microvms")
 				h.FailurePolicy = policy
 				register(e, t, h)
 
-				_, err := e.api.PutMachine(ctx(t), machine("m1"))
+				_, err := e.api.PutMicroVM(ctx(t), microvm("m1"))
 
 				require.ErrorIs(t, err, api.ErrForbidden)
 				assert.NotErrorIs(t, err, api.ErrConflict)
 				assert.Contains(t, err.Error(), "refuse.hooks.example")
-				assert.Contains(t, err.Error(), "no machines today")
-				_, err = e.api.GetMachine(ctx(t), "m1")
+				assert.Contains(t, err.Error(), "no microvms today")
+				_, err = e.api.GetMicroVM(ctx(t), "m1")
 				assert.ErrorIs(t, err, api.ErrNotFound, "a refused write is not stored")
 
 				// Control: the same write is accepted when the webhook allows.
 				refuse = false
-				_, err = e.api.PutMachine(ctx(t), machine("m1"))
+				_, err = e.api.PutMicroVM(ctx(t), microvm("m1"))
 				assert.NoError(t, err)
 			})
 		}
@@ -289,18 +289,18 @@ func TestAdmission_AFailedCallIsInternalUnderFailAndSkippedUnderIgnore(t *testin
 					e := newEnv(t)
 					w := newWebhookServer(t)
 					w.serve, w.answer = f.serve, f.answer
-					h := w.hook("a.hooks.example", "/", "machines")
+					h := w.hook("a.hooks.example", "/", "microvms")
 					h.FailurePolicy = policy
 					if f.h != nil {
 						f.h(t, &h)
 					}
 					register(e, t, h)
 
-					created, err := e.api.PutMachine(ctx(t), machine("m1"))
+					created, err := e.api.PutMicroVM(ctx(t), microvm("m1"))
 
 					if policy == api.FailurePolicyFail {
 						assert.ErrorIs(t, err, api.ErrInternalError, "%s under Fail", name)
-						_, err = e.api.GetMachine(ctx(t), "m1")
+						_, err = e.api.GetMicroVM(ctx(t), "m1")
 						assert.ErrorIs(t, err, api.ErrNotFound, "the write is not stored")
 						continue
 					}
@@ -316,9 +316,9 @@ func TestAdmission_AWebhookThatAnswersWithoutAFaultIsTheControl(t *testing.T) {
 	e := newEnv(t)
 	w := newWebhookServer(t)
 	w.answer = func(c call) *api.AdmissionResponse { return patch(c, setImage) }
-	e.mutating(t, "cfg", w.hook("a.hooks.example", "/", "machines"))
+	e.mutating(t, "cfg", w.hook("a.hooks.example", "/", "microvms"))
 
-	created, err := e.api.PutMachine(ctx(t), machine("m1"))
+	created, err := e.api.PutMicroVM(ctx(t), microvm("m1"))
 
 	require.NoError(t, err)
 	assert.Equal(t, "patched", created.Spec.Image)
@@ -329,11 +329,11 @@ func TestAdmission_AValidatingWebhookThatAnswersWithAPatchIsAFailedCall(t *testi
 		e := newEnv(t)
 		w := newWebhookServer(t)
 		w.answer = func(c call) *api.AdmissionResponse { return patch(c, setImage) }
-		h := w.hook("a.hooks.example", "/", "machines")
+		h := w.hook("a.hooks.example", "/", "microvms")
 		h.FailurePolicy = policy
 		e.validating(t, "cfg", h)
 
-		created, err := e.api.PutMachine(ctx(t), machine("m1"))
+		created, err := e.api.PutMicroVM(ctx(t), microvm("m1"))
 
 		if policy == api.FailurePolicyFail {
 			assert.ErrorIs(t, err, api.ErrInternalError)
@@ -346,7 +346,7 @@ func TestAdmission_AValidatingWebhookThatAnswersWithAPatchIsAFailedCall(t *testi
 
 func TestAdmission_ADeleteIsSentWithTheOldObjectAndCanBeRefused(t *testing.T) {
 	e := newEnv(t)
-	created := e.createMachine(t, machine("m1"))
+	created := e.createMicroVM(t, microvm("m1"))
 	w := newWebhookServer(t)
 	refuse := true
 	w.answer = func(c call) *api.AdmissionResponse {
@@ -355,50 +355,50 @@ func TestAdmission_ADeleteIsSentWithTheOldObjectAndCanBeRefused(t *testing.T) {
 		}
 		return allow(c)
 	}
-	e.validating(t, "cfg", w.hook("a.hooks.example", "/", "machines"))
+	e.validating(t, "cfg", w.hook("a.hooks.example", "/", "microvms"))
 
-	_, err := e.api.DeleteMachine(ctx(t), "m1", created.Metadata.ResourceVersion)
+	_, err := e.api.DeleteMicroVM(ctx(t), "m1", created.Metadata.ResourceVersion)
 
 	require.ErrorIs(t, err, api.ErrForbidden)
 	q := w.received()[0].review.Request
 	assert.Equal(t, api.OperationDelete, q.Operation)
 	assert.NotEmpty(t, q.OldObject)
 	assert.Empty(t, q.Object)
-	_, err = e.api.GetMachine(ctx(t), "m1")
+	_, err = e.api.GetMicroVM(ctx(t), "m1")
 	assert.NoError(t, err, "a refused delete leaves the object")
 
 	// Control: the same delete goes through when the webhook allows.
 	refuse = false
-	_, err = e.api.DeleteMachine(ctx(t), "m1", created.Metadata.ResourceVersion)
+	_, err = e.api.DeleteMicroVM(ctx(t), "m1", created.Metadata.ResourceVersion)
 	assert.NoError(t, err)
 }
 
 func TestAdmission_AMutatingPatchAnsweredToADeleteIsAFailedCall(t *testing.T) {
 	e := newEnv(t)
-	created := e.createMachine(t, machine("m1"))
+	created := e.createMicroVM(t, microvm("m1"))
 	w := newWebhookServer(t)
 	w.answer = func(c call) *api.AdmissionResponse { return patch(c, setImage) }
-	e.mutating(t, "cfg", w.hook("a.hooks.example", "/", "machines"))
+	e.mutating(t, "cfg", w.hook("a.hooks.example", "/", "microvms"))
 
-	_, err := e.api.DeleteMachine(ctx(t), "m1", created.Metadata.ResourceVersion)
+	_, err := e.api.DeleteMicroVM(ctx(t), "m1", created.Metadata.ResourceVersion)
 
 	assert.ErrorIs(t, err, api.ErrInternalError, "a delete has no object to patch")
 }
 
 func TestAdmission_ADeleteOfAnObjectAlreadyBeingDeletedIsNotSent(t *testing.T) {
 	e := newEnv(t)
-	m := machine("m1")
+	m := microvm("m1")
 	m.Metadata.Finalizers = []string{"example.com/hold"}
-	bound := e.createMachine(t, m)
+	bound := e.createMicroVM(t, m)
 	w := newWebhookServer(t)
-	e.validating(t, "cfg", w.hook("a.hooks.example", "/", "machines"))
+	e.validating(t, "cfg", w.hook("a.hooks.example", "/", "microvms"))
 
-	first, err := e.api.DeleteMachine(ctx(t), "m1", bound.Metadata.ResourceVersion)
+	first, err := e.api.DeleteMicroVM(ctx(t), "m1", bound.Metadata.ResourceVersion)
 	require.NoError(t, err)
-	require.NotNil(t, first.Metadata.DeletionTimestamp, "a machine with a finalizer is marked for deletion first")
+	require.NotNil(t, first.Metadata.DeletionTimestamp, "a microvm with a finalizer is marked for deletion first")
 	require.Len(t, w.received(), 1)
 
-	_, err = e.api.DeleteMachine(ctx(t), "m1", first.Metadata.ResourceVersion)
+	_, err = e.api.DeleteMicroVM(ctx(t), "m1", first.Metadata.ResourceVersion)
 	require.NoError(t, err)
 	assert.Len(t, w.received(), 1, "the repeat changes nothing and is not sent")
 }

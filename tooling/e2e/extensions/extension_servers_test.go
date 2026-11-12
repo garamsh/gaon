@@ -18,8 +18,8 @@ import (
 )
 
 // extender is a scheduler extender the test serves on loopback. Its filter
-// refuses the Node named refused for each Machine whose name starts with
-// prefix, and passes every other Node and Machine.
+// refuses the Node named refused for each MicroVM whose name starts with
+// prefix, and passes every other Node and MicroVM.
 type extender struct {
 	URL     string
 	prefix  string
@@ -43,14 +43,14 @@ func startExtender(t *testing.T, prefix, refused string) *extender {
 
 func (e *extender) filter(w http.ResponseWriter, r *http.Request) {
 	var args struct {
-		Machine   *api.Machine `json:"machine"`
+		MicroVM   *api.MicroVM `json:"microvm"`
 		NodeNames []string     `json:"nodeNames"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&args); err != nil || args.Machine == nil {
+	if err := json.NewDecoder(r.Body).Decode(&args); err != nil || args.MicroVM == nil {
 		http.Error(w, "unreadable filter request", http.StatusBadRequest)
 		return
 	}
-	name := args.Machine.Metadata.Name
+	name := args.MicroVM.Metadata.Name
 	res := struct {
 		NodeNames   []string          `json:"nodeNames"`
 		FailedNodes map[string]string `json:"failedNodes"`
@@ -59,7 +59,7 @@ func (e *extender) filter(w http.ResponseWriter, r *http.Request) {
 	e.asked = append(e.asked, name)
 	for _, n := range args.NodeNames {
 		if strings.HasPrefix(name, e.prefix) && n == e.refused {
-			res.FailedNodes[n] = "the extender keeps " + e.prefix + " Machines off " + n
+			res.FailedNodes[n] = "the extender keeps " + e.prefix + " MicroVMs off " + n
 			e.failed = append(e.failed, name+"@"+n)
 			continue
 		}
@@ -70,14 +70,14 @@ func (e *extender) filter(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(res)
 }
 
-// Asked returns the names of the Machines the extender was sent, in order.
+// Asked returns the names of the MicroVMs the extender was sent, in order.
 func (e *extender) Asked() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return append([]string(nil), e.asked...)
 }
 
-// Refusals returns each Node the extender refused, as "<machine>@<node>".
+// Refusals returns each Node the extender refused, as "<microvm>@<node>".
 func (e *extender) Refusals() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()

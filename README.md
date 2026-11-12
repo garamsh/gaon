@@ -1,14 +1,14 @@
 # gaon
 
-gaon is the orchestration project of the garamsh microVM platform. It schedules and manages Machines on nodes whose runtime is mvmd. Its scope is set by the project owner's decisions in garamsh/discussions Discussion #2 (`discussioncomment-19466471`, `discussioncomment-19466961`, `discussioncomment-19533418`).
+gaon is the orchestration project of the garamsh microVM platform. It schedules and manages MicroVMs on nodes whose runtime is mvmd. Its scope is set by the project owner's decisions in garamsh/discussions Discussion #2 (`discussioncomment-19466471`, `discussioncomment-19466961`, `discussioncomment-19533418`).
 
 ## Scope
 
 - **API**: the resource API, with watch, `/status` and finalizers.
 - **Store**: the state behind the API.
-- **Scheduler**: places Machines on nodes.
-- **Controllers**: reconcile resources, including machine and cluster management and multi-cluster, which gaon keeps as resources and controllers.
-- **Gateway** and **Cell Router**: the request path into Machines.
+- **Scheduler**: places MicroVMs on nodes.
+- **Controllers**: reconcile resources, including microvm and cluster management and multi-cluster, which gaon keeps as resources and controllers.
+- **Gateway** and **Cell Router**: the request path into MicroVMs.
 - **Node Agent**: one per node, the counterpart of the kubelet. It watches, renews its Node's Lease, validates epochs, decides OnDemand wake and sleep, reports status, and is a client of mvmd's runtime API.
 
 The control plane runs as host services that naru starts, not inside microVMs.
@@ -22,7 +22,7 @@ The control plane runs as host services that naru starts, not inside microVMs.
 
 ## Status
 
-The first milestone, M1, is a Machine defined in YAML that runs on mvmd on a QEMU development node and runs on another node when its node dies. Its units are planned in `docs/architecture/structure.md` §Units.
+The first milestone, M1, is a MicroVM defined in YAML that runs on mvmd on a QEMU development node and runs on another node when its node dies. Its units are planned in `docs/architecture/structure.md` §Units.
 
 ## Structure
 

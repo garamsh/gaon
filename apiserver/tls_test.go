@@ -129,7 +129,7 @@ func newTokenServer(t *testing.T, tokenFile string) *tlsServer {
 	return s
 }
 
-// get lists Machines as a caller presenting cert, or none where cert is nil,
+// get lists MicroVMs as a caller presenting cert, or none where cert is nil,
 // speaking TLS up to maxVersion where it is not zero, and returns the status.
 func (s *tlsServer) get(t *testing.T, cert *tls.Certificate, maxVersion uint16) (int, error) {
 	t.Helper()
@@ -142,7 +142,7 @@ func (s *tlsServer) get(t *testing.T, cert *tls.Certificate, maxVersion uint16) 
 	}
 	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: cfg}}
 	defer client.CloseIdleConnections()
-	resp, err := client.Get("https://" + s.addr + apiRoot + "/machines")
+	resp, err := client.Get("https://" + s.addr + apiRoot + "/microvms")
 	if err != nil {
 		return 0, err
 	}

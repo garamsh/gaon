@@ -26,7 +26,7 @@ type Server struct {
 
 	mu       sync.Mutex
 	rev      int64
-	machines map[string]api.Machine
+	microvms map[string]api.MicroVM
 	volumes  map[string]api.Volume
 	nodes    map[string]api.Node
 	leases   map[string]api.Lease
@@ -54,7 +54,7 @@ func New(t testing.TB) *Server {
 
 func newServer() (*Server, *http.ServeMux) {
 	s := &Server{
-		machines: map[string]api.Machine{},
+		microvms: map[string]api.MicroVM{},
 		volumes:  map[string]api.Volume{},
 		nodes:    map[string]api.Node{},
 		leases:   map[string]api.Lease{},
@@ -63,10 +63,10 @@ func newServer() (*Server, *http.ServeMux) {
 		failures: map[string]bool{},
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /machines", s.listMachines)
-	mux.HandleFunc("GET /machines/{name}", s.getMachine)
-	mux.HandleFunc("PUT /machines/{name}", s.putMachine)
-	mux.HandleFunc("PUT /machines/{name}/status", s.putMachineStatus)
+	mux.HandleFunc("GET /microvms", s.listMicroVMs)
+	mux.HandleFunc("GET /microvms/{name}", s.getMicroVM)
+	mux.HandleFunc("PUT /microvms/{name}", s.putMicroVM)
+	mux.HandleFunc("PUT /microvms/{name}/status", s.putMicroVMStatus)
 	mux.HandleFunc("GET /volumes", s.listVolumes)
 	mux.HandleFunc("GET /volumes/{name}", s.getVolume)
 	mux.HandleFunc("PUT /volumes/{name}", s.putVolume)
@@ -90,7 +90,7 @@ func (s *Server) FailLeaseWrites(on bool) {
 }
 
 // RequireNode makes the server refuse, as the API server's RBAC does, a
-// Machine list or watch and a Lease write while the Node name does not exist,
+// MicroVM list or watch and a Lease write while the Node name does not exist,
 // and records each refusal.
 func (s *Server) RequireNode(name string) {
 	s.mu.Lock()
@@ -144,11 +144,11 @@ func (s *Server) refuseWithoutNode(w http.ResponseWriter, r *http.Request, e *ap
 	return true
 }
 
-// Machine returns the stored Machine name.
-func (s *Server) Machine(name string) api.Machine {
+// MicroVM returns the stored MicroVM name.
+func (s *Server) MicroVM(name string) api.MicroVM {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.machines[name]
+	return s.microvms[name]
 }
 
 // Node returns the stored Node name, and whether it exists.
@@ -185,53 +185,53 @@ func (s *Server) SetNodeAdmitted(name string, admitted bool) {
 	s.nodes[name] = n
 }
 
-// SetMachine stores m, as a user or the Scheduler does, and emits Added for
-// a Machine that is new and Modified for one that is not.
-func (s *Server) SetMachine(m api.Machine) {
+// SetMicroVM stores m, as a user or the Scheduler does, and emits Added for
+// a MicroVM that is new and Modified for one that is not.
+func (s *Server) SetMicroVM(m api.MicroVM) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m.TypeMeta = api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachine}
+	m.TypeMeta = api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVM}
 	t := api.EventAdded
-	if _, ok := s.machines[m.Metadata.Name]; ok {
+	if _, ok := s.microvms[m.Metadata.Name]; ok {
 		t = api.EventModified
 	}
 	s.rev++
 	m.Metadata.ResourceVersion = version(s.rev)
-	s.machines[m.Metadata.Name] = m
+	s.microvms[m.Metadata.Name] = m
 	s.record(t, &m)
 }
 
-// BumpVersion changes the stored version of the Machine name without emitting
+// BumpVersion changes the stored version of the MicroVM name without emitting
 // an event, as a write does that a watcher has not yet been told of.
 func (s *Server) BumpVersion(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m := s.machines[name]
+	m := s.microvms[name]
 	s.rev++
 	m.Metadata.ResourceVersion = version(s.rev)
-	s.machines[name] = m
+	s.microvms[name] = m
 }
 
-// MarkDeleting sets deletionTimestamp on the Machine name and emits Modified,
+// MarkDeleting sets deletionTimestamp on the MicroVM name and emits Modified,
 // as a delete does while a finalizer is held.
 func (s *Server) MarkDeleting(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m := s.machines[name]
+	m := s.microvms[name]
 	now := time.Now().UTC()
 	m.Metadata.DeletionTimestamp = &now
 	s.rev++
 	m.Metadata.ResourceVersion = version(s.rev)
-	s.machines[name] = m
+	s.microvms[name] = m
 	s.record(api.EventModified, &m)
 }
 
-// DeleteMachine removes the Machine name and emits Deleted.
-func (s *Server) DeleteMachine(name string) {
+// DeleteMicroVM removes the MicroVM name and emits Deleted.
+func (s *Server) DeleteMicroVM(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m := s.machines[name]
-	delete(s.machines, name)
+	m := s.microvms[name]
+	delete(s.microvms, name)
 	s.rev++
 	m.Metadata.ResourceVersion = version(s.rev)
 	s.record(api.EventDeleted, &m)
@@ -239,15 +239,15 @@ func (s *Server) DeleteMachine(name string) {
 
 // Inject emits an event for m without storing it, as a delayed or replayed
 // event reaches a watcher.
-func (s *Server) Inject(t api.EventType, m api.Machine) {
+func (s *Server) Inject(t api.EventType, m api.MicroVM) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m.TypeMeta = api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachine}
+	m.TypeMeta = api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVM}
 	s.rev++
 	s.record(t, &m)
 }
 
-func (s *Server) record(t api.EventType, m *api.Machine) {
+func (s *Server) record(t api.EventType, m *api.MicroVM) {
 	ev, _ := api.NewEvent(t, m)
 	s.log = append(s.log, logged{rev: s.rev, event: ev})
 	close(s.changed)

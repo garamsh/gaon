@@ -1,4 +1,4 @@
-package machines_test
+package microvms_test
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 
 	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
-	"github.com/garamsh/gaon/node-agent/internal/machines"
-	"github.com/garamsh/gaon/node-agent/internal/machines/network"
+	"github.com/garamsh/gaon/node-agent/internal/microvms"
+	"github.com/garamsh/gaon/node-agent/internal/microvms/network"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
@@ -29,20 +29,20 @@ func withNetwork(t *testing.T, egress, ingress []string) func(*env) {
 
 func failedWith(t *testing.T, e *env, name, reason string) api.Condition {
 	t.Helper()
-	eventually(t, name+" is Failed", e.phase(name, 1, api.MachineFailed))
-	s := e.gaon.Machine(name).Status
+	eventually(t, name+" is Failed", e.phase(name, 1, api.MicroVMFailed))
+	s := e.gaon.MicroVM(name).Status
 	require.Len(t, s.Conditions, 1)
 	assert.Equal(t, reason, s.Conditions[0].Reason)
 	assert.Equal(t, api.ConditionFalse, s.Conditions[0].Status)
 	return s.Conditions[0]
 }
 
-func TestNetwork_CreatesAMachineWithThePolicyOfTheFlagsAndItsPorts(t *testing.T) {
+func TestNetwork_CreatesAMicroVMWithThePolicyOfTheFlagsAndItsPorts(t *testing.T) {
 	e := start(t, true, nil, withNetwork(t, []string{"10.0.0.0/8", "2001:db8::/32"}, []string{"192.168.0.0/16"}))
-	web := machine("web", 1, node, api.RunAlways)
+	web := microvm("web", 1, node, api.RunAlways)
 	web.Spec.Ports = []int32{80, 443}
-	e.gaon.SetMachine(web)
-	e.gaon.SetMachine(machine("quiet", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(web)
+	e.gaon.SetMicroVM(microvm("quiet", 1, node, api.RunAlways))
 
 	eventually(t, "web-e1 runs", e.running("web-e1"))
 	eventually(t, "quiet-e1 runs", e.running("quiet-e1"))
@@ -65,14 +65,14 @@ func TestNetwork_CreatesAMachineWithThePolicyOfTheFlagsAndItsPorts(t *testing.T)
 
 	quiet, _ := e.mvmd.Machine("quiet-e1")
 	assert.Len(t, quiet.GetNetworkPolicy().GetEgress(), 2, "control: egress does not depend on the ports")
-	assert.Empty(t, quiet.GetNetworkPolicy().GetIngress(), "a Machine with no ports accepts nothing")
+	assert.Empty(t, quiet.GetNetworkPolicy().GetIngress(), "a MicroVM with no ports accepts nothing")
 }
 
 func TestNetwork_WithNoPrefixesThePolicyIsEmpty(t *testing.T) {
 	e := start(t, true, nil)
-	web := machine("web", 1, node, api.RunAlways)
+	web := microvm("web", 1, node, api.RunAlways)
 	web.Spec.Ports = []int32{80}
-	e.gaon.SetMachine(web)
+	e.gaon.SetMicroVM(web)
 
 	eventually(t, "web-e1 runs", e.running("web-e1"))
 	got, _ := e.mvmd.Machine("web-e1")
@@ -80,52 +80,52 @@ func TestNetwork_WithNoPrefixesThePolicyIsEmpty(t *testing.T) {
 	assert.Empty(t, got.GetNetworkPolicy().GetIngress(), "a port opens nothing until an ingress prefix is given")
 }
 
-func TestNetwork_FailsAMachineNamingANetworkItDoesNotServe(t *testing.T) {
+func TestNetwork_FailsAMicroVMNamingANetworkItDoesNotServe(t *testing.T) {
 	e := start(t, true, nil)
-	other := machine("other", 1, node, api.RunAlways)
+	other := microvm("other", 1, node, api.RunAlways)
 	other.Spec.Networks = []string{"default", "tenant-b"}
-	e.gaon.SetMachine(other)
-	named := machine("named", 1, node, api.RunAlways)
+	e.gaon.SetMicroVM(other)
+	named := microvm("named", 1, node, api.RunAlways)
 	named.Spec.Networks = []string{"default"}
-	e.gaon.SetMachine(named)
-	e.gaon.SetMachine(machine("none", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(named)
+	e.gaon.SetMicroVM(microvm("none", 1, node, api.RunAlways))
 
 	c := failedWith(t, e, "other", network.ReasonUnknownNetwork)
 	assert.Contains(t, c.Message, "tenant-b")
-	eventually(t, "control: a Machine naming default runs", e.running("named-e1"))
-	eventually(t, "control: a Machine naming no network runs", e.running("none-e1"))
-	assert.NotContains(t, e.mvmd.Calls(), "CreateMachine other-e1", "a refused Machine is never created, so it never runs unprotected")
+	eventually(t, "control: a MicroVM naming default runs", e.running("named-e1"))
+	eventually(t, "control: a MicroVM naming no network runs", e.running("none-e1"))
+	assert.NotContains(t, e.mvmd.Calls(), "CreateMachine other-e1", "a refused MicroVM is never created, so it never runs unprotected")
 }
 
-func TestNetwork_FailsAMachineWithAPortMvmdWouldRefuse(t *testing.T) {
+func TestNetwork_FailsAMicroVMWithAPortMvmdWouldRefuse(t *testing.T) {
 	e := start(t, true, nil, withNetwork(t, nil, []string{"10.0.0.0/8"}))
 	for name, port := range map[string]int32{"zero": 0, "negative": -1, "high": 70000, "above": 65536, "first": 1, "last": 65535} {
-		m := machine(name, 1, node, api.RunAlways)
+		m := microvm(name, 1, node, api.RunAlways)
 		m.Spec.Ports = []int32{port}
-		e.gaon.SetMachine(m)
+		e.gaon.SetMicroVM(m)
 	}
 
 	for _, name := range []string{"zero", "negative", "high", "above"} {
-		failedWith(t, e, name, machines.ReasonInvalidSpec)
+		failedWith(t, e, name, microvms.ReasonInvalidSpec)
 		assert.NotContains(t, e.mvmd.Calls(), "CreateMachine "+name+"-e1")
 	}
 	eventually(t, "control: port 1 runs", e.running("first-e1"))
 	eventually(t, "control: port 65535 runs", e.running("last-e1"))
 }
 
-// refusingNetwork refuses the Machines named in refuse and fails with a plain
-// error the Machines named in flaky, the first time.
+// refusingNetwork refuses the MicroVMs named in refuse and fails with a plain
+// error the MicroVMs named in flaky, the first time.
 type refusingNetwork struct {
 	mu     sync.Mutex
 	refuse map[string]string
 	flaky  map[string]bool
 }
 
-func (n *refusingNetwork) Policy(_ context.Context, m *api.Machine) (*v1alpha2.NetworkPolicy, error) {
+func (n *refusingNetwork) Policy(_ context.Context, m *api.MicroVM) (*v1alpha2.NetworkPolicy, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if r, ok := n.refuse[m.Metadata.Name]; ok {
-		return nil, &machines.Refusal{Reason: r, Message: "refused by the test plugin"}
+		return nil, &microvms.Refusal{Reason: r, Message: "refused by the test plugin"}
 	}
 	if n.flaky[m.Metadata.Name] {
 		n.flaky[m.Metadata.Name] = false
@@ -134,20 +134,20 @@ func (n *refusingNetwork) Policy(_ context.Context, m *api.Machine) (*v1alpha2.N
 	return &v1alpha2.NetworkPolicy{}, nil
 }
 
-func TestNetwork_ARefusalFailsTheMachineWithThePluginsReasonAndAnotherErrorIsRetried(t *testing.T) {
+func TestNetwork_ARefusalFailsTheMicroVMWithThePluginsReasonAndAnotherErrorIsRetried(t *testing.T) {
 	n := &refusingNetwork{refuse: map[string]string{"no": "Quota"}, flaky: map[string]bool{"later": true}}
 	e := start(t, true, nil, func(e *env) { e.network = n })
-	e.gaon.SetMachine(machine("no", 1, node, api.RunAlways))
-	e.gaon.SetMachine(machine("later", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("no", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("later", 1, node, api.RunAlways))
 
 	c := failedWith(t, e, "no", "Quota")
 	assert.Equal(t, "refused by the test plugin", c.Message)
 	eventually(t, "a plugin error that is not a refusal is retried until it clears", e.running("later-e1"))
-	assert.Equal(t, api.MachineRunning, e.gaon.Machine("later").Status.Phase)
+	assert.Equal(t, api.MicroVMRunning, e.gaon.MicroVM("later").Status.Phase)
 }
 
 // ledgerStorage is a storage plugin that records what it was asked, and
-// attaches one disk named for each Machine, which it makes on mvmd as a real
+// attaches one disk named for each MicroVM, which it makes on mvmd as a real
 // plugin does.
 type ledgerStorage struct {
 	mvmd     *fakemvmd.Server
@@ -157,11 +157,11 @@ type ledgerStorage struct {
 	released []string
 }
 
-func (s *ledgerStorage) Attach(_ context.Context, m *api.Machine) ([]*v1alpha2.DiskAttachment, error) {
+func (s *ledgerStorage) Attach(_ context.Context, m *api.MicroVM) ([]*v1alpha2.DiskAttachment, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.refuse[m.Metadata.Name] {
-		return nil, &machines.Refusal{Reason: "VolumeNotFound", Message: "no volume for " + m.Metadata.Name}
+		return nil, &microvms.Refusal{Reason: "VolumeNotFound", Message: "no volume for " + m.Metadata.Name}
 	}
 	s.attached = append(s.attached, m.Metadata.Name)
 	s.mvmd.AddDisk("disk-"+m.Metadata.Name, 1<<20)
@@ -181,10 +181,10 @@ func (s *ledgerStorage) releasedIDs() []string {
 	return slices.Clone(s.released)
 }
 
-func TestStorage_CreatesAMachineWithTheDisksItAttached(t *testing.T) {
+func TestStorage_CreatesAMicroVMWithTheDisksItAttached(t *testing.T) {
 	s := &ledgerStorage{}
 	e := start(t, true, nil, func(e *env) { e.storage, s.mvmd = s, e.mvmd })
-	e.gaon.SetMachine(machine("db", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("db", 1, node, api.RunAlways))
 
 	eventually(t, "db-e1 runs", e.running("db-e1"))
 	got, _ := e.mvmd.Machine("db-e1")
@@ -193,35 +193,35 @@ func TestStorage_CreatesAMachineWithTheDisksItAttached(t *testing.T) {
 	assert.True(t, got.GetDisks()[0].GetReadOnly())
 }
 
-func TestStorage_ARefusalFailsTheMachineBeforeMvmdIsAskedToCreateIt(t *testing.T) {
+func TestStorage_ARefusalFailsTheMicroVMBeforeMvmdIsAskedToCreateIt(t *testing.T) {
 	s := &ledgerStorage{refuse: map[string]bool{"lost": true}}
 	e := start(t, true, nil, func(e *env) { e.storage, s.mvmd = s, e.mvmd })
-	e.gaon.SetMachine(machine("lost", 1, node, api.RunAlways))
-	e.gaon.SetMachine(machine("found", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("lost", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("found", 1, node, api.RunAlways))
 
 	c := failedWith(t, e, "lost", "VolumeNotFound")
 	assert.Equal(t, "no volume for lost", c.Message)
-	eventually(t, "control: a Machine the plugin serves runs", e.running("found-e1"))
+	eventually(t, "control: a MicroVM the plugin serves runs", e.running("found-e1"))
 	assert.NotContains(t, e.mvmd.Calls(), "CreateMachine lost-e1")
 }
 
-func TestStorage_ReleasesWhatItAttachedWhenTheMachineIsRemovedAndWhenMvmdRejectsTheCreate(t *testing.T) {
+func TestStorage_ReleasesWhatItAttachedWhenTheMicroVMIsRemovedAndWhenMvmdRejectsTheCreate(t *testing.T) {
 	s := &ledgerStorage{}
 	e := start(t, true, nil, func(e *env) {
 		e.storage, s.mvmd = s, e.mvmd
 		e.mvmd.MaxVCPUs = 2
 	})
-	over := machine("over", 1, node, api.RunAlways)
+	over := microvm("over", 1, node, api.RunAlways)
 	over.Spec.Resources.Limits.CPU = "4"
-	e.gaon.SetMachine(over)
-	e.gaon.SetMachine(machine("kept", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(over)
+	e.gaon.SetMicroVM(microvm("kept", 1, node, api.RunAlways))
 
-	eventually(t, "over is Failed", e.phase("over", 1, api.MachineFailed))
+	eventually(t, "over is Failed", e.phase("over", 1, api.MicroVMFailed))
 	eventually(t, "kept runs", e.running("kept-e1"))
 	assert.Contains(t, s.releasedIDs(), "over-e1", "the disks of a create mvmd rejected are given back")
-	assert.NotContains(t, s.releasedIDs(), "kept-e1", "control: a running Machine keeps its disks")
+	assert.NotContains(t, s.releasedIDs(), "kept-e1", "control: a running MicroVM keeps its disks")
 
-	e.gaon.SetMachine(machine("kept", 2, "n2", api.RunAlways))
+	e.gaon.SetMicroVM(microvm("kept", 2, "n2", api.RunAlways))
 	eventually(t, "kept-e1 is removed", e.gone("kept-e1"))
 	eventually(t, "its disks are released with it", func() bool { return slices.Contains(s.releasedIDs(), "kept-e1") })
 }

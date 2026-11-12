@@ -15,7 +15,7 @@ import (
 func TestPutVolume_CreateStartsPendingWhateverStatusItCarries(t *testing.T) {
 	e := newEnv(t)
 	v := volume("v1")
-	v.Status = api.VolumeStatus{Phase: api.VolumeBound, Attachment: &api.Attachment{MachineName: "m1", BindingEpoch: 1}, Capacity: "1Gi"}
+	v.Status = api.VolumeStatus{Phase: api.VolumeBound, Attachment: &api.Attachment{MicroVMName: "m1", BindingEpoch: 1}, Capacity: "1Gi"}
 	v.Metadata.Generation = 7
 	then := time.Now().UTC()
 	v.Metadata.DeletionTimestamp = &then

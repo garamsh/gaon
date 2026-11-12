@@ -16,13 +16,13 @@ import (
 
 // fakeAPI serves the five endpoints the Scheduler calls over httptest, with
 // the compare-and-swap the resource API specifies. A request to any other
-// path fails the test, so a Lease read or a Machine PUT cannot go unseen.
+// path fails the test, so a Lease read or a MicroVM PUT cannot go unseen.
 type fakeAPI struct {
 	t   *testing.T
 	mu  sync.Mutex
 	rev int
 
-	machines map[string]*api.Machine
+	microvms map[string]*api.MicroVM
 	nodes    map[string]*api.Node
 	volumes  map[string]*api.Volume
 
@@ -36,13 +36,13 @@ type fakeAPI struct {
 }
 
 func newFakeAPI(t *testing.T) (*fakeAPI, *api.Client) {
-	f := &fakeAPI{t: t, machines: map[string]*api.Machine{}, nodes: map[string]*api.Node{}, volumes: map[string]*api.Volume{}}
+	f := &fakeAPI{t: t, microvms: map[string]*api.MicroVM{}, nodes: map[string]*api.Node{}, volumes: map[string]*api.Volume{}}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /machines", f.listMachines)
+	mux.HandleFunc("GET /microvms", f.listMicroVMs)
 	mux.HandleFunc("GET /nodes", f.listNodes)
 	mux.HandleFunc("GET /volumes", f.listVolumes)
-	mux.HandleFunc("POST /machines/{name}/binding", f.bind)
-	mux.HandleFunc("PUT /machines/{name}/status", f.putStatus)
+	mux.HandleFunc("POST /microvms/{name}/binding", f.bind)
+	mux.HandleFunc("PUT /microvms/{name}/status", f.putStatus)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		writeError(w, api.NewAPIError(api.ReasonNotFound, "no such path"))
@@ -77,28 +77,28 @@ func (f *fakeAPI) addVolume(v *api.Volume) {
 	f.volumes[v.Metadata.Name] = v
 }
 
-func (f *fakeAPI) addMachine(m *api.Machine) {
+func (f *fakeAPI) addMicroVM(m *api.MicroVM) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rev++
-	m.TypeMeta = api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachine}
+	m.TypeMeta = api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVM}
 	m.Metadata.ResourceVersion = api.ResourceVersion(strconv.Itoa(f.rev))
 	if m.Status.Phase == "" {
-		m.Status.Phase = api.MachinePending
+		m.Status.Phase = api.MicroVMPending
 		m.Status.BindingEpoch = m.Spec.BindingEpoch
 	}
-	f.machines[m.Metadata.Name] = m
+	f.microvms[m.Metadata.Name] = m
 }
 
-// machine returns a copy of the named Machine as stored, the zero Machine
+// microvm returns a copy of the named MicroVM as stored, the zero MicroVM
 // when none is.
-func (f *fakeAPI) machine(name string) api.Machine {
+func (f *fakeAPI) microvm(name string) api.MicroVM {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if m, ok := f.machines[name]; ok {
+	if m, ok := f.microvms[name]; ok {
 		return *m
 	}
-	return api.Machine{}
+	return api.MicroVM{}
 }
 
 func (f *fakeAPI) bindingCount() int {
@@ -113,12 +113,12 @@ func (f *fakeAPI) statusPutCount() int {
 	return f.statusPuts
 }
 
-func (f *fakeAPI) listMachines(w http.ResponseWriter, _ *http.Request) {
+func (f *fakeAPI) listMicroVMs(w http.ResponseWriter, _ *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	list := api.MachineList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachineList}, Metadata: api.ListMeta{ResourceVersion: api.ResourceVersion(strconv.Itoa(f.rev))}}
-	for _, name := range sortedKeys(f.machines) {
-		list.Items = append(list.Items, *f.machines[name])
+	list := api.MicroVMList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVMList}, Metadata: api.ListMeta{ResourceVersion: api.ResourceVersion(strconv.Itoa(f.rev))}}
+	for _, name := range sortedKeys(f.microvms) {
+		list.Items = append(list.Items, *f.microvms[name])
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -173,13 +173,13 @@ func (f *fakeAPI) bind(w http.ResponseWriter, r *http.Request) {
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	m, ok := f.machines[r.PathValue("name")]
+	m, ok := f.microvms[r.PathValue("name")]
 	switch {
 	case !ok:
-		writeError(w, api.NewAPIError(api.ReasonNotFound, "no machine"))
+		writeError(w, api.NewAPIError(api.ReasonNotFound, "no microvm"))
 		return
 	case m.Metadata.ResourceVersion != b.ResourceVersion:
-		writeError(w, api.NewAPIError(api.ReasonConflict, "machine is at version %s, not %s", m.Metadata.ResourceVersion, b.ResourceVersion))
+		writeError(w, api.NewAPIError(api.ReasonConflict, "microvm is at version %s, not %s", m.Metadata.ResourceVersion, b.ResourceVersion))
 		return
 	}
 	next := *m
@@ -189,25 +189,25 @@ func (f *fakeAPI) bind(w http.ResponseWriter, r *http.Request) {
 	}
 	f.rev++
 	next.Metadata.ResourceVersion = api.ResourceVersion(strconv.Itoa(f.rev))
-	f.machines[next.Metadata.Name] = &next
+	f.microvms[next.Metadata.Name] = &next
 	writeJSON(w, http.StatusOK, next)
 }
 
 func (f *fakeAPI) putStatus(w http.ResponseWriter, r *http.Request) {
-	var next api.Machine
+	var next api.MicroVM
 	if !decode(w, r, &next) {
 		return
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.statusPuts++
-	m, ok := f.machines[r.PathValue("name")]
+	m, ok := f.microvms[r.PathValue("name")]
 	switch {
 	case !ok:
-		writeError(w, api.NewAPIError(api.ReasonNotFound, "no machine"))
+		writeError(w, api.NewAPIError(api.ReasonNotFound, "no microvm"))
 		return
 	case m.Metadata.ResourceVersion != next.Metadata.ResourceVersion:
-		writeError(w, api.NewAPIError(api.ReasonConflict, "machine is at version %s, not %s", m.Metadata.ResourceVersion, next.Metadata.ResourceVersion))
+		writeError(w, api.NewAPIError(api.ReasonConflict, "microvm is at version %s, not %s", m.Metadata.ResourceVersion, next.Metadata.ResourceVersion))
 		return
 	}
 	if err := next.ValidateStatusUpdate(m); err != nil {
@@ -218,7 +218,7 @@ func (f *fakeAPI) putStatus(w http.ResponseWriter, r *http.Request) {
 	stored.Status = next.Status
 	f.rev++
 	stored.Metadata.ResourceVersion = api.ResourceVersion(strconv.Itoa(f.rev))
-	f.machines[stored.Metadata.Name] = &stored
+	f.microvms[stored.Metadata.Name] = &stored
 	writeJSON(w, http.StatusOK, stored)
 }
 
@@ -278,18 +278,18 @@ func volume(name, class, nodeName string) *api.Volume {
 }
 
 // withVolumes makes m name the Volumes given.
-func withVolumes(m *api.Machine, names ...string) *api.Machine {
+func withVolumes(m *api.MicroVM, names ...string) *api.MicroVM {
 	for _, n := range names {
-		m.Spec.Volumes = append(m.Spec.Volumes, api.MachineVolume{Name: n, MountPath: "/mnt/" + n})
+		m.Spec.Volumes = append(m.Spec.Volumes, api.MicroVMVolume{Name: n, MountPath: "/mnt/" + n})
 	}
 	return m
 }
 
-// newMachine returns an unbound Machine requesting cpu and memory.
-func newMachine(name, cpu, memory string) *api.Machine {
-	return &api.Machine{
+// newMicroVM returns an unbound MicroVM requesting cpu and memory.
+func newMicroVM(name, cpu, memory string) *api.MicroVM {
+	return &api.MicroVM{
 		Metadata: api.ObjectMeta{Name: name},
-		Spec: api.MachineSpec{
+		Spec: api.MicroVMSpec{
 			RunStrategy: api.RunAlways,
 			Resources:   api.ResourceRequirements{Requests: api.ResourceList{CPU: api.Quantity(cpu), Memory: api.Quantity(memory)}},
 		},
@@ -297,9 +297,9 @@ func newMachine(name, cpu, memory string) *api.Machine {
 }
 
 // bound returns m bound to nodeName at epoch.
-func bound(m *api.Machine, nodeName string, epoch api.Epoch) *api.Machine {
+func bound(m *api.MicroVM, nodeName string, epoch api.Epoch) *api.MicroVM {
 	m.Spec.NodeName, m.Spec.BindingEpoch = nodeName, epoch
-	m.Status = api.MachineStatus{Phase: api.MachineRunning, BindingEpoch: epoch}
+	m.Status = api.MicroVMStatus{Phase: api.MicroVMRunning, BindingEpoch: epoch}
 	return m
 }
 

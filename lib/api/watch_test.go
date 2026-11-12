@@ -15,20 +15,20 @@ import (
 )
 
 // watchOf serves stream as the body of a watch and returns it opened.
-func watchOf(t *testing.T, stream string) *api.Watch[api.Machine] {
+func watchOf(t *testing.T, stream string) *api.Watch[api.MicroVM] {
 	t.Helper()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, stream)
 	}))
 	t.Cleanup(ts.Close)
-	w, err := api.NewClient(ts.URL, ts.Client()).WatchMachines(testContext(t), "1")
+	w, err := api.NewClient(ts.URL, ts.Client()).WatchMicroVMs(testContext(t), "1")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = w.Close() })
 	return w
 }
 
 func TestWatchEventWireShape(t *testing.T) {
-	ev, err := api.NewEvent(api.EventModified, newMachine("m1"))
+	ev, err := api.NewEvent(api.EventModified, newMicroVM("m1"))
 	require.NoError(t, err)
 	line, err := json.Marshal(ev)
 	require.NoError(t, err)
@@ -43,7 +43,7 @@ func TestWatchEventWireShape(t *testing.T) {
 		} `json:"object"`
 	}
 	require.NoError(t, json.Unmarshal(line, &decoded))
-	assert.Equal(t, "Machine", decoded.Object.Kind)
+	assert.Equal(t, "MicroVM", decoded.Object.Kind)
 	assert.Equal(t, "m1", decoded.Object.Metadata.Name)
 
 	errEvent, err := api.NewErrorEvent(api.NewAPIError(api.ReasonExpired, "gone"))
@@ -53,19 +53,19 @@ func TestWatchEventWireShape(t *testing.T) {
 	assert.JSONEq(t, `{"type":"Error","object":{"code":410,"reason":"Expired","message":"gone"}}`, string(line))
 }
 
-func TestNewMachineEventRefusesTypesThatCarryNoMachine(t *testing.T) {
-	_, err := api.NewEvent(api.EventError, newMachine("m1"))
+func TestNewMicroVMEventRefusesTypesThatCarryNoMicroVM(t *testing.T) {
+	_, err := api.NewEvent(api.EventError, newMicroVM("m1"))
 	assert.Error(t, err)
 	for _, ty := range []api.EventType{api.EventAdded, api.EventModified, api.EventDeleted} {
-		_, err := api.NewEvent(ty, newMachine("m1"))
+		_, err := api.NewEvent(ty, newMicroVM("m1"))
 		assert.NoError(t, err, string(ty))
 	}
 }
 
-func TestMachineWatchDecodesNewlineDelimitedEvents(t *testing.T) {
+func TestMicroVMWatchDecodesNewlineDelimitedEvents(t *testing.T) {
 	var stream strings.Builder
 	for _, ty := range []api.EventType{api.EventAdded, api.EventModified, api.EventDeleted} {
-		ev, err := api.NewEvent(ty, newMachine("m1"))
+		ev, err := api.NewEvent(ty, newMicroVM("m1"))
 		require.NoError(t, err)
 		line, err := json.Marshal(ev)
 		require.NoError(t, err)
@@ -83,15 +83,15 @@ func TestMachineWatchDecodesNewlineDelimitedEvents(t *testing.T) {
 	assert.ErrorIs(t, err, io.EOF)
 }
 
-func TestMachineWatchRefusesWhatItCannotRead(t *testing.T) {
-	machine := `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"Machine","metadata":{"name":"m1"}}`
+func TestMicroVMWatchRefusesWhatItCannotRead(t *testing.T) {
+	microvm := `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"MicroVM","metadata":{"name":"m1"}}`
 	tests := []struct {
 		name   string
 		stream string
 	}{
-		{"unknown event type", `{"type":"Bookmark","object":` + machine + "}\n"},
+		{"unknown event type", `{"type":"Bookmark","object":` + microvm + "}\n"},
 		{"object of another kind", `{"type":"Added","object":{"kind":"Volume"}}` + "\n"},
-		{"machine with a malformed quantity", `{"type":"Added","object":{"kind":"Machine","spec":{"rootDiskSize":"4GB"}}}` + "\n"},
+		{"microvm with a malformed quantity", `{"type":"Added","object":{"kind":"MicroVM","spec":{"rootDiskSize":"4GB"}}}` + "\n"},
 		{"error event with a non-object", `{"type":"Error","object":"expired"}` + "\n"},
 		{"line cut short", `{"type":"Added","obj`},
 	}
@@ -104,11 +104,11 @@ func TestMachineWatchRefusesWhatItCannotRead(t *testing.T) {
 	}
 
 	// control: the same stream with a well-formed Added event is read.
-	ev := nextEvent(t, watchOf(t, `{"type":"Added","object":`+machine+"}\n"))
+	ev := nextEvent(t, watchOf(t, `{"type":"Added","object":`+microvm+"}\n"))
 	assert.Equal(t, api.EventAdded, ev.Type)
 }
 
-func TestMachineWatchReturnsTheErrorObjectOfAnErrorEvent(t *testing.T) {
+func TestMicroVMWatchReturnsTheErrorObjectOfAnErrorEvent(t *testing.T) {
 	w := watchOf(t, `{"type":"Error","object":{"code":410,"reason":"Expired","message":"too old"}}`+"\n")
 	_, err := w.Next()
 	assert.ErrorIs(t, err, api.ErrExpired)

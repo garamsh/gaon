@@ -37,13 +37,13 @@ func newMemoryServer(t *testing.T) (*memoryServer, *api.Client) {
 	t.Helper()
 	s := &memoryServer{objects: map[string][]byte{}, changed: make(chan struct{})}
 	mux := http.NewServeMux()
-	mux.HandleFunc("PUT /machines/{name}", s.putMachine)
-	mux.HandleFunc("POST /machines/{name}/binding", s.bindMachine)
-	mux.HandleFunc("PUT /machines/{name}/status", s.putMachineStatus)
-	mux.HandleFunc("DELETE /machines/{name}", s.deleteMachine)
-	mux.HandleFunc("GET /machines/{name}", getObject[api.Machine](s, "machines/"))
-	mux.HandleFunc("GET /machines", listOrWatch(s, "machines/", api.KindMachine, func(items []api.Machine, rv api.ResourceVersion) any {
-		return &api.MachineList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachineList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
+	mux.HandleFunc("PUT /microvms/{name}", s.putMicroVM)
+	mux.HandleFunc("POST /microvms/{name}/binding", s.bindMicroVM)
+	mux.HandleFunc("PUT /microvms/{name}/status", s.putMicroVMStatus)
+	mux.HandleFunc("DELETE /microvms/{name}", s.deleteMicroVM)
+	mux.HandleFunc("GET /microvms/{name}", getObject[api.MicroVM](s, "microvms/"))
+	mux.HandleFunc("GET /microvms", listOrWatch(s, "microvms/", api.KindMicroVM, func(items []api.MicroVM, rv api.ResourceVersion) any {
+		return &api.MicroVMList{TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVMList}, Metadata: api.ListMeta{ResourceVersion: rv}, Items: items}
 	}))
 	mux.HandleFunc("PUT /volumes/{name}", putValidated(s, "volumes/", api.KindVolume, func(v *api.Volume) (*api.ObjectMeta, error) { return &v.Metadata, v.Validate() }))
 	mux.HandleFunc("DELETE /volumes/{name}", s.deleteVolume)
@@ -206,8 +206,8 @@ func (s *memoryServer) seedVolume(v *api.Volume) {
 	s.objects["volumes/"+v.Metadata.Name] = mustJSON(v)
 }
 
-func (s *memoryServer) putMachine(w http.ResponseWriter, r *http.Request) {
-	var m api.Machine
+func (s *memoryServer) putMicroVM(w http.ResponseWriter, r *http.Request) {
+	var m api.MicroVM
 	if !decodeBody(w, r, &m) || !s.nameMatches(w, r, m.Metadata.Name) {
 		return
 	}
@@ -217,7 +217,7 @@ func (s *memoryServer) putMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	old, found := s.loadMachine(m.Metadata.Name)
+	old, found := s.loadMicroVM(m.Metadata.Name)
 	if err := s.checkVersion(found, old.Metadata.ResourceVersion, m.Metadata.ResourceVersion, m.Metadata.Name); err != nil {
 		writeError(w, err)
 		return
@@ -229,21 +229,21 @@ func (s *memoryServer) putMachine(w http.ResponseWriter, r *http.Request) {
 		}
 		m.Status = old.Status
 		m.Spec.NodeName, m.Spec.BindingEpoch = old.Spec.NodeName, old.Spec.BindingEpoch
-		s.storeMachine(w, &m, api.EventModified)
+		s.storeMicroVM(w, &m, api.EventModified)
 		return
 	}
-	m.Status = api.MachineStatus{Phase: api.MachinePending}
-	s.storeMachine(w, &m, api.EventAdded)
+	m.Status = api.MicroVMStatus{Phase: api.MicroVMPending}
+	s.storeMicroVM(w, &m, api.EventAdded)
 }
 
-func (s *memoryServer) bindMachine(w http.ResponseWriter, r *http.Request) {
+func (s *memoryServer) bindMicroVM(w http.ResponseWriter, r *http.Request) {
 	var b api.Binding
 	if !decodeBody(w, r, &b) {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m, found := s.loadMachine(r.PathValue("name"))
+	m, found := s.loadMicroVM(r.PathValue("name"))
 	if err := s.requireVersion(found, m.Metadata.ResourceVersion, b.ResourceVersion, r.PathValue("name")); err != nil {
 		writeError(w, err)
 		return
@@ -252,17 +252,17 @@ func (s *memoryServer) bindMachine(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	s.storeMachine(w, &m, api.EventModified)
+	s.storeMicroVM(w, &m, api.EventModified)
 }
 
-func (s *memoryServer) putMachineStatus(w http.ResponseWriter, r *http.Request) {
-	var next api.Machine
+func (s *memoryServer) putMicroVMStatus(w http.ResponseWriter, r *http.Request) {
+	var next api.MicroVM
 	if !decodeBody(w, r, &next) || !s.nameMatches(w, r, next.Metadata.Name) {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m, found := s.loadMachine(next.Metadata.Name)
+	m, found := s.loadMicroVM(next.Metadata.Name)
 	if err := s.requireVersion(found, m.Metadata.ResourceVersion, next.Metadata.ResourceVersion, next.Metadata.Name); err != nil {
 		writeError(w, err)
 		return
@@ -272,14 +272,14 @@ func (s *memoryServer) putMachineStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	m.Status = next.Status
-	s.storeMachine(w, &m, api.EventModified)
+	s.storeMicroVM(w, &m, api.EventModified)
 }
 
-func (s *memoryServer) deleteMachine(w http.ResponseWriter, r *http.Request) {
+func (s *memoryServer) deleteMicroVM(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m, found := s.loadMachine(name)
+	m, found := s.loadMicroVM(name)
 	if err := s.requireVersion(found, m.Metadata.ResourceVersion, api.ResourceVersion(r.URL.Query().Get("resourceVersion")), name); err != nil {
 		writeError(w, err)
 		return
@@ -287,13 +287,13 @@ func (s *memoryServer) deleteMachine(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	m.Metadata.DeletionTimestamp = &now
 	if len(m.Metadata.Finalizers) > 0 {
-		s.storeMachine(w, &m, api.EventModified)
+		s.storeMicroVM(w, &m, api.EventModified)
 		return
 	}
-	delete(s.objects, "machines/"+name)
+	delete(s.objects, "microvms/"+name)
 	s.rev++
 	m.Metadata.ResourceVersion = api.ResourceVersion(strconv.FormatInt(s.rev, 10))
-	record(s, api.KindMachine, &m, api.EventDeleted)
+	record(s, api.KindMicroVM, &m, api.EventDeleted)
 	writeJSON(w, http.StatusOK, &m)
 }
 
@@ -431,7 +431,7 @@ func (s *memoryServer) watch(w http.ResponseWriter, r *http.Request, kind string
 	}
 }
 
-// deleteVolume answers DELETE of a Volume as deleteMachine does: a Volume with
+// deleteVolume answers DELETE of a Volume as deleteMicroVM does: a Volume with
 // a finalizer gets a deletionTimestamp and stays.
 func (s *memoryServer) deleteVolume(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -558,9 +558,9 @@ func (s *memoryServer) putNodeStatus(w http.ResponseWriter, r *http.Request) {
 	store(s, w, key, api.KindNode, &n.Metadata, &n, api.EventModified)
 }
 
-func (s *memoryServer) loadMachine(name string) (api.Machine, bool) {
-	var m api.Machine
-	raw, found := s.objects["machines/"+name]
+func (s *memoryServer) loadMicroVM(name string) (api.MicroVM, bool) {
+	var m api.MicroVM
+	raw, found := s.objects["microvms/"+name]
 	if found {
 		_ = json.Unmarshal(raw, &m)
 	}
@@ -576,9 +576,9 @@ func load[T any](s *memoryServer, key string) (T, bool) {
 	return obj, found
 }
 
-// storeMachine writes m at a new revision, logs the event and answers with m.
-func (s *memoryServer) storeMachine(w http.ResponseWriter, m *api.Machine, t api.EventType) {
-	store(s, w, "machines/"+m.Metadata.Name, api.KindMachine, &m.Metadata, m, t)
+// storeMicroVM writes m at a new revision, logs the event and answers with m.
+func (s *memoryServer) storeMicroVM(w http.ResponseWriter, m *api.MicroVM, t api.EventType) {
+	store(s, w, "microvms/"+m.Metadata.Name, api.KindMicroVM, &m.Metadata, m, t)
 }
 
 // store writes obj at a new revision, logs the event and answers with obj.

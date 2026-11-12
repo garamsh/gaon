@@ -49,12 +49,12 @@ func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tok
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, api.NewAPIError(api.ReasonNotFound, "no such path"))
 	})
-	mux.HandleFunc("PUT "+root+"/machines/{name}", h.guard(api.Group, "machines", putVerb, h.putMachine(svc)))
-	mux.HandleFunc("POST "+root+"/machines/{name}/binding", h.guard(api.Group, "machines/binding", fixed(api.VerbCreate), h.bind(svc)))
-	mux.HandleFunc("PUT "+root+"/machines/{name}/status", h.guard(api.Group, "machines/status", fixed(api.VerbUpdate), put(h, svc.PutMachineStatus)))
-	mux.HandleFunc("DELETE "+root+"/machines/{name}", h.guard(api.Group, "machines", fixed(api.VerbDelete), deleteObject(h, svc.DeleteMachine)))
-	mux.HandleFunc("GET "+root+"/machines/{name}", h.guard(api.Group, "machines", fixed(api.VerbGet), get(h, svc.GetMachine)))
-	mux.HandleFunc("GET "+root+"/machines", h.guard(api.Group, "machines", readVerb, listOrWatch(h, svc.ListMachines, svc.WatchMachines)))
+	mux.HandleFunc("PUT "+root+"/microvms/{name}", h.guard(api.Group, "microvms", putVerb, h.putMicroVM(svc)))
+	mux.HandleFunc("POST "+root+"/microvms/{name}/binding", h.guard(api.Group, "microvms/binding", fixed(api.VerbCreate), h.bind(svc)))
+	mux.HandleFunc("PUT "+root+"/microvms/{name}/status", h.guard(api.Group, "microvms/status", fixed(api.VerbUpdate), put(h, svc.PutMicroVMStatus)))
+	mux.HandleFunc("DELETE "+root+"/microvms/{name}", h.guard(api.Group, "microvms", fixed(api.VerbDelete), deleteObject(h, svc.DeleteMicroVM)))
+	mux.HandleFunc("GET "+root+"/microvms/{name}", h.guard(api.Group, "microvms", fixed(api.VerbGet), get(h, svc.GetMicroVM)))
+	mux.HandleFunc("GET "+root+"/microvms", h.guard(api.Group, "microvms", readVerb, listOrWatch(h, svc.ListMicroVMs, svc.WatchMicroVMs)))
 	mux.HandleFunc("PUT "+root+"/volumes/{name}", h.guard(api.Group, "volumes", putVerb, h.putVolume(svc)))
 	mux.HandleFunc("DELETE "+root+"/volumes/{name}", h.guard(api.Group, "volumes", fixed(api.VerbDelete), deleteObject(h, svc.DeleteVolume)))
 	mux.HandleFunc("GET "+root+"/volumes/{name}", h.guard(api.Group, "volumes", fixed(api.VerbGet), get(h, svc.GetVolume)))
@@ -159,7 +159,7 @@ func (id identity) caller() authorization.Caller {
 }
 
 // guard runs next for a caller the authorizer allows to make the verb on the
-// resource, which is "machines" or, for a subresource, "machines/status". A
+// resource, which is "microvms" or, for a subresource, "microvms/status". A
 // bearer-token holder has reached only the routes of ADR 0007 and is not
 // authorized here.
 func (h *handler) guard(group, resource string, verb verbOf, next http.HandlerFunc) http.HandlerFunc {
@@ -233,7 +233,7 @@ func (h *handler) bind(svc resourceapi.Service) http.HandlerFunc {
 		if !h.decode(w, r, &b) {
 			return
 		}
-		out, err := svc.BindMachine(r.Context(), r.PathValue("name"), b)
+		out, err := svc.BindMicroVM(r.Context(), r.PathValue("name"), b)
 		h.respond(w, r, out, err)
 	}
 }
@@ -272,22 +272,22 @@ func deleteObject[T any](h *handler, call func(context.Context, string, api.Reso
 	}
 }
 
-// putMachine writes a Machine, and an update of one only as far as the
+// putMicroVM writes a MicroVM, and an update of one only as far as the
 // caller's grant reaches: a Node's grant is its finalizer.
-func (h *handler) putMachine(svc resourceapi.Service) http.HandlerFunc {
+func (h *handler) putMicroVM(svc resourceapi.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var in api.Machine
+		var in api.MicroVM
 		if !h.decode(w, r, &in) {
 			return
 		}
 		name := r.PathValue("name")
 		if in.Metadata.ResourceVersion != "" {
-			if err := h.az.AuthorizeMachineUpdate(r.Context(), callerOf(r).caller(), name, &in); err != nil {
+			if err := h.az.AuthorizeMicroVMUpdate(r.Context(), callerOf(r).caller(), name, &in); err != nil {
 				h.fail(w, r, err)
 				return
 			}
 		}
-		out, err := svc.PutMachine(r.Context(), name, &in)
+		out, err := svc.PutMicroVM(r.Context(), name, &in)
 		h.respond(w, r, out, err)
 	}
 }

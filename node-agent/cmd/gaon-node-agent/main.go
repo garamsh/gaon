@@ -1,4 +1,4 @@
-// Command gaon-node-agent runs the Machines bound to its node on mvmd.
+// Command gaon-node-agent runs the MicroVMs bound to its node on mvmd.
 package main
 
 import (

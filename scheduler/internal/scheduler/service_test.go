@@ -25,14 +25,14 @@ func reconcile(t *testing.T, client scheduler.API) {
 	require.NoError(t, newService(client).Reconcile(context.Background()))
 }
 
-func TestReconcile_BindsUnboundMachineToReadyNode(t *testing.T) {
+func TestReconcile_BindsUnboundMicroVMToReadyNode(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(node("n1", "4", "8Gi"))
-	f.addMachine(newMachine("m1", "1", "1Gi"))
+	f.addMicroVM(newMicroVM("m1", "1", "1Gi"))
 
 	reconcile(t, client)
 
-	m := f.machine("m1")
+	m := f.microvm("m1")
 	assert.Equal(t, "n1", m.Spec.NodeName)
 	assert.Equal(t, api.Epoch(1), m.Spec.BindingEpoch)
 }
@@ -42,11 +42,11 @@ func TestReconcile_ChoosesTheFirstFittingNodeByName(t *testing.T) {
 	f.addNode(node("a", "1", "1Gi"))
 	f.addNode(node("b", "4", "8Gi"))
 	f.addNode(node("c", "4", "8Gi"))
-	f.addMachine(newMachine("m1", "2", "1Gi"))
+	f.addMicroVM(newMicroVM("m1", "2", "1Gi"))
 
 	reconcile(t, client)
 
-	assert.Equal(t, "b", f.machine("m1").Spec.NodeName, "a is too small, and b sorts before c however the API lists them")
+	assert.Equal(t, "b", f.microvm("m1").Spec.NodeName, "a is too small, and b sorts before c however the API lists them")
 }
 
 func TestReconcile_PlacesOnlyOnAdmittedReadyUnexpiredNode(t *testing.T) {
@@ -66,9 +66,9 @@ func TestReconcile_PlacesOnlyOnAdmittedReadyUnexpiredNode(t *testing.T) {
 			n := node("n1", "4", "8Gi")
 			tt.mutate(n)
 			f.addNode(n)
-			f.addMachine(newMachine("m1", "1", "1Gi"))
+			f.addMicroVM(newMicroVM("m1", "1", "1Gi"))
 			reconcile(t, client)
-			assert.Empty(t, f.machine("m1").Spec.NodeName)
+			assert.Empty(t, f.microvm("m1").Spec.NodeName)
 			assert.Zero(t, f.bindingCount())
 		})
 	}
@@ -76,50 +76,50 @@ func TestReconcile_PlacesOnlyOnAdmittedReadyUnexpiredNode(t *testing.T) {
 	t.Run("control: Ready, and LeaseExpired false", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		f.addNode(withCondition(node("n1", "4", "8Gi"), api.NodeLeaseExpired, api.ConditionFalse))
-		f.addMachine(newMachine("m1", "1", "1Gi"))
+		f.addMicroVM(newMicroVM("m1", "1", "1Gi"))
 		reconcile(t, client)
-		assert.Equal(t, "n1", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "n1", f.microvm("m1").Spec.NodeName)
 	})
 }
 
-func TestReconcile_FitsRequestsInCapacityLessBoundMachines(t *testing.T) {
-	t.Run("a Machine bound to the Node is charged to it", func(t *testing.T) {
+func TestReconcile_FitsRequestsInCapacityLessBoundMicroVMs(t *testing.T) {
+	t.Run("a MicroVM bound to the Node is charged to it", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		f.addNode(node("n1", "4", "8Gi"))
-		f.addMachine(bound(newMachine("old", "3", "1Gi"), "n1", 1))
-		f.addMachine(newMachine("big", "2", "1Gi"))
-		f.addMachine(newMachine("small", "1", "1Gi"))
+		f.addMicroVM(bound(newMicroVM("old", "3", "1Gi"), "n1", 1))
+		f.addMicroVM(newMicroVM("big", "2", "1Gi"))
+		f.addMicroVM(newMicroVM("small", "1", "1Gi"))
 		reconcile(t, client)
-		assert.Empty(t, f.machine("big").Spec.NodeName, "2 cpu does not fit in the 1 cpu left")
-		assert.Equal(t, "n1", f.machine("small").Spec.NodeName, "1 cpu fits in the 1 cpu left")
+		assert.Empty(t, f.microvm("big").Spec.NodeName, "2 cpu does not fit in the 1 cpu left")
+		assert.Equal(t, "n1", f.microvm("small").Spec.NodeName, "1 cpu fits in the 1 cpu left")
 	})
 
-	t.Run("a Machine bound to another Node is not", func(t *testing.T) {
+	t.Run("a MicroVM bound to another Node is not", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		f.addNode(node("n1", "4", "8Gi"))
 		f.addNode(node("n2", "4", "8Gi"))
-		f.addMachine(bound(newMachine("elsewhere", "4", "8Gi"), "n2", 1))
-		f.addMachine(newMachine("m1", "4", "8Gi"))
+		f.addMicroVM(bound(newMicroVM("elsewhere", "4", "8Gi"), "n2", 1))
+		f.addMicroVM(newMicroVM("m1", "4", "8Gi"))
 		reconcile(t, client)
-		assert.Equal(t, "n1", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "n1", f.microvm("m1").Spec.NodeName)
 	})
 
 	t.Run("a binding made in the pass is charged to its Node", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		f.addNode(node("n1", "4", "8Gi"))
-		f.addMachine(newMachine("a", "3", "1Gi"))
-		f.addMachine(newMachine("b", "3", "1Gi"))
+		f.addMicroVM(newMicroVM("a", "3", "1Gi"))
+		f.addMicroVM(newMicroVM("b", "3", "1Gi"))
 		reconcile(t, client)
-		assert.Equal(t, "n1", f.machine("a").Spec.NodeName)
-		assert.Empty(t, f.machine("b").Spec.NodeName)
+		assert.Equal(t, "n1", f.microvm("a").Spec.NodeName)
+		assert.Empty(t, f.microvm("b").Spec.NodeName)
 	})
 
 	t.Run("memory is checked as cpu is", func(t *testing.T) {
 		f, client := newFakeAPI(t)
 		f.addNode(node("n1", "4", "2Gi"))
-		f.addMachine(newMachine("m1", "1", "3Gi"))
+		f.addMicroVM(newMicroVM("m1", "1", "3Gi"))
 		reconcile(t, client)
-		assert.Empty(t, f.machine("m1").Spec.NodeName)
+		assert.Empty(t, f.microvm("m1").Spec.NodeName)
 	})
 }
 
@@ -144,21 +144,21 @@ func TestReconcile_ComparesQuantitiesByValue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f, client := newFakeAPI(t)
 			f.addNode(node("n1", tt.capCPU, tt.capMem))
-			f.addMachine(newMachine("m1", tt.reqCPU, tt.reqMem))
+			f.addMicroVM(newMicroVM("m1", tt.reqCPU, tt.reqMem))
 			reconcile(t, client)
-			assert.Equal(t, tt.fits, f.machine("m1").Spec.NodeName == "n1")
+			assert.Equal(t, tt.fits, f.microvm("m1").Spec.NodeName == "n1")
 		})
 	}
 }
 
-func TestReconcile_MachineThatFitsNoNodeStaysUnboundAndSaysWhy(t *testing.T) {
+func TestReconcile_MicroVMThatFitsNoNodeStaysUnboundAndSaysWhy(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(node("n1", "1", "1Gi"))
-	f.addMachine(newMachine("m1", "2", "1Gi"))
+	f.addMicroVM(newMicroVM("m1", "2", "1Gi"))
 
 	reconcile(t, client)
 
-	m := f.machine("m1")
+	m := f.microvm("m1")
 	assert.Empty(t, m.Spec.NodeName)
 	assert.Zero(t, m.Spec.BindingEpoch)
 	assert.Zero(t, f.bindingCount())
@@ -178,33 +178,33 @@ func TestReconcile_MachineThatFitsNoNodeStaysUnboundAndSaysWhy(t *testing.T) {
 	t.Run("a Node with room binds it", func(t *testing.T) {
 		f.addNode(node("n2", "4", "8Gi"))
 		reconcile(t, client)
-		assert.Equal(t, "n2", f.machine("m1").Spec.NodeName)
+		assert.Equal(t, "n2", f.microvm("m1").Spec.NodeName)
 	})
 }
 
 func TestReconcile_UnschedulableMessageCountsEligibleNodes(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(withCondition(node("n1", "4", "8Gi"), api.NodeReady, api.ConditionFalse))
-	f.addMachine(newMachine("m1", "1", "1Gi"))
+	f.addMicroVM(newMicroVM("m1", "1", "1Gi"))
 
 	reconcile(t, client)
 
-	require.Len(t, f.machine("m1").Status.Conditions, 1)
-	assert.Contains(t, f.machine("m1").Status.Conditions[0].Message, "0 of 1 Nodes are Admitted, Ready and not LeaseExpired")
+	require.Len(t, f.microvm("m1").Status.Conditions, 1)
+	assert.Contains(t, f.microvm("m1").Status.Conditions[0].Message, "0 of 1 Nodes are Admitted, Ready and not LeaseExpired")
 }
 
 func TestReconcile_EachBindingTakesTheNextEpoch(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(node("n1", "4", "8Gi"))
 	f.addNode(withCondition(node("dead", "4", "8Gi"), api.NodeLeaseExpired, api.ConditionTrue))
-	f.addMachine(newMachine("first", "1", "1Gi"))
-	f.addMachine(bound(newMachine("again", "1", "1Gi"), "dead", 3))
+	f.addMicroVM(newMicroVM("first", "1", "1Gi"))
+	f.addMicroVM(bound(newMicroVM("again", "1", "1Gi"), "dead", 3))
 
 	reconcile(t, client)
 
-	assert.Equal(t, api.Epoch(1), f.machine("first").Spec.BindingEpoch)
-	assert.Equal(t, api.Epoch(4), f.machine("again").Spec.BindingEpoch)
-	assert.Equal(t, "n1", f.machine("again").Spec.NodeName)
+	assert.Equal(t, api.Epoch(1), f.microvm("first").Spec.BindingEpoch)
+	assert.Equal(t, api.Epoch(4), f.microvm("again").Spec.BindingEpoch)
+	assert.Equal(t, "n1", f.microvm("again").Spec.NodeName)
 }
 
 func TestReconcile_RebindsOnlyAfterLeaseExpiryIsConfirmed(t *testing.T) {
@@ -229,9 +229,9 @@ func TestReconcile_RebindsOnlyAfterLeaseExpiryIsConfirmed(t *testing.T) {
 				f.addNode(tt.nodeA())
 			}
 			f.addNode(node("b", "4", "8Gi"))
-			f.addMachine(bound(newMachine("m1", "1", "1Gi"), "a", 1))
+			f.addMicroVM(bound(newMicroVM("m1", "1", "1Gi"), "a", 1))
 			reconcile(t, client)
-			m := f.machine("m1")
+			m := f.microvm("m1")
 			assert.Equal(t, "a", m.Spec.NodeName)
 			assert.Equal(t, api.Epoch(1), m.Spec.BindingEpoch)
 			assert.Zero(t, f.bindingCount())
@@ -242,47 +242,47 @@ func TestReconcile_RebindsOnlyAfterLeaseExpiryIsConfirmed(t *testing.T) {
 		f, client := newFakeAPI(t)
 		f.addNode(withCondition(node("a", "4", "8Gi"), api.NodeLeaseExpired, api.ConditionTrue))
 		f.addNode(node("b", "4", "8Gi"))
-		f.addMachine(bound(newMachine("m1", "1", "1Gi"), "a", 1))
+		f.addMicroVM(bound(newMicroVM("m1", "1", "1Gi"), "a", 1))
 		reconcile(t, client)
-		m := f.machine("m1")
+		m := f.microvm("m1")
 		assert.Equal(t, "b", m.Spec.NodeName)
 		assert.Equal(t, api.Epoch(2), m.Spec.BindingEpoch)
 	})
 }
 
-func TestReconcile_RebindThatFitsNoNodeLeavesTheMachineAlone(t *testing.T) {
+func TestReconcile_RebindThatFitsNoNodeLeavesTheMicroVMAlone(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(withCondition(node("a", "4", "8Gi"), api.NodeLeaseExpired, api.ConditionTrue))
 	f.addNode(node("b", "1", "1Gi"))
-	f.addMachine(bound(newMachine("m1", "2", "1Gi"), "a", 1))
+	f.addMicroVM(bound(newMicroVM("m1", "2", "1Gi"), "a", 1))
 
 	reconcile(t, client)
 
-	m := f.machine("m1")
+	m := f.microvm("m1")
 	assert.Equal(t, "a", m.Spec.NodeName)
 	assert.Equal(t, api.Epoch(1), m.Spec.BindingEpoch)
 	assert.Zero(t, f.statusPutCount(), "the dead Node's epoch status is nobody's to rewrite")
 }
 
-func TestReconcile_LeavesDeletingMachineAlone(t *testing.T) {
+func TestReconcile_LeavesDeletingMicroVMAlone(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(node("n1", "4", "8Gi"))
 	now := time.Now()
-	m := newMachine("m1", "1", "1Gi")
+	m := newMicroVM("m1", "1", "1Gi")
 	m.Metadata.DeletionTimestamp = &now
-	f.addMachine(m)
+	f.addMicroVM(m)
 
 	reconcile(t, client)
 
-	assert.Empty(t, f.machine("m1").Spec.NodeName)
+	assert.Empty(t, f.microvm("m1").Spec.NodeName)
 	assert.Zero(t, f.statusPutCount())
 }
 
 func TestReconcile_RacingSchedulersProduceOneBinding(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(node("n1", "4", "8Gi"))
-	f.addMachine(newMachine("m1", "1", "1Gi"))
-	before := f.machine("m1").Metadata.ResourceVersion
+	f.addMicroVM(newMicroVM("m1", "1", "1Gi"))
+	before := f.microvm("m1").Metadata.ResourceVersion
 	f.holdBindings(2)
 
 	var wg sync.WaitGroup
@@ -299,18 +299,18 @@ func TestReconcile_RacingSchedulersProduceOneBinding(t *testing.T) {
 	assert.NoError(t, errs[0])
 	assert.NoError(t, errs[1], "a lost race is not a failure")
 	assert.Equal(t, 2, f.bindingCount(), "both schedulers attempted the binding")
-	m := f.machine("m1")
+	m := f.microvm("m1")
 	assert.Equal(t, "n1", m.Spec.NodeName)
 	assert.Equal(t, api.Epoch(1), m.Spec.BindingEpoch)
 	oldRV, err := strconv.Atoi(string(before))
 	require.NoError(t, err)
-	assert.Equal(t, strconv.Itoa(oldRV+1), string(m.Metadata.ResourceVersion), "one write changed the Machine")
+	assert.Equal(t, strconv.Itoa(oldRV+1), string(m.Metadata.ResourceVersion), "one write changed the MicroVM")
 }
 
 func TestRun_ReconcilesEachIntervalUntilCancelled(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.addNode(node("n1", "4", "8Gi"))
-	f.addMachine(newMachine("first", "1", "1Gi"))
+	f.addMicroVM(newMicroVM("first", "1", "1Gi"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -319,9 +319,9 @@ func TestRun_ReconcilesEachIntervalUntilCancelled(t *testing.T) {
 		newService(client).Run(ctx, 10*time.Millisecond)
 	}()
 
-	assert.Eventually(t, func() bool { return f.machine("first").Spec.NodeName == "n1" }, 5*time.Second, 5*time.Millisecond)
-	f.addMachine(newMachine("second", "1", "1Gi"))
-	assert.Eventually(t, func() bool { return f.machine("second").Spec.NodeName == "n1" }, 5*time.Second, 5*time.Millisecond, "a Machine created later is bound by a later pass")
+	assert.Eventually(t, func() bool { return f.microvm("first").Spec.NodeName == "n1" }, 5*time.Second, 5*time.Millisecond)
+	f.addMicroVM(newMicroVM("second", "1", "1Gi"))
+	assert.Eventually(t, func() bool { return f.microvm("second").Spec.NodeName == "n1" }, 5*time.Second, 5*time.Millisecond, "a MicroVM created later is bound by a later pass")
 
 	cancel()
 	select {

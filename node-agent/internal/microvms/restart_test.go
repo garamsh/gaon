@@ -1,4 +1,4 @@
-package machines
+package microvms
 
 // These tests are internal because they drive reconcileAll round by round on a
 // fake clock that only moves when told to: the restart waits are exact only
@@ -67,21 +67,21 @@ func newRig(t *testing.T, wrap func(API) API) *rig {
 // restarts alone; this package cannot import the built-ins, which import it.
 type emptyNetwork struct{}
 
-func (emptyNetwork) Policy(context.Context, *api.Machine) (*v1alpha2.NetworkPolicy, error) {
+func (emptyNetwork) Policy(context.Context, *api.MicroVM) (*v1alpha2.NetworkPolicy, error) {
 	return &v1alpha2.NetworkPolicy{}, nil
 }
 
 type noStorage struct{}
 
-func (noStorage) Attach(context.Context, *api.Machine) ([]*v1alpha2.DiskAttachment, error) {
+func (noStorage) Attach(context.Context, *api.MicroVM) ([]*v1alpha2.DiskAttachment, error) {
 	return nil, nil
 }
 func (noStorage) Release(context.Context, string) error { return nil }
 
-func rigMachine(epoch api.Epoch, strategy api.RunStrategy) api.Machine {
-	return api.Machine{
+func rigMicroVM(epoch api.Epoch, strategy api.RunStrategy) api.MicroVM {
+	return api.MicroVM{
 		Metadata: api.ObjectMeta{Name: "m1", Generation: 1},
-		Spec: api.MachineSpec{
+		Spec: api.MicroVMSpec{
 			Image:        rigImage,
 			Resources:    api.ResourceRequirements{Limits: api.ResourceList{CPU: "1", Memory: "1Gi"}},
 			RunStrategy:  strategy,
@@ -92,10 +92,10 @@ func rigMachine(epoch api.Epoch, strategy api.RunStrategy) api.Machine {
 }
 
 // put stores m as a user or the Scheduler does and gives it to the service.
-func (r *rig) put(m api.Machine) {
+func (r *rig) put(m api.MicroVM) {
 	r.t.Helper()
-	r.gaon.SetMachine(m)
-	list, err := r.svc.api.ListMachines(context.Background())
+	r.gaon.SetMicroVM(m)
+	list, err := r.svc.api.ListMicroVMs(context.Background())
 	require.NoError(r.t, err)
 	r.svc.cache.replace(list.Items)
 }
@@ -110,11 +110,11 @@ func (r *rig) mustRound() {
 	require.NoError(r.t, r.round())
 }
 
-// begin stores a Machine under strategy and runs it until mvmd holds it
+// begin stores a MicroVM under strategy and runs it until mvmd holds it
 // Running.
 func (r *rig) begin(strategy api.RunStrategy) {
 	r.t.Helper()
-	r.put(rigMachine(1, strategy))
+	r.put(rigMicroVM(1, strategy))
 	r.mustRound()
 	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
 }
@@ -136,7 +136,7 @@ func (r *rig) starts() int {
 	return n
 }
 
-// exit ends the entrypoint with rec and stops the Machine, as mvmd does.
+// exit ends the entrypoint with rec and stops the MicroVM, as mvmd does.
 func (r *rig) exit(rec *v1alpha2.ExecRecord) {
 	r.mvmd.SetEntrypointRecord(rigID, rec)
 	r.mvmd.SetState(rigID, v1alpha2.MachineState_MACHINE_STATE_STOPPED, "the VMM ended with no call asking it to")
@@ -146,7 +146,7 @@ func exited(code, signal int32) *v1alpha2.ExecRecord {
 	return &v1alpha2.ExecRecord{ExecId: "entrypoint", Status: v1alpha2.ExecStatus_EXEC_STATUS_EXITED, ExitCode: code, TermSignal: signal}
 }
 
-// restartAfter ends the run with a failure and checks that the Machine stays
+// restartAfter ends the run with a failure and checks that the MicroVM stays
 // stopped until wait has passed since the exit was seen, and runs once it has.
 func (r *rig) restartAfter(wait time.Duration) {
 	r.t.Helper()
@@ -189,7 +189,7 @@ func TestRestart_CapsTheWaitAtTheMaximum(t *testing.T) {
 	}
 }
 
-func TestRestart_StartsTheWaitOverAfterTheMachineRanForTheResetTime(t *testing.T) {
+func TestRestart_StartsTheWaitOverAfterTheMicroVMRanForTheResetTime(t *testing.T) {
 	tests := []struct {
 		name string
 		ran  time.Duration
@@ -228,7 +228,7 @@ func TestRestart_RerunOnFailureRestartsAFailureAndNotACleanExit(t *testing.T) {
 		{"a record that says not started", failed, &v1alpha2.ExecRecord{ExecId: "entrypoint", Status: v1alpha2.ExecStatus_EXEC_STATUS_NOT_STARTED}, v1alpha2.MachineState_MACHINE_STATE_STOPPED, true},
 		{"a record that says started", failed, &v1alpha2.ExecRecord{ExecId: "entrypoint", Status: v1alpha2.ExecStatus_EXEC_STATUS_STARTED}, v1alpha2.MachineState_MACHINE_STATE_STOPPED, true},
 		{"a read that ends with no record", func(r *rig) { r.mvmd.SilenceEntrypoint(rigID, true) }, nil, v1alpha2.MachineState_MACHINE_STATE_STOPPED, true},
-		{"a faulted Machine", failed, nil, v1alpha2.MachineState_MACHINE_STATE_FAULTED, true},
+		{"a faulted MicroVM", failed, nil, v1alpha2.MachineState_MACHINE_STATE_FAULTED, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -251,8 +251,8 @@ func TestRestart_RerunOnFailureRestartsAFailureAndNotACleanExit(t *testing.T) {
 			}
 			r.requireState(v1alpha2.MachineState_MACHINE_STATE_STOPPED)
 			assert.Equal(t, 1, r.starts(), "a clean exit is not started again, however long the wait")
-			s := r.gaon.Machine("m1").Status
-			assert.Equal(t, api.MachineSucceeded, s.Phase)
+			s := r.gaon.MicroVM("m1").Status
+			assert.Equal(t, api.MicroVMSucceeded, s.Phase)
 			require.Len(t, s.Conditions, 1)
 			assert.Contains(t, s.Conditions[0].Message, "cleanly")
 		})
@@ -284,10 +284,10 @@ func TestRestart_DoesNotTrustACleanRecordEqualToTheOneReadAtTheExitBefore(t *tes
 	r.mustRound()
 	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
 
-	m := r.gaon.Machine("m1")
+	m := r.gaon.MicroVM("m1")
 	m.Spec.RunStrategy = api.RunRerunOnFailure
 	r.put(m)
-	// The Machine stops again and the record is the one the last run left.
+	// The MicroVM stops again and the record is the one the last run left.
 	r.mvmd.SetState(rigID, v1alpha2.MachineState_MACHINE_STATE_STOPPED, "the VMM ended with no call asking it to")
 	r.mustRound()
 	r.clk.Advance(time.Hour)
@@ -311,13 +311,13 @@ func TestRestart_AcceptsACleanRecordThatDiffersFromTheExitBefore(t *testing.T) {
 	assert.Equal(t, 2, r.starts())
 }
 
-func TestRestart_StopsAFaultedMachineBeforeStartingIt(t *testing.T) {
+func TestRestart_StopsAFaultedMicroVMBeforeStartingIt(t *testing.T) {
 	r := newRig(t, nil)
 	r.begin(api.RunAlways)
 	r.mvmd.SetState(rigID, v1alpha2.MachineState_MACHINE_STATE_FAULTED, "stop not confirmed")
 
 	r.mustRound()
-	assert.Equal(t, api.MachineFailed, r.gaon.Machine("m1").Status.Phase, "while it waits, the Machine is Failed")
+	assert.Equal(t, api.MicroVMFailed, r.gaon.MicroVM("m1").Status.Phase, "while it waits, the MicroVM is Failed")
 	r.clk.Advance(10 * time.Second)
 	r.mustRound()
 
@@ -329,30 +329,30 @@ func TestRestart_StopsAFaultedMachineBeforeStartingIt(t *testing.T) {
 func TestRestart_WritesRestartCountAndLeavesLastExitEmpty(t *testing.T) {
 	r := newRig(t, nil)
 	r.begin(api.RunAlways)
-	assert.EqualValues(t, 0, r.gaon.Machine("m1").Status.RestartCount)
+	assert.EqualValues(t, 0, r.gaon.MicroVM("m1").Status.RestartCount)
 
 	r.restartAfter(10 * time.Second)
-	assert.EqualValues(t, 1, r.gaon.Machine("m1").Status.RestartCount)
+	assert.EqualValues(t, 1, r.gaon.MicroVM("m1").Status.RestartCount)
 	r.restartAfter(20 * time.Second)
 
-	s := r.gaon.Machine("m1").Status
+	s := r.gaon.MicroVM("m1").Status
 	assert.EqualValues(t, 2, s.RestartCount)
 	assert.Nil(t, s.LastExit, "mvmd reports no exit time, so lastExit is not written")
 	assert.EqualValues(t, 1, s.BindingEpoch)
 }
 
 // conflictOnStatus answers the first status write with a conflict, as a write
-// does when the Machine changed since it was read.
+// does when the MicroVM changed since it was read.
 type conflictOnStatus struct {
 	API
 	hit atomic.Bool
 }
 
-func (c *conflictOnStatus) PutMachineStatus(ctx context.Context, m *api.Machine) (*api.Machine, error) {
+func (c *conflictOnStatus) PutMicroVMStatus(ctx context.Context, m *api.MicroVM) (*api.MicroVM, error) {
 	if m.Status.RestartCount > 0 && !c.hit.Swap(true) {
 		return nil, api.NewAPIError(api.ReasonConflict, "version is stale")
 	}
-	return c.API.PutMachineStatus(ctx, m)
+	return c.API.PutMicroVMStatus(ctx, m)
 }
 
 func TestRestart_RestartCountIsWrittenByCompareAndSwapAndCountedOnce(t *testing.T) {
@@ -363,7 +363,7 @@ func TestRestart_RestartCountIsWrittenByCompareAndSwapAndCountedOnce(t *testing.
 	r.restartAfter(10 * time.Second)
 
 	assert.True(t, c.hit.Load(), "setup: the write of the count was answered with a conflict")
-	assert.EqualValues(t, 1, r.gaon.Machine("m1").Status.RestartCount, "the write is read again and retried, and the restart counted once")
+	assert.EqualValues(t, 1, r.gaon.MicroVM("m1").Status.RestartCount, "the write is read again and retried, and the restart counted once")
 }
 
 // failStatusOnce fails the first status write that carries a restart with a
@@ -373,11 +373,11 @@ type failStatusOnce struct {
 	hit atomic.Bool
 }
 
-func (c *failStatusOnce) PutMachineStatus(ctx context.Context, m *api.Machine) (*api.Machine, error) {
+func (c *failStatusOnce) PutMicroVMStatus(ctx context.Context, m *api.MicroVM) (*api.MicroVM, error) {
 	if m.Status.RestartCount > 0 && !c.hit.Swap(true) {
 		return nil, errors.New("store is down")
 	}
-	return c.API.PutMachineStatus(ctx, m)
+	return c.API.PutMicroVMStatus(ctx, m)
 }
 
 func TestRestart_WritesARestartAgainWhenTheWriteFailed(t *testing.T) {
@@ -389,10 +389,10 @@ func TestRestart_WritesARestartAgainWhenTheWriteFailed(t *testing.T) {
 	r.clk.Advance(10 * time.Second)
 
 	require.Error(t, r.round(), "the restart happened and its write failed")
-	assert.EqualValues(t, 0, r.gaon.Machine("m1").Status.RestartCount)
+	assert.EqualValues(t, 0, r.gaon.MicroVM("m1").Status.RestartCount)
 	r.mustRound()
 
-	assert.EqualValues(t, 1, r.gaon.Machine("m1").Status.RestartCount)
+	assert.EqualValues(t, 1, r.gaon.MicroVM("m1").Status.RestartCount)
 	assert.Equal(t, 2, r.starts(), "the next round does not start it again")
 }
 
@@ -401,34 +401,34 @@ func TestRestart_CountsFromZeroAtANewEpoch(t *testing.T) {
 	r.begin(api.RunAlways)
 	r.restartAfter(10 * time.Second)
 	r.restartAfter(20 * time.Second)
-	require.EqualValues(t, 2, r.gaon.Machine("m1").Status.RestartCount)
+	require.EqualValues(t, 2, r.gaon.MicroVM("m1").Status.RestartCount)
 
 	// The Scheduler's binding changes the spec and leaves the status as it was.
-	m := r.gaon.Machine("m1")
+	m := r.gaon.MicroVM("m1")
 	m.Spec.BindingEpoch = 2
 	r.put(m)
 	r.mustRound()
 
-	s := r.gaon.Machine("m1").Status
+	s := r.gaon.MicroVM("m1").Status
 	assert.EqualValues(t, 2, s.BindingEpoch)
 	assert.EqualValues(t, 0, s.RestartCount, "the restarts of epoch 1 are not carried into epoch 2")
-	assert.Equal(t, api.MachineRunning, s.Phase)
+	assert.Equal(t, api.MicroVMRunning, s.Phase)
 }
 
-func TestRestart_StartsAHaltedMachineAgainAtOnceWhenResumedAndDoesNotCountIt(t *testing.T) {
+func TestRestart_StartsAHaltedMicroVMAgainAtOnceWhenResumedAndDoesNotCountIt(t *testing.T) {
 	r := newRig(t, nil)
 	r.begin(api.RunAlways)
-	m := r.gaon.Machine("m1")
+	m := r.gaon.MicroVM("m1")
 	m.Spec.RunStrategy = api.RunHalted
 	r.put(m)
 	r.mustRound()
 	r.requireState(v1alpha2.MachineState_MACHINE_STATE_STOPPED)
 
-	m = r.gaon.Machine("m1")
+	m = r.gaon.MicroVM("m1")
 	m.Spec.RunStrategy = api.RunAlways
 	r.put(m)
 	r.mustRound()
 
 	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
-	assert.EqualValues(t, 0, r.gaon.Machine("m1").Status.RestartCount)
+	assert.EqualValues(t, 0, r.gaon.MicroVM("m1").Status.RestartCount)
 }

@@ -1,6 +1,6 @@
 # Resource API
 
-The `v1alpha1` resource API contract of gaon: who writes what, the state a Machine moves through, the Lease and fencing rule, the invariants and the paths.
+The `v1alpha1` resource API contract of gaon: who writes what, the state a MicroVM moves through, the Lease and fencing rule, the invariants and the paths.
 
 Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.com/garamsh/discussions/discussions/2#discussioncomment-19288320)), with the decisions of [ADR 0003](./adr/0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md). The mvmd statements below hold for garamsh/mvmd at commit `2288ea94810b8151abece78b47f2618db2a645d1`.
 
@@ -8,9 +8,9 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 
 ### Naming and groups
 
-- **`Machine` is the microVM.** A physical machine is the core resource `Node`. A machine naru has discovered but gaon has not admitted is a `Node` whose state is `Discovered`. There is no Host resource. The `Node` schema is in §Node.
+- **`MicroVM` is the microVM.** A physical machine is the core resource `Node`. A machine naru has discovered but gaon has not admitted is a `Node` whose state is `Discovered`. There is no Host resource. The `Node` schema is in §Node.
 - **API group suffix `gaon.garam.sh`:** `compute.gaon.garam.sh/v1alpha1` holds the core resources named here, `rbac.gaon.garam.sh/v1alpha1` the roles and bindings, `apps.gaon.garam.sh` the default extensions, `apiextensions.gaon.garam.sh` the resource definitions, `admissionregistration.gaon.garam.sh` the webhook configurations, `admission.gaon.garam.sh` the `AdmissionReview` a webhook receives (§Admission webhooks).
-- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, Machine, Volume, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions (`CustomResourceDefinition`, in `apiextensions.gaon.garam.sh`, §CustomResourceDefinition), webhook configurations (`MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration`, in `admissionregistration.gaon.garam.sh`, §Admission webhooks), the Driver interface. MachineSet, MachineDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no Machine runs before its network policy is applied, and the default network blocks all outside traffic.
+- **Core and extension.** Core resources carry an invariant the core must guarantee: Namespace, Node, Lease, MicroVM, Volume, roles and bindings (`ClusterRole` and `ClusterRoleBinding`, in `rbac.gaon.garam.sh`, §RBAC), resource definitions (`CustomResourceDefinition`, in `apiextensions.gaon.garam.sh`, §CustomResourceDefinition), webhook configurations (`MutatingWebhookConfiguration` and `ValidatingWebhookConfiguration`, in `admissionregistration.gaon.garam.sh`, §Admission webhooks), the Driver interface. MicroVMSet, MicroVMDeployment, Job, Service, Gateway and Autoscaler are default extensions built on resource definitions and controllers; Network and NetworkPolicy are extensions a Driver interprets. The core keeps one network rule: no MicroVM runs before its network policy is applied, and the default network blocks all outside traffic.
 
 ### Transport
 
@@ -26,16 +26,16 @@ Basis: section 4 of garamsh/discussions Discussion #2 ([comment](https://github.
 - Each section has one writer: `spec` users and controllers, `/binding` the Scheduler, `/status` the Node Agent for what runs on its node and controllers for the rest.
 - Every write is a compare-and-swap on `resourceVersion`. A change of `spec` is tracked by `generation` and `observedGeneration`.
 - Deletion sets `deletionTimestamp`; the owner of each finalizer removes it when its work is done. Ownership and garbage collection use `ownerReferences`.
-- **A finalizer's owner adds and removes it through `PUT /machines/{name}`**, by compare-and-swap, changing only its own entry of `metadata.finalizers`. The Node Agent's finalizer is `compute.gaon.garam.sh/node-agent`: it adds it before it first starts a Machine bound to its Node, and removes it once a Machine with `deletionTimestamp` set is released on mvmd. The API server removes a Machine on the write that clears its last finalizer. A Volume's finalizer is added and removed the same way through `PUT /volumes/{name}` (§Volume).
+- **A finalizer's owner adds and removes it through `PUT /microvms/{name}`**, by compare-and-swap, changing only its own entry of `metadata.finalizers`. The Node Agent's finalizer is `compute.gaon.garam.sh/node-agent`: it adds it before it first starts a MicroVM bound to its Node, and removes it once a MicroVM with `deletionTimestamp` set is released on mvmd. The API server removes a MicroVM on the write that clears its last finalizer. A Volume's finalizer is added and removed the same way through `PUT /volumes/{name}` (§Volume).
 - A `PUT` without `metadata.resourceVersion` creates the object and answers `AlreadyExists` if it exists; a `PUT` with one is the compare-and-swap. A `DELETE` carries the version in the query `resourceVersion`.
 - Enum values are PascalCase, fields camelCase, quantities in `500m` and `4Gi` form, and detail is carried in `conditions`.
 
-### Machine
+### MicroVM
 
-- **`spec`:** image, kernel (the name of a kernel the node offers, empty for the node's default; the node agent fails a Machine naming one the node does not offer, with reason `Rejected`), resources (requests and limits for cpu and memory), root disk size, volumes and mounts, networks, ports, `runStrategy`, `idleTimeoutSeconds`, `nodeSelector`, `requiredCapabilities`.
+- **`spec`:** image, kernel (the name of a kernel the node offers, empty for the node's default; the node agent fails a MicroVM naming one the node does not offer, with reason `Rejected`), resources (requests and limits for cpu and memory), root disk size, volumes and mounts, networks, ports, `runStrategy`, `idleTimeoutSeconds`, `nodeSelector`, `requiredCapabilities`.
 - **`runStrategy`:** `Always`, `RerunOnFailure`, `Once`, `OnDemand`, `Halted`.
 - **Set by `/binding` only:** `spec.nodeName` and `spec.bindingEpoch`. The first binding sets the epoch to 1, and each binding sets it to the current epoch plus one.
-- **Mutable:** `runStrategy`, `idleTimeoutSeconds`, `resources` and `volumes`, as far as the Driver supports a change while running. Everything else is replaced by a new Machine; MachineDeployment does rolling updates.
+- **Mutable:** `runStrategy`, `idleTimeoutSeconds`, `resources` and `volumes`, as far as the Driver supports a change while running. Everything else is replaced by a new MicroVM; MicroVMDeployment does rolling updates.
 - **`status`:** `phase` (`Pending`, `Running`, `Suspended`, `Succeeded`, `Failed`, `Stopped`), `bindingEpoch`, `observedGeneration`, `conditions`, `restartCount`, `addresses`, `lastActiveTime`, and the exit code and time of the last exit.
 - **A status whose `bindingEpoch` differs from `spec.bindingEpoch` is void** and read as `Pending`, so no one rewrites a dead node's status.
 
@@ -48,33 +48,33 @@ Every transition below is decided and written by the Node Agent except the rebin
 | created, then `Pending` | API server on creation |
 | `Pending` to `Running` | image, volumes and network policy ready, then boot or restore succeeded |
 | `Running` to `Suspended` | `OnDemand` and idle for at least `idleTimeoutSeconds` |
-| `Suspended` to `Running` | a demand signal arrives, the Machine is not `Halted` and not being deleted, and the epoch is current |
+| `Suspended` to `Running` | a demand signal arrives, the MicroVM is not `Halted` and not being deleted, and the epoch is current |
 | any to `Stopped` | `runStrategy` is `Halted` |
 | `Stopped` to `Pending` | `runStrategy` changes from `Halted` |
 | `Running` to `Pending` | exit and `runStrategy` asks for a restart, with backoff |
-| `Running` to `Succeeded` | a `Once` Machine whose entrypoint exits cleanly |
-| `Running` to `Failed` | a `Once` Machine whose entrypoint exits with a failure |
+| `Running` to `Succeeded` | a `Once` MicroVM whose entrypoint exits cleanly |
+| `Running` to `Failed` | a `Once` MicroVM whose entrypoint exits with a failure |
 | `Running` to `Succeeded` | `RerunOnFailure` and the entrypoint exits cleanly; it is not started again |
 | any to `Failed` | unrecoverable error: image error, no node with a required capability |
 | rebinding, epoch plus one | the node's Lease expiry is confirmed (Scheduler writes `/binding`) |
 
 - **OnDemand, what the Store holds:** the phase on each transition, and `lastActiveTime` no more often than a minimum interval, provisionally 60s. Momentary activity is not in the Store; the node serves it on the data plane.
-- **OnDemand, a process that exits by itself:** the Machine goes to `Suspended`, keeping its disk. The exit code and time go into status, and the next demand signal starts it. Exits that repeat without demand back off before the next start.
-- **Restart backoff,** provisionally: 10s, doubled per restart, at most 5 minutes, reset after the Machine has run for 10 minutes. Exits that repeat without demand under OnDemand back off the same way.
+- **OnDemand, a process that exits by itself:** the MicroVM goes to `Suspended`, keeping its disk. The exit code and time go into status, and the next demand signal starts it. Exits that repeat without demand back off before the next start.
+- **Restart backoff,** provisionally: 10s, doubled per restart, at most 5 minutes, reset after the MicroVM has run for 10 minutes. Exits that repeat without demand under OnDemand back off the same way.
 - **Without snapshot support,** `Suspended` means the disk is kept and the process ended; only resume speed differs.
 
 ### Volume
 
-A Volume is a disk a Machine names in its `spec.volumes`. Its semantics follow Kubernetes' PersistentVolume and StorageClass, without a claim, and the rules below are gaon's own ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)).
+A Volume is a disk a MicroVM names in its `spec.volumes`. Its semantics follow Kubernetes' PersistentVolume and StorageClass, without a claim, and the rules below are gaon's own ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)).
 
 - **`spec`, written by users at creation:** storage class (required), access modes, requested storage, data source, and `nodeName` (node-local classes only, set by `/binding`).
 - **`spec` is immutable after creation.** A `PUT` that changes any field of it, `nodeName` included, is `Invalid`, and so is a create that carries a `nodeName`. Resizing is not designed.
-- **`status`, written by the Node Agent of the Volume's Node:** `phase` (`Pending`, `Available`, `Bound`, `Released`, `Failed`), `attachment` (machine name and binding epoch), capacity. The API server starts a Volume `Pending`.
-  - `Available` with `capacity` once the disk exists; `Bound`, with the attachment, while a Machine has it attached; `Released` once no Machine holds it, keeping the last attachment; `Failed` when the disk cannot be made.
-- **Attachment is a compare-and-swap by the Node Agent** on `status.attachment`. It succeeds only if the Volume is not being deleted and `attachment` is empty or its epoch is lower than the Machine's current epoch.
+- **`status`, written by the Node Agent of the Volume's Node:** `phase` (`Pending`, `Available`, `Bound`, `Released`, `Failed`), `attachment` (microvm name and binding epoch), capacity. The API server starts a Volume `Pending`.
+  - `Available` with `capacity` once the disk exists; `Bound`, with the attachment, while a MicroVM has it attached; `Released` once no MicroVM holds it, keeping the last attachment; `Failed` when the disk cannot be made.
+- **Attachment is a compare-and-swap by the Node Agent** on `status.attachment`. It succeeds only if the Volume is not being deleted and `attachment` is empty or its epoch is lower than the MicroVM's current epoch.
 - **Class `local`** is a disk of `spec.storage` bytes on one Node, which that Node's agent creates through mvmd and formats ext4. Its `accessModes` is exactly `ReadWriteOnce`, `storage` is positive and `dataSource` is empty; any other value is `Invalid`. A Volume of another class waits `Pending` for a plugin that serves it.
-- **Pinning.** `/binding` reads each Volume the Machine uses and, in the same write, sets `spec.nodeName` of a `local` Volume that has none to the Machine's Node and adds the finalizer `compute.gaon.garam.sh/node-agent` to it. A binding to a Node other than a used Volume's `nodeName`, or of a Machine that uses a Volume that is being deleted, is `Conflict`, and of a Machine that names a Volume that does not exist `Invalid`; nothing is written. A Machine whose `local` Volume is pinned to an expired Node is not rebound elsewhere; moving between nodes is out of the first scope.
-- **Deletion.** `DELETE` sets `deletionTimestamp`. The Node Agent of the Volume's Node removes its finalizer through `PUT /volumes/{name}`, changing only its own entry, once no Machine has the Volume attached and the disk is deleted. A Volume with no `nodeName` has no finalizer, and `DELETE` removes it at once.
+- **Pinning.** `/binding` reads each Volume the MicroVM uses and, in the same write, sets `spec.nodeName` of a `local` Volume that has none to the MicroVM's Node and adds the finalizer `compute.gaon.garam.sh/node-agent` to it. A binding to a Node other than a used Volume's `nodeName`, or of a MicroVM that uses a Volume that is being deleted, is `Conflict`, and of a MicroVM that names a Volume that does not exist `Invalid`; nothing is written. A MicroVM whose `local` Volume is pinned to an expired Node is not rebound elsewhere; moving between nodes is out of the first scope.
+- **Deletion.** `DELETE` sets `deletionTimestamp`. The Node Agent of the Volume's Node removes its finalizer through `PUT /volumes/{name}`, changing only its own entry, once no MicroVM has the Volume attached and the disk is deleted. A Volume with no `nodeName` has no finalizer, and `DELETE` removes it at once.
 - The types are in `lib/api/`: `Volume`, `VolumeList`, `VolumeSpec` and `VolumeStatus`.
 
 ### Node
@@ -88,8 +88,8 @@ A Volume is a disk a Machine names in its `spec.volumes`. Its semantics follow K
   - `conditions`: each has a `status` of `True`, `False` or `Unknown`, and any other value is refused. `Ready` is written by the Node Agent. `LeaseExpired` is written by the node lifecycle controller.
 - **Each writer changes only its own fields**, by compare-and-swap on the whole object, as §Common rules states for every write.
 - **The Node's Lease** is one Lease per Node, named as the Node.
-- **A Node with no Lease.** The node lifecycle controller also watches Nodes. For a Node whose Lease it has not seen, it counts validity from its first sighting of that Node, for the Lease duration plus the expiry margin. When that elapses with no Lease seen, it writes `LeaseExpired` true with reason `LeaseMissing`. Seeing the Lease afterwards applies the Lease rule: a new version makes it false, with reason `LeaseRenewed`. This keeps invariant 1: without an acknowledged Lease renewal the Node Agent never renews mvmd's node deadline, so no Machine runs on that Node. A Lease cannot be deleted, as §Paths has no such path, so a Node never having had one is the only case.
-- **Placement:** the Scheduler places a Machine only on a Node that is `Admitted`, is `Ready`, and does not have `LeaseExpired` true.
+- **A Node with no Lease.** The node lifecycle controller also watches Nodes. For a Node whose Lease it has not seen, it counts validity from its first sighting of that Node, for the Lease duration plus the expiry margin. When that elapses with no Lease seen, it writes `LeaseExpired` true with reason `LeaseMissing`. Seeing the Lease afterwards applies the Lease rule: a new version makes it false, with reason `LeaseRenewed`. This keeps invariant 1: without an acknowledged Lease renewal the Node Agent never renews mvmd's node deadline, so no MicroVM runs on that Node. A Lease cannot be deleted, as §Paths has no such path, so a Node never having had one is the only case.
+- **Placement:** the Scheduler places a MicroVM only on a Node that is `Admitted`, is `Ready`, and does not have `LeaseExpired` true.
 
 ### CertificateSigningRequest
 
@@ -112,7 +112,7 @@ A request for a client certificate from the cluster CA, used by a Node Agent to 
 - **A Lease per node, separate from `Node`.** It holds a holder, a renew time and a duration, and the Node Agent renews it by compare-and-swap.
 - **Validity is measured by the observer.** A Lease is expired when its duration, plus a margin, has elapsed on the observer's monotonic clock since the observer first saw its current `resourceVersion`. The renew time the node wrote is not compared with another machine's clock.
 - **The Node Agent's validity bound.** After the Store acknowledges a renewal, the Lease is valid for the duration counted from the start of that renewal call on the Node Agent's own monotonic clock, because the observer sees it no earlier.
-- **The fencing obligation.** The Node Agent renews mvmd's node deadline only so that, for each renewal acknowledged at monotonic time `t` with length `L`, `t + L + δ` is no later than the end of validity of the latest acknowledged Lease renewal. mvmd's runtime API gives the bound: a recorded expiry is never later than the acknowledgement time plus the length, and a Machine runs at most δ past it. This keeps invariant 1 when the Node Agent dies.
+- **The fencing obligation.** The Node Agent renews mvmd's node deadline only so that, for each renewal acknowledged at monotonic time `t` with length `L`, `t + L + δ` is no later than the end of validity of the latest acknowledged Lease renewal. mvmd's runtime API gives the bound: a recorded expiry is never later than the acknowledgement time plus the length, and a MicroVM runs at most δ past it. This keeps invariant 1 when the Node Agent dies.
 - **Rebinding waits for expiry.** The epoch increases only after the node's Lease expiry is confirmed.
 - **Parameters, provisional until measured.** Each binary that takes one as a flag defaults to it:
 
@@ -129,12 +129,12 @@ A request for a client certificate from the cluster CA, used by a Node Agent to 
 
 | # | Invariant | Writer it constrains |
 |---|---|---|
-| 1 | A Machine runs on at most one node at a time, the one holding the current epoch. | Node Agent: runs only under the current epoch and holds the fencing obligation. Scheduler: rebinds only after confirmed Lease expiry. |
-| 2 | A Volume is written by at most one (Machine, epoch). | Node Agent: attaches only by compare-and-swap on `status.attachment`. API server: applies the attachment rule. |
+| 1 | A MicroVM runs on at most one node at a time, the one holding the current epoch. | Node Agent: runs only under the current epoch and holds the fencing obligation. Scheduler: rebinds only after confirmed Lease expiry. |
+| 2 | A Volume is written by at most one (MicroVM, epoch). | Node Agent: attaches only by compare-and-swap on `status.attachment`. API server: applies the attachment rule. |
 | 3 | `spec`, `/binding` and `/status` are each written by their assigned writer only. | API server: refuses any other writer. Every writer: stays in its section. |
 | 4 | A status or request with a stale epoch is ignored. | API server: refuses a status write whose epoch is not the spec's. Readers: treat a void status as `Pending`. |
-| 5 | A `Halted` Machine, or one with `deletionTimestamp` set, is woken by no demand signal. | Node Agent: refuses to wake it. |
-| 6 | No Machine runs before its network policy is applied. | Node Agent: starts a Machine only after applying the policy. |
+| 5 | A `Halted` MicroVM, or one with `deletionTimestamp` set, is woken by no demand signal. | Node Agent: refuses to wake it. |
+| 6 | No MicroVM runs before its network policy is applied. | Node Agent: starts a MicroVM only after applying the policy. |
 
 ### Paths
 
@@ -142,13 +142,13 @@ Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where
 
 | Path | Writer | Use |
 |---|---|---|
-| `PUT /machines/{name}` | users, controllers; the Node Agent for its finalizer only | create and change `spec`; add or remove a finalizer |
-| `POST /machines/{name}/binding` | Scheduler | bind and set the epoch; pin the Machine's unpinned `local` Volumes to the Node (§Volume) |
-| `PUT /machines/{name}/status` | Node Agent, controllers | report status, epoch checked |
-| `DELETE /machines/{name}` | users | set `deletionTimestamp`; the Node Agent removes its finalizer after release |
-| `GET /machines` | all | list, with the `resourceVersion` to watch from |
-| `GET /machines/{name}` | all | read one Machine |
-| `GET /machines?watch=true` | all | subscribe to changes |
+| `PUT /microvms/{name}` | users, controllers; the Node Agent for its finalizer only | create and change `spec`; add or remove a finalizer |
+| `POST /microvms/{name}/binding` | Scheduler | bind and set the epoch; pin the MicroVM's unpinned `local` Volumes to the Node (§Volume) |
+| `PUT /microvms/{name}/status` | Node Agent, controllers | report status, epoch checked |
+| `DELETE /microvms/{name}` | users | set `deletionTimestamp`; the Node Agent removes its finalizer after release |
+| `GET /microvms` | all | list, with the `resourceVersion` to watch from |
+| `GET /microvms/{name}` | all | read one MicroVM |
+| `GET /microvms?watch=true` | all | subscribe to changes |
 | `PUT /volumes/{name}` | users; the Node Agent for its finalizer only | create a Volume; add or remove a finalizer; `spec` is immutable after creation |
 | `PUT /volumes/{name}/status` | Node Agent, controllers | attachment and volume status |
 | `DELETE /volumes/{name}` | users | set `deletionTimestamp`; the Node Agent removes its finalizer after the disk is deleted |
@@ -216,31 +216,31 @@ The API server's `--authorization-mode` is `AlwaysAllow`, the default, which all
 - **Identity.** The user is the certificate's CN and the groups are its subject's Organization values. A bearer token keeps `bootstrap:<id>` and the rule of §Transport; neither authorizer is consulted for it.
 - **A request is** a verb on a resource of an API group:
   - `PUT` without `resourceVersion` is `create`, with one `update`; `DELETE` is `delete`; `GET` of one object is `get`, of a collection `list`, and with `watch=true` `watch`;
-  - a subresource is named `resource/sub`: `PUT /machines/{name}/status` is `update` on `machines/status`, and `POST /machines/{name}/binding` is `create` on `machines/binding`;
+  - a subresource is named `resource/sub`: `PUT /microvms/{name}/status` is `update` on `microvms/status`, and `POST /microvms/{name}/binding` is `create` on `microvms/binding`;
   - the group and resource of a custom resource are the definition's `group` and `plural` (`PUT /widgets/{name}/status` is `update` on `widgets/status` in `apps.gaon.garam.sh`), and the definitions themselves are `customresourcedefinitions` in `apiextensions.gaon.garam.sh`, and the webhook configurations are `mutatingwebhookconfigurations` and `validatingwebhookconfigurations` in `admissionregistration.gaon.garam.sh`. `gaon:admin`'s `*` covers all.
 - **Order.** The Node authorizer first, then the roles bound to the caller. Permissions only add; there is no deny. A request neither allows is `Forbidden`.
 - **The Node authorizer** applies to a caller whose CN equals a Node's name, or the name of the Node it creates. It allows:
   - create its own Node, read it and write its `status`;
   - read and write its own Lease;
-  - read Machines; write the `status` of a Machine whose `spec.nodeName` is that Node, and its own finalizer through `PUT /machines/{name}` on such a Machine (the API server checks that only the finalizer entry changed, invariant 3);
-  - read Volumes, for the reason it reads Machines; write the `status` of a Volume whose `spec.nodeName` is that Node, or that a Machine bound to it uses; and its own finalizer through `PUT /volumes/{name}` on a Volume whose `spec.nodeName` is that Node (the API server checks that only the finalizer entry changed, invariant 3);
+  - read MicroVMs; write the `status` of a MicroVM whose `spec.nodeName` is that Node, and its own finalizer through `PUT /microvms/{name}` on such a MicroVM (the API server checks that only the finalizer entry changed, invariant 3);
+  - read Volumes, for the reason it reads MicroVMs; write the `status` of a Volume whose `spec.nodeName` is that Node, or that a MicroVM bound to it uses; and its own finalizer through `PUT /volumes/{name}` on a Volume whose `spec.nodeName` is that Node (the API server checks that only the finalizer entry changed, invariant 3);
   - create CertificateSigningRequests and read one it created.
 
-  Reads of Machines and Volumes are open to a Node because a list cannot be filtered by Node.
+  Reads of MicroVMs and Volumes are open to a Node because a list cannot be filtered by Node.
 - **Escalation.** A caller creates or updates a ClusterRole only if it holds every permission the role grants, and a ClusterRoleBinding only if it holds every permission of the role it names. The Node authorizer's permissions do not count.
 
 ### RBAC
 
 The group `rbac.gaon.garam.sh/v1alpha1` has the root `/apis/rbac.gaon.garam.sh/v1alpha1`. Both kinds have `apiVersion`, `kind` and `metadata`, and no `spec` or `status`; they are cluster-scoped.
 
-- **`ClusterRole`:** `rules`, a list; each rule has non-empty `apiGroups`, `resources` and `verbs`, lists of names. A resource is `machines` or a subresource `machines/status`; `*` as a whole name matches every value, and a name with `*` inside it is not a wildcard. The verbs are `get`, `list`, `watch`, `create`, `update`, `delete` and `*`; any other verb is `Invalid`. A role with no rules is valid and grants nothing.
+- **`ClusterRole`:** `rules`, a list; each rule has non-empty `apiGroups`, `resources` and `verbs`, lists of names. A resource is `microvms` or a subresource `microvms/status`; `*` as a whole name matches every value, and a name with `*` inside it is not a wildcard. The verbs are `get`, `list`, `watch`, `create`, `update`, `delete` and `*`; any other verb is `Invalid`. A role with no rules is valid and grants nothing.
 - **`ClusterRoleBinding`:** `roleRef` (`kind` `ClusterRole` and `name`) and `subjects`, each with `kind` `User` or `Group` and a `name`. An empty `roleRef`, another kind and an unknown subject kind are `Invalid`.
 - **Bootstrap roles.** In `RBAC` mode the API server creates each of these that is missing at start and never overwrites one, with a binding of each to a group, all in the group `compute.gaon.garam.sh` unless said:
 
   | Role (group bound) | Rules |
   |---|---|
-  | `gaon:scheduler` (`gaon:schedulers`) | `machines`, `nodes`, `volumes`: `get`, `list`, `watch`; `machines/binding`: `create`; `machines/status`: `update` |
-  | `gaon:controllers` (`gaon:controllers`) | `machines`, `nodes`, `leases`, `certificatesigningrequests`: `get`, `list`, `watch`; `machines`: `create`, `update`; `machines/status`, `nodes/status`, `volumes/status`, `certificatesigningrequests/status`: `update` |
+  | `gaon:scheduler` (`gaon:schedulers`) | `microvms`, `nodes`, `volumes`: `get`, `list`, `watch`; `microvms/binding`: `create`; `microvms/status`: `update` |
+  | `gaon:controllers` (`gaon:controllers`) | `microvms`, `nodes`, `leases`, `certificatesigningrequests`: `get`, `list`, `watch`; `microvms`: `create`, `update`; `microvms/status`, `nodes/status`, `volumes/status`, `certificatesigningrequests/status`: `update` |
   | `gaon:admin` (`gaon:admins`) | `*` on `*` for every API group |
 
 - **An existing cluster** keeps the roles it has, so its `gaon:scheduler` lacks `volumes` and the scheduler's list of Volumes is `Forbidden` until an administrator adds the rule to the role, or deletes the role so the next API server start creates it ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)).
@@ -279,7 +279,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
   - `failurePolicy`: `Fail`, the default, or `Ignore`. `timeoutSeconds`: 1 to 30, default 10.
   - There is no namespace selector, object selector, `sideEffects` or `reinvocationPolicy`.
 - **The call.** `POST` of an `AdmissionReview` (`admission.gaon.garam.sh/v1alpha1`) with `request`: `uid`, `kind`, `resource`, `subResource`, `name`, `operation`, `userInfo` (`username`, `groups`), `object` and `oldObject`. The webhook answers `200` with an `AdmissionReview` whose `response` has the same `uid`, `allowed`, optionally `status` (`code`, `message`), and, from a mutating webhook that allows, `patchType` `JSONPatch` and a base64 RFC 6902 `patch`. No path serves an `AdmissionReview`.
-- **Which writes are sent.** Every write accepted after authorization: a `PUT` without a version is `CREATE`, with one `UPDATE`; a write to `/status` is `UPDATE` with `subResource` `status`; `POST /machines/{name}/binding` is `CREATE` on `machines/binding`; `DELETE` is `DELETE`, with `oldObject` and no `object`. Writes to the two configuration kinds and every read are never sent.
+- **Which writes are sent.** Every write accepted after authorization: a `PUT` without a version is `CREATE`, with one `UPDATE`; a write to `/status` is `UPDATE` with `subResource` `status`; `POST /microvms/{name}/binding` is `CREATE` on `microvms/binding`; `DELETE` is `DELETE`, with `oldObject` and no `object`. Writes to the two configuration kinds and every read are never sent.
 - **Order of a write.** Authentication, authorization, the mutating webhooks, the API server's own validation (with a custom resource's schema and pruning), the validating webhooks, the Store. Configurations are called by name and the webhooks of one in their order; each mutating webhook sees the object as the previous patch left it. A patch that changes `apiVersion`, `kind`, `metadata.name` or `metadata.resourceVersion` is a failed call.
 - **Failure.** `allowed: false` is `Forbidden` whatever `status.code` says, with a message that names the webhook and carries `status.message`. A failed call is a timeout, a TLS or connection error, a status other than 200, a body that does not decode, a `uid` that is not the request's, or a bad patch; under `Fail` the write is refused as `InternalError`, and under `Ignore` the webhook is skipped.
 - **Types and client.** In `lib/api/`: `MutatingWebhookConfiguration`, `ValidatingWebhookConfiguration`, their lists, `Webhook`, `WebhookClientConfig`, `WebhookRule`, and `AdmissionReview` with `AdmissionRequest` and `AdmissionResponse`. `Client` has `Put`, `Get`, `List`, `Watch` and `Delete` for each kind.
@@ -289,7 +289,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - A watch resumes from a given `resourceVersion`; the request carries `watch=true` and `resourceVersion`, and the version is required.
 - Each line of the stream is one JSON event with a `type` and an `object`.
 - Event types, PascalCase as every enum is:
-  - `Added`, `Modified` and `Deleted` carry the resource being watched (a Machine, a Volume, a Node, a Lease, a CertificateSigningRequest, a ClusterRole, a ClusterRoleBinding, a CustomResourceDefinition, a MutatingWebhookConfiguration, a ValidatingWebhookConfiguration or an object of a registered kind) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
+  - `Added`, `Modified` and `Deleted` carry the resource being watched (a MicroVM, a Volume, a Node, a Lease, a CertificateSigningRequest, a ClusterRole, a ClusterRoleBinding, a CustomResourceDefinition, a MutatingWebhookConfiguration, a ValidatingWebhookConfiguration or an object of a registered kind) as it is after the change. `Deleted` carries its last state, sent when the last finalizer is removed.
   - `Error` carries the error object, and is the last event of its stream.
 - The error object has `code` (the HTTP status), `reason` and `message`. It is the body of a failed response as well. The reasons and their HTTP status are `Conflict` and `AlreadyExists` 409, `NotFound` 404, `Invalid` 422, `Expired` 410, `Unauthorized` 401, `Forbidden` 403 and `InternalError` 500. `Unauthorized` is a request with no client certificate and a missing or invalid bearer token; `Forbidden` is a valid token on any request other than creating a CertificateSigningRequest or reading one it created, and, in the `RBAC` mode, a request by certificate that neither the Node authorizer nor a bound role allows (§Authorization), or a validating or mutating webhook refuses (§Admission webhooks); `InternalError` is a write refused because a call to a webhook whose `failurePolicy` is `Fail` failed.
 - An expired `resourceVersion` gets an `Error` event whose reason is `Expired`; the client lists again and watches from the list's version. The server reports it as an event, never as the status of the response, because compaction can also pass a version while the stream is open.
@@ -316,7 +316,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - **Numbers:** measuring the provisional values in §Lease and fencing, the restart backoff and the `lastActiveTime` minimum interval (Discussion #2 section 6 item 13).
 - **Store growth and compaction interval:** [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
 - **Placement of Namespace** in an API group.
-- **The schemas of the default extensions** (MachineSet, MachineDeployment, Job, Service, Gateway, Autoscaler) in `apps.gaon.garam.sh`: none is written yet.
+- **The schemas of the default extensions** (MicroVMSet, MicroVMDeployment, Job, Service, Gateway, Autoscaler) in `apps.gaon.garam.sh`: none is written yet.
 - **More than one version of a custom resource,** which needs conversion, and the `scale` subresource and the schema keywords outside §CustomResourceDefinition's list.
 - **Webhook selection and calling:** selectors by label or namespace, a reinvocation policy, a service reference for `clientConfig` and a status code from the webhook wait for a need and, for the last, for a Service resource; the API server's calling of webhooks is the next issue.
 - **Namespaced roles:** `Role` and `RoleBinding` wait for the namespace decision above; only the cluster-scoped kinds exist.

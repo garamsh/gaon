@@ -19,16 +19,16 @@ const (
 	reasonInsufficientFree = "insufficient free cpu or memory"
 )
 
-// demand is what a Machine asks of the Node it goes to.
+// demand is what a MicroVM asks of the Node it goes to.
 type demand struct {
 	req     resources
 	volumes volumeNeed
 }
 
-// filterPlugin decides whether a Machine can go to a Node.
+// filterPlugin decides whether a MicroVM can go to a Node.
 type filterPlugin interface {
 	Name() string
-	// Filter returns the reason a Machine with demand d does not fit n, or
+	// Filter returns the reason a MicroVM with demand d does not fit n, or
 	// the empty string when it fits.
 	Filter(d demand, n *nodeView) string
 }
@@ -36,7 +36,7 @@ type filterPlugin interface {
 // scorePlugin ranks a Node that passed every filter.
 type scorePlugin interface {
 	Name() string
-	// Score returns 0 to maxScore for placing a Machine requesting req on n.
+	// Score returns 0 to maxScore for placing a MicroVM requesting req on n.
 	Score(req resources, n *nodeView) int
 }
 
@@ -69,7 +69,7 @@ func (nodeResourcesFit) Filter(d demand, n *nodeView) string {
 	return reasonInsufficientFree
 }
 
-// volumeNode keeps only the Node the Machine's pinned local Volumes name.
+// volumeNode keeps only the Node the MicroVM's pinned local Volumes name.
 type volumeNode struct{}
 
 func (volumeNode) Name() string { return PluginVolumeNode }
@@ -85,7 +85,7 @@ func (volumeNode) Filter(d demand, n *nodeView) string {
 }
 
 // leastAllocated scores the share of cpu and memory left free after the
-// Machine, each rounded down to a whole number from 0 to maxScore and
+// MicroVM, each rounded down to a whole number from 0 to maxScore and
 // averaged with the same rounding. A resource the Node has none of scores 0.
 type leastAllocated struct{}
 

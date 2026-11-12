@@ -29,29 +29,29 @@ func TestRBAC_EachComponentReachesItsPathsAndAnotherGroupIsRefused(t *testing.T)
 	_, err = agent.PutLease(ctx(t), lease("node-1"))
 	require.NoError(t, err)
 
-	// The controllers create a Machine.
-	_, err = stranger.PutMachine(ctx(t), machine("m1"))
+	// The controllers create a MicroVM.
+	_, err = stranger.PutMicroVM(ctx(t), microvm("m1"))
 	assert.ErrorIs(t, err, api.ErrForbidden)
-	m, err := ctrl.PutMachine(ctx(t), machine("m1"))
+	m, err := ctrl.PutMicroVM(ctx(t), microvm("m1"))
 	require.NoError(t, err)
 
-	// The scheduler lists Machines and binds one.
-	_, err = stranger.ListMachines(ctx(t))
+	// The scheduler lists MicroVMs and binds one.
+	_, err = stranger.ListMicroVMs(ctx(t))
 	assert.ErrorIs(t, err, api.ErrForbidden)
-	_, err = sched.ListMachines(ctx(t))
+	_, err = sched.ListMicroVMs(ctx(t))
 	require.NoError(t, err)
 	binding := api.Binding{ResourceVersion: m.Metadata.ResourceVersion, NodeName: "node-1", BindingEpoch: 1}
-	_, err = ctrl.BindMachine(ctx(t), "m1", binding)
+	_, err = ctrl.BindMicroVM(ctx(t), "m1", binding)
 	assert.ErrorIs(t, err, api.ErrForbidden, "the controllers' group on the scheduler's path")
-	m, err = sched.BindMachine(ctx(t), "m1", binding)
+	m, err = sched.BindMicroVM(ctx(t), "m1", binding)
 	require.NoError(t, err)
 
-	// The Node Agent reports the status of the Machine bound to it.
+	// The Node Agent reports the status of the MicroVM bound to it.
 	running := *m
-	running.Status = api.MachineStatus{Phase: api.MachineRunning, BindingEpoch: 1}
-	_, err = stranger.PutMachineStatus(ctx(t), &running)
+	running.Status = api.MicroVMStatus{Phase: api.MicroVMRunning, BindingEpoch: 1}
+	_, err = stranger.PutMicroVMStatus(ctx(t), &running)
 	assert.ErrorIs(t, err, api.ErrForbidden)
-	_, err = agent.PutMachineStatus(ctx(t), &running)
+	_, err = agent.PutMicroVMStatus(ctx(t), &running)
 	require.NoError(t, err)
 
 	// The controllers write the status of a Node.
@@ -61,18 +61,18 @@ func TestRBAC_EachComponentReachesItsPathsAndAnotherGroupIsRefused(t *testing.T)
 	_, err = ctrl.PutNodeStatus(ctx(t), n)
 	require.NoError(t, err)
 
-	// An administrator writes roles and deletes a Machine.
-	_, err = ctrlRBAC.PutClusterRole(ctx(t), clusterRole("viewer", rule(api.Group, "machines", api.VerbGet)))
+	// An administrator writes roles and deletes a MicroVM.
+	_, err = ctrlRBAC.PutClusterRole(ctx(t), clusterRole("viewer", rule(api.Group, "microvms", api.VerbGet)))
 	assert.ErrorIs(t, err, api.ErrForbidden)
-	_, err = strangerRBAC.PutClusterRole(ctx(t), clusterRole("viewer", rule(api.Group, "machines", api.VerbGet)))
+	_, err = strangerRBAC.PutClusterRole(ctx(t), clusterRole("viewer", rule(api.Group, "microvms", api.VerbGet)))
 	assert.ErrorIs(t, err, api.ErrForbidden)
-	_, err = adminRBAC.PutClusterRole(ctx(t), clusterRole("viewer", rule(api.Group, "machines", api.VerbGet)))
+	_, err = adminRBAC.PutClusterRole(ctx(t), clusterRole("viewer", rule(api.Group, "microvms", api.VerbGet)))
 	require.NoError(t, err)
-	current, err := admin.GetMachine(ctx(t), "m1")
+	current, err := admin.GetMicroVM(ctx(t), "m1")
 	require.NoError(t, err)
-	_, err = ctrl.DeleteMachine(ctx(t), "m1", current.Metadata.ResourceVersion)
+	_, err = ctrl.DeleteMicroVM(ctx(t), "m1", current.Metadata.ResourceVersion)
 	assert.ErrorIs(t, err, api.ErrForbidden, "the controllers hold no delete")
-	_, err = admin.DeleteMachine(ctx(t), "m1", current.Metadata.ResourceVersion)
+	_, err = admin.DeleteMicroVM(ctx(t), "m1", current.Metadata.ResourceVersion)
 	require.NoError(t, err)
 }
 
@@ -87,9 +87,9 @@ func TestRBAC_ACallerWithNoBindingIsForbiddenEverywhereAndAlwaysAllowServesIt(t 
 	assert.ErrorIs(t, err, api.ErrForbidden)
 	_, err = allowed.ListNodes(ctx(t))
 	assert.NoError(t, err, "control: the same request in AlwaysAllow")
-	_, err = denied.PutMachine(ctx(t), machine("m1"))
+	_, err = denied.PutMicroVM(ctx(t), microvm("m1"))
 	assert.ErrorIs(t, err, api.ErrForbidden)
-	_, err = allowed.PutMachine(ctx(t), machine("m1"))
+	_, err = allowed.PutMicroVM(ctx(t), microvm("m1"))
 	assert.NoError(t, err, "control: the same request in AlwaysAllow")
 }
 
@@ -98,7 +98,7 @@ func TestRBAC_TheDefaultModeIsAlwaysAllow(t *testing.T) {
 	addr, _ := c.start(t, "")
 	stranger, strangerRBAC := c.clients(t, addr, strangerID)
 
-	_, err := stranger.PutMachine(ctx(t), machine("m1"))
+	_, err := stranger.PutMicroVM(ctx(t), microvm("m1"))
 	assert.NoError(t, err)
 	_, err = strangerRBAC.PutClusterRole(ctx(t), clusterRole("anything", rule("*", "*", api.VerbAll)))
 	assert.NoError(t, err, "in AlwaysAllow a role decides nothing, so any caller may write one")
@@ -108,12 +108,12 @@ func TestRBAC_RolesAndBindingsDecideNothingInAlwaysAllow(t *testing.T) {
 	c := newCluster(t)
 	addr, _ := c.start(t, apiserver.ModeAlwaysAllow)
 	stranger, strangerRBAC := c.clients(t, addr, strangerID)
-	_, err := strangerRBAC.PutClusterRole(ctx(t), clusterRole("nothing", rule(api.Group, "machines", api.VerbGet)))
+	_, err := strangerRBAC.PutClusterRole(ctx(t), clusterRole("nothing", rule(api.Group, "microvms", api.VerbGet)))
 	require.NoError(t, err)
 	_, err = strangerRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("nothing", "nothing", userSubject("stranger")))
 	require.NoError(t, err)
 
-	_, err = stranger.PutMachine(ctx(t), machine("m1"))
+	_, err = stranger.PutMicroVM(ctx(t), microvm("m1"))
 
 	assert.NoError(t, err, "a role that grants get does not stop a create")
 }
@@ -123,20 +123,20 @@ func TestRBAC_ARoleEditTakesEffectOnTheNextRequest(t *testing.T) {
 	addr, _ := c.start(t, apiserver.ModeRBAC)
 	_, adminRBAC := c.clients(t, addr, adminID)
 	reader, _ := c.clients(t, addr, who{"reader", nil})
-	role, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("lister", rule(api.Group, "machines", api.VerbList)))
+	role, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("lister", rule(api.Group, "microvms", api.VerbList)))
 	require.NoError(t, err)
 
-	_, err = reader.ListMachines(ctx(t))
+	_, err = reader.ListMicroVMs(ctx(t))
 	assert.ErrorIs(t, err, api.ErrForbidden, "no binding yet")
 	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("lister", "lister", userSubject("reader")))
 	require.NoError(t, err)
-	_, err = reader.ListMachines(ctx(t))
+	_, err = reader.ListMicroVMs(ctx(t))
 	assert.NoError(t, err, "control: bound to a role that lists")
 
-	role.Rules = []api.PolicyRule{rule(api.Group, "machines", api.VerbGet)}
+	role.Rules = []api.PolicyRule{rule(api.Group, "microvms", api.VerbGet)}
 	_, err = adminRBAC.PutClusterRole(ctx(t), role)
 	require.NoError(t, err)
-	_, err = reader.ListMachines(ctx(t))
+	_, err = reader.ListMicroVMs(ctx(t))
 	assert.ErrorIs(t, err, api.ErrForbidden, "the role no longer lists")
 }
 
@@ -146,7 +146,7 @@ func TestRBAC_AWildcardRuleMatchesEveryValueAndOnlyAsTheWholeName(t *testing.T) 
 	_, adminRBAC := c.clients(t, addr, adminID)
 	holder, _ := c.clients(t, addr, who{"holder", nil})
 	partial, _ := c.clients(t, addr, who{"partial", nil})
-	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("star", rule("*", "machines", api.VerbAll)))
+	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("star", rule("*", "microvms", api.VerbAll)))
 	require.NoError(t, err)
 	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("star", "star", userSubject("holder")))
 	require.NoError(t, err)
@@ -155,18 +155,18 @@ func TestRBAC_AWildcardRuleMatchesEveryValueAndOnlyAsTheWholeName(t *testing.T) 
 	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("prefix", "prefix", userSubject("partial")))
 	require.NoError(t, err)
 
-	_, err = partial.ListMachines(ctx(t))
+	_, err = partial.ListMicroVMs(ctx(t))
 	assert.ErrorIs(t, err, api.ErrForbidden, "mach* is a plain name, not a pattern")
-	_, err = holder.ListMachines(ctx(t))
+	_, err = holder.ListMicroVMs(ctx(t))
 	assert.NoError(t, err, "control: * as the whole name")
 
 	_, err = holder.ListNodes(ctx(t))
-	assert.ErrorIs(t, err, api.ErrForbidden, "the rule names machines, not nodes")
-	_, err = holder.PutMachine(ctx(t), machine("m1"))
+	assert.ErrorIs(t, err, api.ErrForbidden, "the rule names microvms, not nodes")
+	_, err = holder.PutMicroVM(ctx(t), microvm("m1"))
 	assert.NoError(t, err, "control: * covers the group and the verb")
-	m, err := holder.GetMachine(ctx(t), "m1")
+	m, err := holder.GetMicroVM(ctx(t), "m1")
 	require.NoError(t, err)
-	_, err = holder.DeleteMachine(ctx(t), "m1", m.Metadata.ResourceVersion)
+	_, err = holder.DeleteMicroVM(ctx(t), "m1", m.Metadata.ResourceVersion)
 	assert.NoError(t, err, "control: * covers delete")
 }
 
@@ -175,19 +175,19 @@ func TestRBAC_ASubresourceNeedsItsOwnRule(t *testing.T) {
 	addr, _ := c.start(t, apiserver.ModeRBAC)
 	admin, adminRBAC := c.clients(t, addr, adminID)
 	holder, _ := c.clients(t, addr, who{"holder", nil})
-	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("machines-only", rule(api.Group, "machines", api.VerbUpdate)))
+	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("microvms-only", rule(api.Group, "microvms", api.VerbUpdate)))
 	require.NoError(t, err)
-	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("machines-only", "machines-only", userSubject("holder")))
+	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("microvms-only", "microvms-only", userSubject("holder")))
 	require.NoError(t, err)
-	m, err := admin.PutMachine(ctx(t), machine("m1"))
+	m, err := admin.PutMicroVM(ctx(t), microvm("m1"))
 	require.NoError(t, err)
 
 	status := *m
-	status.Status = api.MachineStatus{Phase: api.MachineRunning}
-	_, err = holder.PutMachineStatus(ctx(t), &status)
-	assert.ErrorIs(t, err, api.ErrForbidden, "update on machines is not update on machines/status")
-	_, err = holder.PutMachine(ctx(t), m)
-	assert.NoError(t, err, "control: update on machines")
+	status.Status = api.MicroVMStatus{Phase: api.MicroVMRunning}
+	_, err = holder.PutMicroVMStatus(ctx(t), &status)
+	assert.ErrorIs(t, err, api.ErrForbidden, "update on microvms is not update on microvms/status")
+	_, err = holder.PutMicroVM(ctx(t), m)
+	assert.NoError(t, err, "control: update on microvms")
 }
 
 func TestRBAC_ThePutVerbIsCreateWithoutAVersionAndUpdateWithOne(t *testing.T) {
@@ -195,16 +195,16 @@ func TestRBAC_ThePutVerbIsCreateWithoutAVersionAndUpdateWithOne(t *testing.T) {
 	addr, _ := c.start(t, apiserver.ModeRBAC)
 	admin, adminRBAC := c.clients(t, addr, adminID)
 	creator, _ := c.clients(t, addr, who{"creator", nil})
-	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("create-only", rule(api.Group, "machines", api.VerbCreate)))
+	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("create-only", rule(api.Group, "microvms", api.VerbCreate)))
 	require.NoError(t, err)
 	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("create-only", "create-only", userSubject("creator")))
 	require.NoError(t, err)
-	m, err := admin.PutMachine(ctx(t), machine("existing"))
+	m, err := admin.PutMicroVM(ctx(t), microvm("existing"))
 	require.NoError(t, err)
 
-	_, err = creator.PutMachine(ctx(t), m)
+	_, err = creator.PutMicroVM(ctx(t), m)
 	assert.ErrorIs(t, err, api.ErrForbidden, "a body with a version is an update")
-	_, err = creator.PutMachine(ctx(t), machine("fresh"))
+	_, err = creator.PutMicroVM(ctx(t), microvm("fresh"))
 	assert.NoError(t, err, "control: a body without a version is a create")
 }
 
@@ -213,14 +213,14 @@ func TestRBAC_AListAndAWatchAreDistinctVerbs(t *testing.T) {
 	addr, _ := c.start(t, apiserver.ModeRBAC)
 	_, adminRBAC := c.clients(t, addr, adminID)
 	lister, _ := c.clients(t, addr, who{"lister", nil})
-	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("list-only", rule(api.Group, "machines", api.VerbList)))
+	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("list-only", rule(api.Group, "microvms", api.VerbList)))
 	require.NoError(t, err)
 	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("list-only", "list-only", userSubject("lister")))
 	require.NoError(t, err)
 
-	_, err = lister.WatchMachines(ctx(t), "1")
+	_, err = lister.WatchMicroVMs(ctx(t), "1")
 	assert.ErrorIs(t, err, api.ErrForbidden, "list does not allow watch")
-	_, err = lister.ListMachines(ctx(t))
+	_, err = lister.ListMicroVMs(ctx(t))
 	assert.NoError(t, err, "control: list")
 }
 
@@ -230,14 +230,14 @@ func TestRBAC_AGroupBindingGivesItsRoleToEveryCertificateWithTheOrganization(t *
 	_, adminRBAC := c.clients(t, addr, adminID)
 	member, _ := c.clients(t, addr, who{"member", []string{"team", "other"}})
 	outsider, _ := c.clients(t, addr, who{"member", []string{"another"}})
-	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("lister", rule(api.Group, "machines", api.VerbList)))
+	_, err := adminRBAC.PutClusterRole(ctx(t), clusterRole("lister", rule(api.Group, "microvms", api.VerbList)))
 	require.NoError(t, err)
 	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("team-lists", "lister", groupSubject("team")))
 	require.NoError(t, err)
 
-	_, err = outsider.ListMachines(ctx(t))
+	_, err = outsider.ListMicroVMs(ctx(t))
 	assert.ErrorIs(t, err, api.ErrForbidden, "the same CN without the Organization")
-	_, err = member.ListMachines(ctx(t))
+	_, err = member.ListMicroVMs(ctx(t))
 	assert.NoError(t, err, "control: one of its Organizations is the bound group")
 }
 
@@ -257,7 +257,7 @@ func TestRBAC_ABearerTokenIsNeitherWidenedNorNarrowedByRoles(t *testing.T) {
 
 	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("token-admin", "gaon:admin", userSubject("bootstrap:abcdef")))
 	require.NoError(t, err)
-	_, err = holder.ListMachines(ctx(t))
+	_, err = holder.ListMicroVMs(ctx(t))
 	assert.ErrorIs(t, err, api.ErrForbidden, "a binding to gaon:admin does not widen a token")
 	_, err = holder.ListCertificateSigningRequests(ctx(t))
 	assert.ErrorIs(t, err, api.ErrForbidden)

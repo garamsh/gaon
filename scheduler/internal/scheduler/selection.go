@@ -12,7 +12,7 @@ import (
 // refusal names who refused a Node and why.
 type refusal struct{ by, reason string }
 
-// refusals counts the Nodes each refusal kept a Machine from.
+// refusals counts the Nodes each refusal kept a MicroVM from.
 type refusals map[refusal]int
 
 func (r refusals) String() string {
@@ -37,7 +37,7 @@ func (r refusals) String() string {
 // every filter, and the Nodes each filter or extender refused. A non-nil error
 // is a failed call to an extender that is not ignorable: m is not placed this
 // pass.
-func (s *service) choose(ctx context.Context, book *ledger, m *api.Machine, d demand) (string, refusals, error) {
+func (s *service) choose(ctx context.Context, book *ledger, m *api.MicroVM, d demand) (string, refusals, error) {
 	refused := refusals{}
 	var candidates []string
 	for _, name := range book.names {
@@ -66,7 +66,7 @@ func (s *service) choose(ctx context.Context, book *ledger, m *api.Machine, d de
 		passed, failed, err := e.filter(ctx, m, candidates)
 		if err != nil {
 			if e.ignorable {
-				s.log.Warn("extender skipped", "machine", m.Metadata.Name, "err", err)
+				s.log.Warn("extender skipped", "microvm", m.Metadata.Name, "err", err)
 				continue
 			}
 			return "", refused, err
@@ -93,7 +93,7 @@ func (s *service) choose(ctx context.Context, book *ledger, m *api.Machine, d de
 		prio, err := e.prioritize(ctx, m, candidates)
 		if err != nil {
 			if e.ignorable {
-				s.log.Warn("extender skipped", "machine", m.Metadata.Name, "err", err)
+				s.log.Warn("extender skipped", "microvm", m.Metadata.Name, "err", err)
 				continue
 			}
 			return "", refused, err

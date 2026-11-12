@@ -7,14 +7,14 @@ import (
 
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 
-	"github.com/garamsh/gaon/node-agent/internal/machines"
-	"github.com/garamsh/gaon/node-agent/internal/machines/network"
-	"github.com/garamsh/gaon/node-agent/internal/machines/storage"
+	"github.com/garamsh/gaon/node-agent/internal/microvms"
+	"github.com/garamsh/gaon/node-agent/internal/microvms/network"
+	"github.com/garamsh/gaon/node-agent/internal/microvms/storage"
 )
 
 // newNetwork returns the network plugin called name, built with the prefixes
 // of --egress-prefix and --ingress-prefix. The plugins are compiled in.
-func newNetwork(name string, egress, ingress []string) (machines.Network, error) {
+func newNetwork(name string, egress, ingress []string) (microvms.Network, error) {
 	switch name {
 	case network.Name:
 		return network.NewDefault(egress, ingress)
@@ -35,7 +35,7 @@ func checkStoragePlugin(name string) error {
 
 // newStorage returns the storage plugin called name, built with the
 // dependencies it needs. A plugin with a Run method is returned with it.
-func newStorage(name string, node string, resync time.Duration, client storage.Volumes, runtime machines.Runtime, clk clock.Clock, log *slog.Logger) (machines.Storage, error) {
+func newStorage(name string, node string, resync time.Duration, client storage.Volumes, runtime microvms.Runtime, clk clock.Clock, log *slog.Logger) (microvms.Storage, error) {
 	switch name {
 	case storage.LocalName:
 		return storage.NewLocal(node, resync, client, runtime, clk, log), nil

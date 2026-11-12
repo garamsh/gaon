@@ -11,8 +11,8 @@ import (
 
 	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/node-agent/internal/liveness"
-	"github.com/garamsh/gaon/node-agent/internal/machines"
-	"github.com/garamsh/gaon/node-agent/internal/machines/storage"
+	"github.com/garamsh/gaon/node-agent/internal/microvms"
+	"github.com/garamsh/gaon/node-agent/internal/microvms/storage"
 )
 
 // Environment variables, each the fallback of the flag named beside it.
@@ -63,20 +63,20 @@ type Config struct {
 	MvmdSocket string
 	// Liveness holds δ and the Lease and deadline durations.
 	Liveness liveness.Params
-	// ResyncPeriod is the time between two reconciliations of the Machines
+	// ResyncPeriod is the time between two reconciliations of the MicroVMs
 	// and two reports of the Node's status.
 	ResyncPeriod time.Duration
-	// RestartBackoff is the wait before a Machine's first restart, doubled
+	// RestartBackoff is the wait before a MicroVM's first restart, doubled
 	// with each restart up to RestartBackoffMax.
 	RestartBackoff    time.Duration
 	RestartBackoffMax time.Duration
-	// RestartResetAfter is how long a Machine runs before the wait starts
+	// RestartResetAfter is how long a MicroVM runs before the wait starts
 	// again from RestartBackoff.
 	RestartResetAfter time.Duration
-	// Network decides the network policy each Machine is created with. It
+	// Network decides the network policy each MicroVM is created with. It
 	// is the plugin --network-plugin names.
-	Network machines.Network
-	// StoragePlugin names the plugin that decides the disks of each Machine,
+	Network microvms.Network
+	// StoragePlugin names the plugin that decides the disks of each MicroVM,
 	// from --storage-plugin. Run builds it, as it needs the API client and
 	// mvmd.
 	StoragePlugin string
@@ -133,19 +133,19 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	str(&c.CertDir, "cert-dir", EnvCertDir, "directory where the agent keeps its key and client certificate")
 	str(&c.NodeName, "node-name", EnvNodeName, "name of this node's Node and Lease")
 	str(&c.MvmdSocket, "mvmd-socket", EnvMvmdSocket, "path of mvmd's runtime API Unix socket")
-	dur(&c.Liveness.Delta, "delta", EnvDelta, defaultDelta, "δ, how long a Machine can run past mvmd's recorded deadline expiry")
+	dur(&c.Liveness.Delta, "delta", EnvDelta, defaultDelta, "δ, how long a MicroVM can run past mvmd's recorded deadline expiry")
 	dur(&c.Liveness.LeaseDuration, "lease-duration", EnvLeaseDuration, defaultLeaseDuration, "how long the Lease is valid after a renewal, in whole seconds")
 	dur(&c.Liveness.RenewPeriod, "renew-period", EnvRenewPeriod, defaultRenewPeriod, "time between two renewals of the Lease and the deadline")
 	dur(&c.Liveness.DeadlineLength, "deadline-length", EnvDeadlineLength, defaultDeadlineLength, "length each deadline renewal asks mvmd for")
 	dur(&c.Liveness.RPCTimeout, "rpc-timeout", EnvRPCTimeout, defaultRPCTimeout, "bound on each call of a renewal")
-	dur(&c.ResyncPeriod, "resync-period", EnvResyncPeriod, defaultResyncPeriod, "time between two reconciliations of the Machines")
-	dur(&c.RestartBackoff, "restart-backoff", EnvRestartBackoff, defaultRestartBackoff, "wait before a Machine's first restart, doubled with each restart")
+	dur(&c.ResyncPeriod, "resync-period", EnvResyncPeriod, defaultResyncPeriod, "time between two reconciliations of the MicroVMs")
+	dur(&c.RestartBackoff, "restart-backoff", EnvRestartBackoff, defaultRestartBackoff, "wait before a MicroVM's first restart, doubled with each restart")
 	dur(&c.RestartBackoffMax, "restart-backoff-max", EnvRestartBackoffMax, defaultRestartBackoffMax, "longest wait before a restart")
-	dur(&c.RestartResetAfter, "restart-reset-after", EnvRestartResetAfter, defaultRestartResetAfter, "how long a Machine runs before the restart wait starts again from the first")
+	dur(&c.RestartResetAfter, "restart-reset-after", EnvRestartResetAfter, defaultRestartResetAfter, "how long a MicroVM runs before the restart wait starts again from the first")
 	var networkPlugin, storagePlugin string
 	var egress, ingress []string
-	fs.StringVar(&networkPlugin, "network-plugin", orDefault(getenv(EnvNetworkPlugin), defaultNetworkPlugin), "network plugin, which decides each Machine's network policy (env "+EnvNetworkPlugin+")")
-	fs.StringVar(&storagePlugin, "storage-plugin", orDefault(getenv(EnvStoragePlugin), defaultStoragePlugin), "storage plugin, which decides each Machine's disks (env "+EnvStoragePlugin+")")
+	fs.StringVar(&networkPlugin, "network-plugin", orDefault(getenv(EnvNetworkPlugin), defaultNetworkPlugin), "network plugin, which decides each MicroVM's network policy (env "+EnvNetworkPlugin+")")
+	fs.StringVar(&storagePlugin, "storage-plugin", orDefault(getenv(EnvStoragePlugin), defaultStoragePlugin), "storage plugin, which decides each MicroVM's disks (env "+EnvStoragePlugin+")")
 	prefixes := func(p *[]string, name, env, usage string) {
 		if v := getenv(env); v != "" {
 			*p = strings.Split(v, ",")
@@ -159,8 +159,8 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 			return nil
 		})
 	}
-	prefixes(&egress, "egress-prefix", EnvEgressPrefix, "CIDR a Machine may send to over any protocol, for the default network plugin")
-	prefixes(&ingress, "ingress-prefix", EnvIngressPrefix, "CIDR a Machine's ports accept TCP from, for the default network plugin")
+	prefixes(&egress, "egress-prefix", EnvEgressPrefix, "CIDR a MicroVM may send to over any protocol, for the default network plugin")
+	prefixes(&ingress, "ingress-prefix", EnvIngressPrefix, "CIDR a MicroVM's ports accept TCP from, for the default network plugin")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}

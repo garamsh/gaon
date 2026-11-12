@@ -33,10 +33,10 @@ const (
 	// The Nodes: bigNode has more capacity, so LeastAllocated prefers it, and
 	// its name sorts last, so the default order does not.
 	smallNode, bigNode = "node-a", "node-b"
-	// The extender keeps the Machines with this name prefix off bigNode.
+	// The extender keeps the MicroVMs with this name prefix off bigNode.
 	filteredPrefix = "filtered-"
-	// machineImage is a Machine's image; the fake mvmd pulls nothing.
-	machineImage = "gaon-93/image@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	// microvmImage is a MicroVM's image; the fake mvmd pulls nothing.
+	microvmImage = "gaon-93/image@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 	crdGroup   = "apps.gaon.garam.sh"
 	crdVersion = "v1alpha1"
@@ -74,7 +74,7 @@ func TestExtensions(t *testing.T) {
 	}
 	c := startCluster(t, binDir)
 
-	t.Run("agents_register_and_machines_run_under_rbac", c.agentsRegister)
+	t.Run("agents_register_and_microvms_run_under_rbac", c.agentsRegister)
 	t.Run("custom_resource_is_served", c.customResourceServed)
 	t.Run("external_controller_is_bound_by_rbac", c.externalController)
 	t.Run("webhook_refuses_a_marked_object", c.webhookRefuses)
@@ -177,7 +177,7 @@ func (c *cluster) customClient(t *testing.T, id identity) *api.CustomResourceCli
 }
 
 // agentsRegister shows the Node Agents get certificates by CertificateSigningRequest,
-// register their Nodes and keep Leases, and that a Machine is bound and Running.
+// register their Nodes and keep Leases, and that a MicroVM is bound and Running.
 func (c *cluster) agentsRegister(t *testing.T) {
 	ctx, cancel := within(5 * time.Minute)
 	defer cancel()
@@ -224,8 +224,8 @@ func (c *cluster) agentsRegister(t *testing.T) {
 		}, waitFor, pollEvery, n+" renews its Lease")
 	}
 
-	m := c.machine("plain-1", "1", "1Gi")
-	_, err = c.admin.PutMachine(ctx, m)
+	m := c.microvm("plain-1", "1", "1Gi")
+	_, err = c.admin.PutMicroVM(ctx, m)
 	require.NoError(t, err)
 	bound := c.waitRunning(t, ctx, "plain-1")
 	assert.Contains(t, []string{smallNode, bigNode}, bound.Spec.NodeName)
@@ -256,12 +256,12 @@ func parseCertificate(t *testing.T, certPEM string) *x509.Certificate {
 	return cert
 }
 
-func (c *cluster) machine(name, cpu, memory string) *api.Machine {
-	return &api.Machine{
-		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachine},
+func (c *cluster) microvm(name, cpu, memory string) *api.MicroVM {
+	return &api.MicroVM{
+		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVM},
 		Metadata: api.ObjectMeta{Name: name},
-		Spec: api.MachineSpec{
-			Image:        machineImage,
+		Spec: api.MicroVMSpec{
+			Image:        microvmImage,
 			RunStrategy:  api.RunAlways,
 			RootDiskSize: "256Mi",
 			Resources:    api.ResourceRequirements{Requests: api.ResourceList{CPU: api.Quantity(cpu), Memory: api.Quantity(memory)}},
@@ -269,19 +269,19 @@ func (c *cluster) machine(name, cpu, memory string) *api.Machine {
 	}
 }
 
-// waitRunning waits for the Machine to be bound and reported Running at its
+// waitRunning waits for the MicroVM to be bound and reported Running at its
 // binding epoch, and returns it.
-func (c *cluster) waitRunning(t *testing.T, ctx context.Context, name string) *api.Machine {
+func (c *cluster) waitRunning(t *testing.T, ctx context.Context, name string) *api.MicroVM {
 	t.Helper()
-	var got *api.Machine
+	var got *api.MicroVM
 	require.Eventually(t, func() bool {
-		m, err := c.admin.GetMachine(ctx, name)
+		m, err := c.admin.GetMicroVM(ctx, name)
 		if err != nil {
 			return false
 		}
 		got = m
-		return m.Spec.NodeName != "" && m.EffectivePhase() == api.MachineRunning
-	}, waitFor, pollEvery, "Machine "+name+" is bound and Running")
+		return m.Spec.NodeName != "" && m.EffectivePhase() == api.MicroVMRunning
+	}, waitFor, pollEvery, "MicroVM "+name+" is bound and Running")
 	return got
 }
 
@@ -488,25 +488,25 @@ func (c *cluster) webhookRefuses(t *testing.T) {
 	assert.Equal(t, []string{"marked", "unmarked"}, hook.Seen(), "the webhook was asked about both writes")
 }
 
-// extenderFilters shows the extender keeps a Machine off the Node
-// LeastAllocated would choose, and that a Machine it does not filter goes to
+// extenderFilters shows the extender keeps a MicroVM off the Node
+// LeastAllocated would choose, and that a MicroVM it does not filter goes to
 // that Node.
 func (c *cluster) extenderFilters(t *testing.T) {
 	ctx, cancel := within(3 * time.Minute)
 	defer cancel()
 
-	// The filtered Machine goes first: LeastAllocated prefers bigNode for it
+	// The filtered MicroVM goes first: LeastAllocated prefers bigNode for it
 	// and, with the Nodes unloaded, scores smallNode lower.
 	c.assertBigNodeIsFreer(t, ctx)
-	_, err := c.admin.PutMachine(ctx, c.machine(filteredPrefix+"1", "2", "2Gi"))
+	_, err := c.admin.PutMicroVM(ctx, c.microvm(filteredPrefix+"1", "2", "2Gi"))
 	require.NoError(t, err)
 	filtered := c.waitRunning(t, ctx, filteredPrefix+"1")
 	assert.Equal(t, smallNode, filtered.Spec.NodeName, "the extender filtered out %s", bigNode)
 	assert.Contains(t, c.extender.Refusals(), filteredPrefix+"1@"+bigNode)
 
-	// The control: an unfiltered Machine goes to the Node LeastAllocated chooses.
+	// The control: an unfiltered MicroVM goes to the Node LeastAllocated chooses.
 	c.assertBigNodeIsFreer(t, ctx)
-	_, err = c.admin.PutMachine(ctx, c.machine("control-1", "2", "2Gi"))
+	_, err = c.admin.PutMicroVM(ctx, c.microvm("control-1", "2", "2Gi"))
 	require.NoError(t, err)
 	control := c.waitRunning(t, ctx, "control-1")
 	assert.Equal(t, bigNode, control.Spec.NodeName, "LeastAllocated chooses the Node with the most free capacity")
@@ -515,7 +515,7 @@ func (c *cluster) extenderFilters(t *testing.T) {
 }
 
 // assertBigNodeIsFreer checks the two Nodes' free cpu and memory differ, with
-// bigNode ahead on both, from their capacity and the Machines bound to them.
+// bigNode ahead on both, from their capacity and the MicroVMs bound to them.
 func (c *cluster) assertBigNodeIsFreer(t *testing.T, ctx context.Context) {
 	t.Helper()
 	free := map[string][2]*big.Rat{}
@@ -528,12 +528,12 @@ func (c *cluster) assertBigNodeIsFreer(t *testing.T, ctx context.Context) {
 		require.NoError(t, err)
 		free[name] = [2]*big.Rat{cpu, mem}
 	}
-	// The Machines already placed must not be what makes the Nodes differ.
+	// The MicroVMs already placed must not be what makes the Nodes differ.
 	require.Equal(t, 1, free[bigNode][0].Cmp(free[smallNode][0]), "%s has more cpu capacity than %s", bigNode, smallNode)
 	require.Equal(t, 1, free[bigNode][1].Cmp(free[smallNode][1]), "%s has more memory capacity than %s", bigNode, smallNode)
-	machines, err := c.admin.ListMachines(ctx)
+	microvms, err := c.admin.ListMicroVMs(ctx)
 	require.NoError(t, err)
-	for _, m := range machines.Items {
+	for _, m := range microvms.Items {
 		f, ok := free[m.Spec.NodeName]
 		if !ok {
 			continue

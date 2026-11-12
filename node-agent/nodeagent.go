@@ -1,5 +1,5 @@
 // Package nodeagent is gaon-node-agent: it registers the node, keeps its
-// Lease and mvmd's fencing deadline renewed, and runs the Machines bound to
+// Lease and mvmd's fencing deadline renewed, and runs the MicroVMs bound to
 // it on mvmd.
 package nodeagent
 
@@ -11,7 +11,7 @@ import (
 
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/gaon/node-agent/internal/liveness"
-	"github.com/garamsh/gaon/node-agent/internal/machines"
+	"github.com/garamsh/gaon/node-agent/internal/microvms"
 	"github.com/garamsh/gaon/node-agent/internal/node"
 	"github.com/garamsh/mvmd/lib/runtimeapi"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
@@ -41,7 +41,7 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 	if err != nil {
 		return err
 	}
-	runs := machines.NewService(cfg.NodeName, machines.Params{
+	runs := microvms.NewService(cfg.NodeName, microvms.Params{
 		Resync:            cfg.ResyncPeriod,
 		Retry:             cfg.ResyncPeriod,
 		RestartBackoff:    cfg.RestartBackoff,

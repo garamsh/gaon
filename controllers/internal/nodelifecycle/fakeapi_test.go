@@ -18,7 +18,7 @@ import (
 // fakeAPI serves only the endpoints the controller uses: listing and watching
 // Leases and Nodes, reading a Node and writing a Node's status. A request to any other
 // path fails the test, which is how the tests show the controller never
-// writes a Machine's binding or a Node's spec.
+// writes a MicroVM's binding or a Node's spec.
 type fakeAPI struct {
 	t      *testing.T
 	client *api.Client

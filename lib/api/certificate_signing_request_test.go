@@ -172,7 +172,7 @@ func TestClientCertificateSigningRequestGetAndList(t *testing.T) {
 func TestClientWatchCertificateSigningRequestsDeliversTheirEventsOnly(t *testing.T) {
 	ctx := testContext(t)
 	s, c := newMemoryServer(t)
-	_, err := c.PutMachine(ctx, newMachine("m1"))
+	_, err := c.PutMicroVM(ctx, newMicroVM("m1"))
 	require.NoError(t, err)
 	created, err := c.PutCertificateSigningRequest(ctx, newCSR(t, "csr-1"))
 	require.NoError(t, err)
@@ -182,7 +182,7 @@ func TestClientWatchCertificateSigningRequestsDeliversTheirEventsOnly(t *testing
 	t.Cleanup(func() { _ = w.Close() })
 	ev := nextEvent(t, w)
 	assert.Equal(t, api.EventAdded, ev.Type)
-	assert.Equal(t, "csr-1", ev.Object.Metadata.Name, "the Machine's event is not delivered to a request watch")
+	assert.Equal(t, "csr-1", ev.Object.Metadata.Name, "the MicroVM's event is not delivered to a request watch")
 
 	sign := *created
 	sign.Status.Conditions = []api.Condition{{Type: api.CSRApproved, Status: api.ConditionTrue}}

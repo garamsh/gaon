@@ -111,7 +111,7 @@ func (s *Server) putVolume(w http.ResponseWriter, r *http.Request) {
 
 // putVolumeStatus replaces the status of a Volume, checking the version and,
 // as the API server does, the phase and a new attachment: it must name the
-// current epoch of an existing Machine and pass the Volume's attach rule.
+// current epoch of an existing MicroVM and pass the Volume's attach rule.
 func (s *Server) putVolumeStatus(w http.ResponseWriter, r *http.Request) {
 	var next api.Volume
 	if !decode(w, r, &next) {
@@ -133,13 +133,13 @@ func (s *Server) putVolumeStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a := next.Status.Attachment; a != nil && (v.Status.Attachment == nil || *a != *v.Status.Attachment) {
-		m, ok := s.machines[a.MachineName]
+		m, ok := s.microvms[a.MicroVMName]
 		if !ok || m.Spec.BindingEpoch != a.BindingEpoch {
-			writeError(w, api.NewAPIError(api.ReasonInvalid, "attachment names machine %q at epoch %d, which is not a Machine's current binding", a.MachineName, a.BindingEpoch))
+			writeError(w, api.NewAPIError(api.ReasonInvalid, "attachment names microvm %q at epoch %d, which is not a MicroVM's current binding", a.MicroVMName, a.BindingEpoch))
 			return
 		}
 		probe := v
-		if err := probe.Attach(a.MachineName, a.BindingEpoch); err != nil {
+		if err := probe.Attach(a.MicroVMName, a.BindingEpoch); err != nil {
 			writeError(w, err.(*api.APIError))
 			return
 		}

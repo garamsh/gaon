@@ -39,7 +39,7 @@ type mtlsAPI struct {
 }
 
 // newMTLSAPI starts a TLS server that verifies client certificates against a CA
-// generated here and answers an empty Machine list.
+// generated here and answers an empty MicroVM list.
 func newMTLSAPI(t *testing.T) *mtlsAPI {
 	t.Helper()
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -81,7 +81,7 @@ func newMTLSAPI(t *testing.T) *mtlsAPI {
 		if len(r.TLS.PeerCertificates) > 0 {
 			a.withCerts.Add(1)
 		}
-		_, _ = io.WriteString(w, `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"MachineList","metadata":{"resourceVersion":"1"},"items":[]}`)
+		_, _ = io.WriteString(w, `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"MicroVMList","metadata":{"resourceVersion":"1"},"items":[]}`)
 	}))
 	ts.TLS = &tls.Config{Certificates: []tls.Certificate{pair}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: clients}
 	ts.StartTLS()
@@ -108,7 +108,7 @@ func TestParseConfig_ReachesTheAPIServerOverMutualTLSWhenGivenTheThreeFiles(t *t
 	cfg, err := nodeagent.ParseConfig(args, env(required), io.Discard)
 	require.NoError(t, err)
 
-	_, err = api.NewClient(a.URL, cfg.HTTPClient).ListMachines(context.Background())
+	_, err = api.NewClient(a.URL, cfg.HTTPClient).ListMicroVMs(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), a.requests.Load())
 	assert.Equal(t, int32(1), a.withCerts.Load(), "the server saw the client certificate")
@@ -123,7 +123,7 @@ func TestParseConfig_TakesTheTLSFilesFromTheEnvironmentAndAFlagWins(t *testing.T
 
 	cfg, err := nodeagent.ParseConfig(nil, env(environment), io.Discard)
 	require.NoError(t, err)
-	_, err = api.NewClient(a.URL, cfg.HTTPClient).ListMachines(context.Background())
+	_, err = api.NewClient(a.URL, cfg.HTTPClient).ListMicroVMs(context.Background())
 	require.NoError(t, err, "the three variables alone build a mutual TLS client")
 
 	_, err = nodeagent.ParseConfig([]string{"--tls-ca", filepath.Join(t.TempDir(), "missing.pem")}, env(environment), io.Discard)

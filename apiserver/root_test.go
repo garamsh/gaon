@@ -14,13 +14,13 @@ import (
 
 // contractPaths is resource-api.md §Paths.
 var contractPaths = []struct{ method, path string }{
-	{http.MethodPut, "/machines/m1"},
-	{http.MethodPost, "/machines/m1/binding"},
-	{http.MethodPut, "/machines/m1/status"},
-	{http.MethodDelete, "/machines/m1"},
-	{http.MethodGet, "/machines"},
-	{http.MethodGet, "/machines/m1"},
-	{http.MethodGet, "/machines?watch=true&resourceVersion=abc"},
+	{http.MethodPut, "/microvms/m1"},
+	{http.MethodPost, "/microvms/m1/binding"},
+	{http.MethodPut, "/microvms/m1/status"},
+	{http.MethodDelete, "/microvms/m1"},
+	{http.MethodGet, "/microvms"},
+	{http.MethodGet, "/microvms/m1"},
+	{http.MethodGet, "/microvms?watch=true&resourceVersion=abc"},
 	{http.MethodPut, "/volumes/v1"},
 	{http.MethodDelete, "/volumes/v1"},
 	{http.MethodGet, "/volumes"},
@@ -64,11 +64,11 @@ func TestRoot_PathOutsideItAnswersTheNotFoundObject(t *testing.T) {
 	e := newEnv(t)
 	for _, path := range []string{
 		"/",
-		"/machines",
+		"/microvms",
 		apiRoot,
-		"/apis/compute.gaon.garam.sh/v1/machines",
-		"/apis/other.group/v1alpha1/machines",
-		"/apis/compute.gaon.garam.sh/v1alpha1x/machines",
+		"/apis/compute.gaon.garam.sh/v1/microvms",
+		"/apis/other.group/v1alpha1/microvms",
+		"/apis/compute.gaon.garam.sh/v1alpha1x/microvms",
 	} {
 		status, body := e.sendAbsolute(t, http.MethodGet, path, "")
 		assert.Equal(t, http.StatusNotFound, status, path)
@@ -78,6 +78,6 @@ func TestRoot_PathOutsideItAnswersTheNotFoundObject(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, got.Code, path)
 	}
 
-	status, _ := e.sendAbsolute(t, http.MethodGet, apiRoot+"/machines", "")
+	status, _ := e.sendAbsolute(t, http.MethodGet, apiRoot+"/microvms", "")
 	assert.Equal(t, http.StatusOK, status, "the same collection under the root")
 }

@@ -34,12 +34,12 @@ type Authorizer interface {
 	// AuthorizeRole allows c to write a ClusterRole with rules, or returns
 	// Forbidden where c does not already hold every permission they grant.
 	AuthorizeRole(ctx context.Context, c Caller, rules []api.PolicyRule) error
-	// AuthorizeMachineUpdate allows c to replace the stored Machine name
-	// with next where a role grants it update on machines, and otherwise,
+	// AuthorizeMicroVMUpdate allows c to replace the stored MicroVM name
+	// with next where a role grants it update on microvms, and otherwise,
 	// where the Node authorizer's grant is all it has, only where next
-	// differs from the stored Machine in the Node Agent's finalizer alone.
+	// differs from the stored MicroVM in the Node Agent's finalizer alone.
 	// It returns Forbidden for any other change.
-	AuthorizeMachineUpdate(ctx context.Context, c Caller, name string, next *api.Machine) error
+	AuthorizeMicroVMUpdate(ctx context.Context, c Caller, name string, next *api.MicroVM) error
 	// AuthorizeVolumeUpdate allows c to replace the stored Volume name with
 	// next where a role grants it update on volumes, and otherwise, where the
 	// Node authorizer's grant is all it has, only where next differs from
@@ -59,7 +59,7 @@ func AlwaysAllow() Authorizer { return alwaysAllow{} }
 
 func (alwaysAllow) Authorize(context.Context, Caller, Request) error              { return nil }
 func (alwaysAllow) AuthorizeRole(context.Context, Caller, []api.PolicyRule) error { return nil }
-func (alwaysAllow) AuthorizeMachineUpdate(context.Context, Caller, string, *api.Machine) error {
+func (alwaysAllow) AuthorizeMicroVMUpdate(context.Context, Caller, string, *api.MicroVM) error {
 	return nil
 }
 func (alwaysAllow) AuthorizeVolumeUpdate(context.Context, Caller, string, *api.Volume) error {
@@ -71,7 +71,7 @@ func (r Request) String() string {
 	return string(r.Verb) + " " + r.qualified()
 }
 
-// qualified is the resource as a rule names it: machines, or machines/status.
+// qualified is the resource as a rule names it: microvms, or microvms/status.
 func (r Request) qualified() string {
 	if r.Subresource == "" {
 		return r.Resource

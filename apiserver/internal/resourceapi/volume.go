@@ -9,7 +9,7 @@ import (
 )
 
 // PutVolumeStatus replaces the status of the stored Volume v was read at. A
-// new attachment must name the epoch of its Machine's current binding, and
+// new attachment must name the epoch of its MicroVM's current binding, and
 // succeeds only where the Volume is unattached or attached at a lower epoch.
 func (s *service) PutVolumeStatus(ctx context.Context, name string, next *api.Volume) (*api.Volume, error) {
 	if err := checkName(name, next.Metadata.Name); err != nil {
@@ -42,22 +42,22 @@ func (s *service) PutVolumeStatus(ctx context.Context, name string, next *api.Vo
 }
 
 func (s *service) checkAttachment(ctx context.Context, v *api.Volume, a *api.Attachment) error {
-	m, _, err := machines.get(ctx, s.st, a.MachineName)
+	m, _, err := microvms.get(ctx, s.st, a.MicroVMName)
 	if errors.Is(err, api.ErrNotFound) {
-		return api.NewAPIError(api.ReasonInvalid, "attachment names machine %q, which does not exist", a.MachineName)
+		return api.NewAPIError(api.ReasonInvalid, "attachment names microvm %q, which does not exist", a.MicroVMName)
 	}
 	if err != nil {
 		return err
 	}
 	if a.BindingEpoch != m.Spec.BindingEpoch {
-		return api.NewAPIError(api.ReasonInvalid, "attachment epoch is %d, want the machine's current %d", a.BindingEpoch, m.Spec.BindingEpoch)
+		return api.NewAPIError(api.ReasonInvalid, "attachment epoch is %d, want the microvm's current %d", a.BindingEpoch, m.Spec.BindingEpoch)
 	}
-	return v.Attach(a.MachineName, a.BindingEpoch)
+	return v.Attach(a.MicroVMName, a.BindingEpoch)
 }
 
 // PutVolume creates v with phase Pending, or changes the finalizers of the
 // stored Volume v was read at. Neither takes the status or the node from v: a
-// Volume's spec is immutable, and only the binding of a Machine pins it. An
+// Volume's spec is immutable, and only the binding of a MicroVM pins it. An
 // update that clears the last finalizer of a Volume being deleted removes it.
 func (s *service) PutVolume(ctx context.Context, name string, v *api.Volume) (*api.Volume, error) {
 	if err := checkName(name, v.Metadata.Name); err != nil {

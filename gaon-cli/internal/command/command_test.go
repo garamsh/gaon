@@ -17,8 +17,8 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-const machineYAML = `apiVersion: compute.gaon.garam.sh/v1alpha1
-kind: Machine
+const microvmYAML = `apiVersion: compute.gaon.garam.sh/v1alpha1
+kind: MicroVM
 metadata:
   name: web
 spec:
@@ -70,27 +70,27 @@ func writeFile(t *testing.T, content string) string {
 	return path
 }
 
-func newMachine(name string, strategy api.RunStrategy) api.Machine {
-	return api.Machine{
-		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMachine},
+func newMicroVM(name string, strategy api.RunStrategy) api.MicroVM {
+	return api.MicroVM{
+		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindMicroVM},
 		Metadata: api.ObjectMeta{Name: name},
-		Spec:     api.MachineSpec{RunStrategy: strategy},
+		Spec:     api.MicroVMSpec{RunStrategy: strategy},
 	}
 }
 
 func TestApply_CreatesAndThenUpdatesEachResource(t *testing.T) {
 	f := newFakeServer(t)
-	file := writeFile(t, machineYAML+"---\n"+nodeYAML+"---\n"+leaseYAML)
+	file := writeFile(t, microvmYAML+"---\n"+nodeYAML+"---\n"+leaseYAML)
 
 	stdout, stderr, code := execute(t, f, "apply", "-f", file)
 	require.Equal(t, command.ExitOK, code, stderr)
-	assert.Equal(t, "machine/web created\nnode/n1 created\nlease/n1 created\n", stdout)
-	assert.Equal(t, api.RunAlways, load[api.Machine](f, "/machines/web").Spec.RunStrategy)
+	assert.Equal(t, "microvm/web created\nnode/n1 created\nlease/n1 created\n", stdout)
+	assert.Equal(t, api.RunAlways, load[api.MicroVM](f, "/microvms/web").Spec.RunStrategy)
 	assert.True(t, load[api.Node](f, "/nodes/n1").Spec.Admitted)
 	assert.Equal(t, int32(15), load[api.Lease](f, "/leases/n1").Spec.DurationSeconds)
 
 	changed := writeFile(t, `apiVersion: compute.gaon.garam.sh/v1alpha1
-kind: Machine
+kind: MicroVM
 metadata:
   name: web
 spec:
@@ -98,22 +98,22 @@ spec:
 `)
 	stdout, stderr, code = execute(t, f, "apply", "-f", changed)
 	require.Equal(t, command.ExitOK, code, stderr)
-	assert.Equal(t, "machine/web configured\n", stdout)
-	assert.Equal(t, api.RunHalted, load[api.Machine](f, "/machines/web").Spec.RunStrategy)
+	assert.Equal(t, "microvm/web configured\n", stdout)
+	assert.Equal(t, api.RunHalted, load[api.MicroVM](f, "/microvms/web").Spec.RunStrategy)
 }
 
 func TestApply_ReportsAConcurrentChangeAndDoesNotOverwriteIt(t *testing.T) {
 	changeBehindTheCLI := func(f *fakeServer) {
 		f.beforeWrite = func(method, path string) {
 			if method == "PUT" {
-				theirs := newMachine("web", api.RunOnce)
+				theirs := newMicroVM("web", api.RunOnce)
 				theirs.Metadata.ResourceVersion = api.ResourceVersion(versionOf(f.objects[path]))
 				f.store(path, toMap(t, theirs))
 				f.beforeWrite = nil
 			}
 		}
 	}
-	file := writeFile(t, machineYAML)
+	file := writeFile(t, microvmYAML)
 
 	tests := []struct {
 		name       string
@@ -127,7 +127,7 @@ func TestApply_ReportsAConcurrentChangeAndDoesNotOverwriteIt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFakeServer(t)
-			f.seed("/machines/web", newMachine("web", api.RunHalted))
+			f.seed("/microvms/web", newMicroVM("web", api.RunHalted))
 			if tt.concurrent {
 				changeBehindTheCLI(f)
 			}
@@ -135,7 +135,7 @@ func TestApply_ReportsAConcurrentChangeAndDoesNotOverwriteIt(t *testing.T) {
 			_, stderr, code := execute(t, f, "apply", "-f", file)
 
 			assert.Equal(t, tt.code, code, stderr)
-			assert.Equal(t, tt.strategy, load[api.Machine](f, "/machines/web").Spec.RunStrategy)
+			assert.Equal(t, tt.strategy, load[api.MicroVM](f, "/microvms/web").Spec.RunStrategy)
 			if tt.concurrent {
 				assert.Contains(t, stderr, "changed by someone else")
 				assert.Contains(t, stderr, "Conflict")
@@ -147,53 +147,53 @@ func TestApply_ReportsAConcurrentChangeAndDoesNotOverwriteIt(t *testing.T) {
 func TestApply_ReportsACreateThatLostTheRace(t *testing.T) {
 	f := newFakeServer(t)
 	f.beforeWrite = func(method, path string) {
-		f.store(path, toMap(t, newMachine("web", api.RunOnce)))
+		f.store(path, toMap(t, newMicroVM("web", api.RunOnce)))
 		f.beforeWrite = nil
 	}
 
-	_, stderr, code := execute(t, f, "apply", "-f", writeFile(t, machineYAML))
+	_, stderr, code := execute(t, f, "apply", "-f", writeFile(t, microvmYAML))
 
 	assert.Equal(t, command.ExitFailure, code)
 	assert.Contains(t, stderr, "changed by someone else")
 	assert.Contains(t, stderr, "AlreadyExists")
-	assert.Equal(t, api.RunOnce, load[api.Machine](f, "/machines/web").Spec.RunStrategy)
+	assert.Equal(t, api.RunOnce, load[api.MicroVM](f, "/microvms/web").Spec.RunStrategy)
 }
 
 func TestApply_UsesTheVersionTheFileCarries(t *testing.T) {
 	f := newFakeServer(t)
-	current := f.seed("/machines/web", newMachine("web", api.RunHalted))
-	f.seed("/machines/web", newMachine("web", api.RunOnce)) // moves the stored version on
+	current := f.seed("/microvms/web", newMicroVM("web", api.RunHalted))
+	f.seed("/microvms/web", newMicroVM("web", api.RunOnce)) // moves the stored version on
 
 	withVersion := func(rv api.ResourceVersion) string {
-		return strings.Replace(machineYAML, "  name: web\n", "  name: web\n  resourceVersion: \""+string(rv)+"\"\n", 1)
+		return strings.Replace(microvmYAML, "  name: web\n", "  name: web\n  resourceVersion: \""+string(rv)+"\"\n", 1)
 	}
 
 	_, stderr, code := execute(t, f, "apply", "-f", writeFile(t, withVersion(current)))
 	assert.Equal(t, command.ExitFailure, code)
 	assert.Contains(t, stderr, "Conflict")
-	assert.Equal(t, api.RunOnce, load[api.Machine](f, "/machines/web").Spec.RunStrategy)
+	assert.Equal(t, api.RunOnce, load[api.MicroVM](f, "/microvms/web").Spec.RunStrategy)
 
-	latest := load[api.Machine](f, "/machines/web").Metadata.ResourceVersion
+	latest := load[api.MicroVM](f, "/microvms/web").Metadata.ResourceVersion
 	_, stderr, code = execute(t, f, "apply", "-f", writeFile(t, withVersion(latest)))
 	assert.Equal(t, command.ExitOK, code, stderr)
-	assert.Equal(t, api.RunAlways, load[api.Machine](f, "/machines/web").Spec.RunStrategy)
+	assert.Equal(t, api.RunAlways, load[api.MicroVM](f, "/microvms/web").Spec.RunStrategy)
 }
 
 func TestApply_SendsNothingWhenAnyDocumentIsRefused(t *testing.T) {
-	invalid := machineYAML + "---\n" + `apiVersion: compute.gaon.garam.sh/v1alpha1
-kind: Machine
+	invalid := microvmYAML + "---\n" + `apiVersion: compute.gaon.garam.sh/v1alpha1
+kind: MicroVM
 metadata:
   name: bad
 spec:
   runStrategy: Sometimes
 `
-	unknownField := machineYAML + "---\n" + nodeYAML + "  colour: red\n"
-	unknownKind := machineYAML + "---\n" + `apiVersion: compute.gaon.garam.sh/v1alpha1
+	unknownField := microvmYAML + "---\n" + nodeYAML + "  colour: red\n"
+	unknownKind := microvmYAML + "---\n" + `apiVersion: compute.gaon.garam.sh/v1alpha1
 kind: Widget
 metadata:
   name: w
 `
-	notYAML := machineYAML + "---\nkey: [unclosed\n"
+	notYAML := microvmYAML + "---\nkey: [unclosed\n"
 	tests := []struct {
 		name, file, message string
 	}{
@@ -217,7 +217,7 @@ metadata:
 
 	t.Run("control: the valid first document alone is sent", func(t *testing.T) {
 		f := newFakeServer(t)
-		_, stderr, code := execute(t, f, "apply", "-f", writeFile(t, machineYAML))
+		_, stderr, code := execute(t, f, "apply", "-f", writeFile(t, microvmYAML))
 		require.Equal(t, command.ExitOK, code, stderr)
 		assert.NotZero(t, f.writes())
 	})
@@ -238,7 +238,7 @@ var (
 
 	// tableOf names the table each kind prints, for the objects seedCluster stores.
 	tableOf = map[string]string{
-		"machine": "NAME  PHASE    NODE  EPOCH\nold   Pending  n2    3\nweb   Running  n1    2\n",
+		"microvm": "NAME  PHASE    NODE  EPOCH\nold   Pending  n2    3\nweb   Running  n1    2\n",
 		"node":    "NAME  STATE     ADMITTED\nn1    Admitted  true\n",
 		"lease":   "NAME  HOLDER  DURATION\nn1    n1      15s\n",
 		"volume":  "NAME  CLASS  SIZE  PHASE      NODE\ndata  local  10Gi  Available  n1\n",
@@ -248,14 +248,14 @@ var (
 // seedCluster stores one or two objects of each kind and verifies they are there.
 func seedCluster(t *testing.T, f *fakeServer) {
 	t.Helper()
-	m := newMachine("web", api.RunAlways)
+	m := newMicroVM("web", api.RunAlways)
 	m.Spec.NodeName, m.Spec.BindingEpoch = "n1", 2
-	m.Status = api.MachineStatus{Phase: api.MachineRunning, BindingEpoch: 2}
-	f.seed("/machines/web", m)
-	stale := newMachine("old", api.RunAlways)
+	m.Status = api.MicroVMStatus{Phase: api.MicroVMRunning, BindingEpoch: 2}
+	f.seed("/microvms/web", m)
+	stale := newMicroVM("old", api.RunAlways)
 	stale.Spec.NodeName, stale.Spec.BindingEpoch = "n2", 3
-	stale.Status = api.MachineStatus{Phase: api.MachineRunning, BindingEpoch: 2}
-	f.seed("/machines/old", stale)
+	stale.Status = api.MicroVMStatus{Phase: api.MicroVMRunning, BindingEpoch: 2}
+	f.seed("/microvms/old", stale)
 	f.seed("/nodes/n1", api.Node{
 		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindNode},
 		Metadata: api.ObjectMeta{Name: "n1"},
@@ -273,7 +273,7 @@ func seedCluster(t *testing.T, f *fakeServer) {
 		Spec:     api.VolumeSpec{StorageClass: api.StorageClassLocal, AccessModes: []string{api.AccessReadWriteOnce}, Storage: "10Gi", NodeName: "n1"},
 		Status:   api.VolumeStatus{Phase: api.VolumeAvailable},
 	})
-	require.Equal(t, api.MachineRunning, load[api.Machine](f, "/machines/web").Status.Phase)
+	require.Equal(t, api.MicroVMRunning, load[api.MicroVM](f, "/microvms/web").Status.Phase)
 	require.Equal(t, api.VolumeAvailable, load[api.Volume](f, "/volumes/data").Status.Phase)
 }
 
@@ -286,9 +286,9 @@ func TestGet_ListsAKindWithoutANameAndReadsOneWithAName(t *testing.T) {
 		args   []string
 		stdout string
 	}{
-		{"every machine", []string{"get", "machine"}, tableOf["machine"]},
-		{"one machine", []string{"get", "machine", "web"}, "NAME  PHASE    NODE  EPOCH\nweb   Running  n1    2\n"},
-		{"a void status reads as Pending", []string{"get", "machine", "old"}, "NAME  PHASE    NODE  EPOCH\nold   Pending  n2    3\n"},
+		{"every microvm", []string{"get", "microvm"}, tableOf["microvm"]},
+		{"one microvm", []string{"get", "microvm", "web"}, "NAME  PHASE    NODE  EPOCH\nweb   Running  n1    2\n"},
+		{"a void status reads as Pending", []string{"get", "microvm", "old"}, "NAME  PHASE    NODE  EPOCH\nold   Pending  n2    3\n"},
 		{"every node", []string{"get", "node"}, tableOf["node"]},
 		{"one lease", []string{"get", "lease", "n1"}, tableOf["lease"]},
 		{"every volume", []string{"get", "volume"}, tableOf["volume"]},
@@ -303,7 +303,7 @@ func TestGet_ListsAKindWithoutANameAndReadsOneWithAName(t *testing.T) {
 	}
 
 	t.Run("a missing resource fails", func(t *testing.T) {
-		_, stderr, code := execute(t, f, "get", "machine", "nope")
+		_, stderr, code := execute(t, f, "get", "microvm", "nope")
 		assert.Equal(t, command.ExitFailure, code)
 		assert.Contains(t, stderr, "NotFound")
 	})
@@ -321,25 +321,25 @@ func TestGet_PrintsATableByDefaultAndTheObjectOnRequest(t *testing.T) {
 	seedCluster(t, f)
 
 	t.Run("table is the default", func(t *testing.T) {
-		byDefault, stderr, code := execute(t, f, "get", "machine", "web")
+		byDefault, stderr, code := execute(t, f, "get", "microvm", "web")
 		require.Equal(t, command.ExitOK, code, stderr)
-		asked, _, _ := execute(t, f, "get", "-o", "table", "machine", "web")
+		asked, _, _ := execute(t, f, "get", "-o", "table", "microvm", "web")
 		assert.Equal(t, asked, byDefault)
 		assert.True(t, strings.HasPrefix(byDefault, "NAME  PHASE"), byDefault)
 	})
 
 	t.Run("yaml names fields as the API does", func(t *testing.T) {
-		stdout, stderr, code := execute(t, f, "get", "-o", "yaml", "machine", "web")
+		stdout, stderr, code := execute(t, f, "get", "-o", "yaml", "microvm", "web")
 		require.Equal(t, command.ExitOK, code, stderr)
-		assert.Contains(t, stdout, "kind: Machine\n")
+		assert.Contains(t, stdout, "kind: MicroVM\n")
 		assert.Contains(t, stdout, "runStrategy: Always")
 		assert.Contains(t, stdout, "bindingEpoch: 2")
 	})
 
 	t.Run("json is the object", func(t *testing.T) {
-		stdout, stderr, code := execute(t, f, "get", "-o", "json", "machine", "web")
+		stdout, stderr, code := execute(t, f, "get", "-o", "json", "microvm", "web")
 		require.Equal(t, command.ExitOK, code, stderr)
-		var m api.Machine
+		var m api.MicroVM
 		require.NoError(t, json.Unmarshal([]byte(stdout), &m))
 		assert.Equal(t, "web", m.Metadata.Name)
 		assert.Equal(t, api.Epoch(2), m.Spec.BindingEpoch)
@@ -347,15 +347,15 @@ func TestGet_PrintsATableByDefaultAndTheObjectOnRequest(t *testing.T) {
 	})
 
 	t.Run("a list in yaml and json is the list object", func(t *testing.T) {
-		stdout, stderr, code := execute(t, f, "get", "-o", "yaml", "machine")
+		stdout, stderr, code := execute(t, f, "get", "-o", "yaml", "microvm")
 		require.Equal(t, command.ExitOK, code, stderr)
-		assert.Contains(t, stdout, "kind: MachineList")
+		assert.Contains(t, stdout, "kind: MicroVMList")
 		assert.Contains(t, stdout, "name: old")
 		assert.Contains(t, stdout, "name: web")
 
-		stdout, stderr, code = execute(t, f, "get", "-o", "json", "machine")
+		stdout, stderr, code = execute(t, f, "get", "-o", "json", "microvm")
 		require.Equal(t, command.ExitOK, code, stderr)
-		var l api.MachineList
+		var l api.MicroVMList
 		require.NoError(t, json.Unmarshal([]byte(stdout), &l))
 		assert.Len(t, l.Items, 2)
 	})
@@ -366,7 +366,7 @@ func TestGet_AcceptsAKindAsItsSingularItsPluralOrItsShortName(t *testing.T) {
 	seedCluster(t, f)
 
 	spellings := map[string][]string{
-		"machine": {"machine", "machines", "mc", "Machines", "MC"},
+		"microvm": {"microvm", "microvms", "mvm", "MicroVMs", "MVM"},
 		"node":    {"node", "nodes", "no", "Nodes"},
 		"lease":   {"lease", "leases", "le"},
 		"volume":  {"volume", "volumes", "vol", "Volumes"},
@@ -385,19 +385,19 @@ func TestGet_AcceptsAKindAsItsSingularItsPluralOrItsShortName(t *testing.T) {
 func TestGet_ReadsFlagsWhereverTheyStandAmongTheOperands(t *testing.T) {
 	f := newFakeServer(t)
 	seedCluster(t, f)
-	want, stderr, code := execute(t, f, "get", "-o", "yaml", "machine", "web")
+	want, stderr, code := execute(t, f, "get", "-o", "yaml", "microvm", "web")
 	require.Equal(t, command.ExitOK, code, stderr)
-	require.Contains(t, want, "kind: Machine")
+	require.Contains(t, want, "kind: MicroVM")
 
 	tests := []struct {
 		name string
 		args []string
 	}{
-		{"before the operands", []string{"get", "-o", "yaml", "machine", "web"}},
-		{"between them", []string{"get", "machine", "-o", "yaml", "web"}},
-		{"after them", []string{"get", "machine", "web", "-o", "yaml"}},
-		{"with an equals sign", []string{"get", "machine", "web", "-o=yaml"}},
-		{"before a double dash", []string{"get", "-o", "yaml", "--", "machine", "web"}},
+		{"before the operands", []string{"get", "-o", "yaml", "microvm", "web"}},
+		{"between them", []string{"get", "microvm", "-o", "yaml", "web"}},
+		{"after them", []string{"get", "microvm", "web", "-o", "yaml"}},
+		{"with an equals sign", []string{"get", "microvm", "web", "-o=yaml"}},
+		{"before a double dash", []string{"get", "-o", "yaml", "--", "microvm", "web"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -408,13 +408,13 @@ func TestGet_ReadsFlagsWhereverTheyStandAmongTheOperands(t *testing.T) {
 	}
 
 	t.Run("after a double dash a flag is an operand", func(t *testing.T) {
-		_, stderr, code := execute(t, f, "get", "machine", "--", "web", "-o", "yaml")
+		_, stderr, code := execute(t, f, "get", "microvm", "--", "web", "-o", "yaml")
 		assert.Equal(t, command.ExitUsage, code)
 		assert.Contains(t, stderr, "get: want KIND [NAME]")
 	})
 
 	t.Run("an unknown flag after an operand is refused", func(t *testing.T) {
-		_, stderr, code := execute(t, f, "get", "machine", "web", "-x")
+		_, stderr, code := execute(t, f, "get", "microvm", "web", "-x")
 		assert.Equal(t, command.ExitUsage, code)
 		assert.Contains(t, stderr, "-x")
 	})
@@ -432,15 +432,15 @@ func TestApply_CreatesAVolume(t *testing.T) {
 func TestDelete_ReportsWhatTheServerAnswered(t *testing.T) {
 	t.Run("an object with a finalizer is marked, and stays", func(t *testing.T) {
 		f := newFakeServer(t)
-		m := newMachine("web", api.RunAlways)
+		m := newMicroVM("web", api.RunAlways)
 		m.Metadata.Finalizers = []string{api.NodeAgentFinalizer}
-		f.seed("/machines/web", m)
+		f.seed("/microvms/web", m)
 
-		stdout, stderr, code := execute(t, f, "delete", "machine", "web")
+		stdout, stderr, code := execute(t, f, "delete", "microvm", "web")
 
 		require.Equal(t, command.ExitOK, code, stderr)
-		assert.Equal(t, "machine/web marked for deletion\n", stdout)
-		assert.NotNil(t, load[api.Machine](f, "/machines/web").Metadata.DeletionTimestamp)
+		assert.Equal(t, "microvm/web marked for deletion\n", stdout)
+		assert.NotNil(t, load[api.MicroVM](f, "/microvms/web").Metadata.DeletionTimestamp)
 	})
 
 	t.Run("a volume with no finalizer is removed at once", func(t *testing.T) {
@@ -461,14 +461,14 @@ func TestDelete_ReportsWhatTheServerAnswered(t *testing.T) {
 func TestDescribe_PrintsTheObjectAndItsStatusConditions(t *testing.T) {
 	f := newFakeServer(t)
 	seedCluster(t, f)
-	m := newMachine("broken", api.RunAlways)
-	m.Spec.Image, m.Spec.NodeName, m.Spec.Volumes = "ubuntu", "n1", []api.MachineVolume{{Name: "data", MountPath: "/data"}}
+	m := newMicroVM("broken", api.RunAlways)
+	m.Spec.Image, m.Spec.NodeName, m.Spec.Volumes = "ubuntu", "n1", []api.MicroVMVolume{{Name: "data", MountPath: "/data"}}
 	m.Spec.Resources.Requests = api.ResourceList{CPU: "500m", Memory: "1Gi"}
-	m.Status = api.MachineStatus{Phase: api.MachineFailed, Conditions: []api.Condition{
+	m.Status = api.MicroVMStatus{Phase: api.MicroVMFailed, Conditions: []api.Condition{
 		{Type: "Ready", Status: api.ConditionFalse, Reason: "ImagePullFailed", Message: "no such image", LastTransitionTime: &t0},
 		{Type: "Scheduled", Status: api.ConditionTrue},
 	}}
-	f.seed("/machines/broken", m)
+	f.seed("/microvms/broken", m)
 	f.seed("/nodes/n2", api.Node{
 		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindNode},
 		Metadata: api.ObjectMeta{Name: "n2"},
@@ -483,9 +483,9 @@ func TestDescribe_PrintsTheObjectAndItsStatusConditions(t *testing.T) {
 		matches []string
 		absent  []string
 	}{
-		{"a machine with conditions", []string{"describe", "machine", "broken"}, []string{
+		{"a microvm with conditions", []string{"describe", "microvm", "broken"}, []string{
 			`(?m)^Name:\s+broken$`,
-			`(?m)^Kind:\s+Machine$`,
+			`(?m)^Kind:\s+MicroVM$`,
 			`(?m)^Image:\s+ubuntu$`,
 			`(?m)^Requests:\s+cpu=500m, memory=1Gi$`,
 			`(?m)^Volumes:\s+data:/data$`,
@@ -498,7 +498,7 @@ func TestDescribe_PrintsTheObjectAndItsStatusConditions(t *testing.T) {
 			`(?m)^Addresses:\s+10\.0\.0\.2$`,
 			`(?m)^\s+LeaseExpired\s+True\s+LeaseMissing`,
 		}, nil},
-		{"a machine with no condition", []string{"describe", "machine", "web"}, []string{
+		{"a microvm with no condition", []string{"describe", "microvm", "web"}, []string{
 			`(?m)^Phase:\s+Running$`,
 			"(?m)^Conditions:\n  -$",
 		}, nil},
@@ -526,44 +526,44 @@ func TestDescribe_PrintsTheObjectAndItsStatusConditions(t *testing.T) {
 	}
 
 	t.Run("a missing object fails", func(t *testing.T) {
-		_, stderr, code := execute(t, f, "describe", "machine", "nope")
+		_, stderr, code := execute(t, f, "describe", "microvm", "nope")
 		assert.Equal(t, command.ExitFailure, code)
 		assert.Contains(t, stderr, "NotFound")
 	})
 }
 
-func TestDelete_MarksAMachineForDeletionAtItsCurrentVersion(t *testing.T) {
+func TestDelete_MarksAMicroVMForDeletionAtItsCurrentVersion(t *testing.T) {
 	t.Run("deletes", func(t *testing.T) {
 		f := newFakeServer(t)
-		m := newMachine("web", api.RunAlways)
+		m := newMicroVM("web", api.RunAlways)
 		m.Metadata.Finalizers = []string{api.NodeAgentFinalizer}
-		f.seed("/machines/web", m)
+		f.seed("/microvms/web", m)
 
-		stdout, stderr, code := execute(t, f, "delete", "machine", "web")
+		stdout, stderr, code := execute(t, f, "delete", "microvm", "web")
 
 		require.Equal(t, command.ExitOK, code, stderr)
-		assert.Equal(t, "machine/web marked for deletion\n", stdout)
-		assert.NotNil(t, load[api.Machine](f, "/machines/web").Metadata.DeletionTimestamp)
+		assert.Equal(t, "microvm/web marked for deletion\n", stdout)
+		assert.NotNil(t, load[api.MicroVM](f, "/microvms/web").Metadata.DeletionTimestamp)
 	})
 
 	t.Run("a change after the read is reported", func(t *testing.T) {
 		f := newFakeServer(t)
-		f.seed("/machines/web", newMachine("web", api.RunAlways))
+		f.seed("/microvms/web", newMicroVM("web", api.RunAlways))
 		f.beforeWrite = func(method, path string) {
-			f.store(path, toMap(t, newMachine("web", api.RunOnce)))
+			f.store(path, toMap(t, newMicroVM("web", api.RunOnce)))
 			f.beforeWrite = nil
 		}
 
-		_, stderr, code := execute(t, f, "delete", "machine", "web")
+		_, stderr, code := execute(t, f, "delete", "microvm", "web")
 
 		assert.Equal(t, command.ExitFailure, code)
 		assert.Contains(t, stderr, "Conflict")
-		assert.Nil(t, load[api.Machine](f, "/machines/web").Metadata.DeletionTimestamp)
+		assert.Nil(t, load[api.MicroVM](f, "/microvms/web").Metadata.DeletionTimestamp)
 	})
 
-	t.Run("a missing machine fails", func(t *testing.T) {
+	t.Run("a missing microvm fails", func(t *testing.T) {
 		f := newFakeServer(t)
-		_, stderr, code := execute(t, f, "delete", "machine", "nope")
+		_, stderr, code := execute(t, f, "delete", "microvm", "nope")
 		assert.Equal(t, command.ExitFailure, code)
 		assert.Contains(t, stderr, "NotFound")
 	})
@@ -595,10 +595,10 @@ func TestVerbWithoutAPath_IsRefusedLocallyNamingThePath(t *testing.T) {
 
 	t.Run("control: a verb with a path is sent", func(t *testing.T) {
 		f := newFakeServer(t)
-		f.seed("/machines/web", newMachine("web", api.RunAlways))
-		_, stderr, code := execute(t, f, "delete", "machine", "web")
+		f.seed("/microvms/web", newMicroVM("web", api.RunAlways))
+		_, stderr, code := execute(t, f, "delete", "microvm", "web")
 		require.Equal(t, command.ExitOK, code, stderr)
-		assert.Equal(t, []string{"GET /machines/web", "DELETE /machines/web"}, f.seen())
+		assert.Equal(t, []string{"GET /microvms/web", "DELETE /microvms/web"}, f.seen())
 	})
 
 	t.Run("control: the volume paths the contract gained are sent", func(t *testing.T) {
@@ -618,7 +618,7 @@ func TestUnknownKind_IsRefusedWithTheKindsThereAreAndAKnownOneIsServed(t *testin
 	for _, args := range [][]string{
 		{"get", "widget"},
 		{"get", "widgets", "x"},
-		{"get", "machinez"},
+		{"get", "microvmz"},
 		{"describe", "widget", "x"},
 		{"delete", "widget", "x"},
 	} {
@@ -627,11 +627,11 @@ func TestUnknownKind_IsRefusedWithTheKindsThereAreAndAKnownOneIsServed(t *testin
 		assert.Equal(t, command.ExitUsage, code, args)
 		message := strings.SplitN(stderr, "\n", 2)[0]
 		assert.Contains(t, message, "unknown kind", args)
-		assert.Contains(t, message, "want one of machine (machines, mc)", args)
+		assert.Contains(t, message, "want one of microvm (microvms, mvm)", args)
 	}
 	assert.Equal(t, before, f.writes(), "writes sent")
 
-	for _, args := range [][]string{{"get", "machines"}, {"describe", "mc", "web"}, {"delete", "machine", "old"}} {
+	for _, args := range [][]string{{"get", "microvms"}, {"describe", "mvm", "web"}, {"delete", "microvm", "old"}} {
 		_, stderr, code := execute(t, f, args...)
 		assert.Equal(t, command.ExitOK, code, "%v: %s", args, stderr)
 	}
@@ -643,13 +643,13 @@ func TestGet_RefusesAnUnknownOutputFormatAndServesTheKnownOnes(t *testing.T) {
 	seedCluster(t, f)
 	before := f.count()
 
-	_, stderr, code := execute(t, f, "get", "-o", "xml", "machine", "web")
+	_, stderr, code := execute(t, f, "get", "-o", "xml", "microvm", "web")
 	assert.Equal(t, command.ExitUsage, code)
 	assert.Contains(t, stderr, `unknown output format "xml", want table, yaml or json`)
 	assert.Equal(t, before, f.count(), "requests sent")
 
 	for _, format := range []string{"table", "yaml", "json"} {
-		stdout, stderr, code := execute(t, f, "get", "-o", format, "machine", "web")
+		stdout, stderr, code := execute(t, f, "get", "-o", format, "microvm", "web")
 		assert.Equal(t, command.ExitOK, code, "%s: %s", format, stderr)
 		assert.NotEmpty(t, stdout, format)
 	}
@@ -660,14 +660,14 @@ func TestListVerb_IsNotACommand(t *testing.T) {
 	seedCluster(t, f)
 	before := f.count()
 
-	_, stderr, code := execute(t, f, "list", "machine")
+	_, stderr, code := execute(t, f, "list", "microvm")
 	assert.Equal(t, command.ExitUsage, code)
 	assert.Contains(t, stderr, `unknown command "list"`)
 	assert.Equal(t, before, f.count(), "requests sent")
 
-	stdout, stderr, code := execute(t, f, "get", "machine")
+	stdout, stderr, code := execute(t, f, "get", "microvm")
 	require.Equal(t, command.ExitOK, code, stderr)
-	assert.Equal(t, tableOf["machine"], stdout)
+	assert.Equal(t, tableOf["microvm"], stdout)
 }
 
 func TestUsageMistakes_ExitWithUsageAndSendNothing(t *testing.T) {
@@ -678,12 +678,12 @@ func TestUsageMistakes_ExitWithUsageAndSendNothing(t *testing.T) {
 		{"no command", nil},
 		{"unknown command", []string{"frobnicate"}},
 		{"get without a kind", []string{"get"}},
-		{"get with three operands", []string{"get", "machine", "web", "extra"}},
-		{"unknown flag", []string{"get", "-x", "machine", "web"}},
+		{"get with three operands", []string{"get", "microvm", "web", "extra"}},
+		{"unknown flag", []string{"get", "-x", "microvm", "web"}},
 		{"apply without a file", []string{"apply"}},
-		{"delete without a name", []string{"delete", "machine"}},
-		{"describe without a name", []string{"describe", "machine"}},
-		{"describe with a flag", []string{"describe", "-o", "yaml", "machine", "web"}},
+		{"delete without a name", []string{"delete", "microvm"}},
+		{"describe without a name", []string{"describe", "microvm"}},
+		{"describe with a flag", []string{"describe", "-o", "yaml", "microvm", "web"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -701,7 +701,7 @@ func TestUsageMistakes_ExitWithUsageAndSendNothing(t *testing.T) {
 	t.Run("control: a complete command is accepted", func(t *testing.T) {
 		f := newFakeServer(t)
 		seedCluster(t, f)
-		_, stderr, code := execute(t, f, "describe", "machine", "web")
+		_, stderr, code := execute(t, f, "describe", "microvm", "web")
 		assert.Equal(t, command.ExitOK, code, stderr)
 	})
 

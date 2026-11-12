@@ -21,7 +21,7 @@ func TestVolumeNode_KeepsOnlyTheNodeTheLocalVolumesArePinnedTo(t *testing.T) {
 		name    string
 		volumes []*api.Volume
 		uses    []string
-		wantOn  string // the Node the Machine is bound to, empty when none
+		wantOn  string // the Node the MicroVM is bound to, empty when none
 		message string // part of the Unschedulable message when it is not bound
 	}{
 		{name: "names no Volume", wantOn: "a"},
@@ -74,11 +74,11 @@ func TestVolumeNode_KeepsOnlyTheNodeTheLocalVolumesArePinnedTo(t *testing.T) {
 			for _, v := range tt.volumes {
 				f.addVolume(v)
 			}
-			f.addMachine(withVolumes(newMachine("m1", "1", "1Gi"), tt.uses...))
+			f.addMicroVM(withVolumes(newMicroVM("m1", "1", "1Gi"), tt.uses...))
 
 			reconcile(t, client)
 
-			m := f.machine("m1")
+			m := f.microvm("m1")
 			assert.Equal(t, tt.wantOn, m.Spec.NodeName)
 			if tt.wantOn != "" {
 				assert.Equal(t, 1, f.bindingCount())
@@ -97,73 +97,73 @@ func TestVolumeNode_TheNodeThatHoldsTheVolumeStillHasToFit(t *testing.T) {
 	f.addNode(node("a", "1", "1Gi"))
 	f.addNode(node("b", "4", "8Gi"))
 	f.addVolume(volume("v", api.StorageClassLocal, "a"))
-	f.addMachine(withVolumes(newMachine("m1", "2", "1Gi"), "v"))
+	f.addMicroVM(withVolumes(newMicroVM("m1", "2", "1Gi"), "v"))
 
 	reconcile(t, client)
 
-	m := f.machine("m1")
+	m := f.microvm("m1")
 	assert.Empty(t, m.Spec.NodeName, "a holds the Volume and is too small; b is large enough and does not hold it")
 	require.Len(t, m.Status.Conditions, 1)
 	assert.Contains(t, m.Status.Conditions[0].Message, "NodeResourcesFit refused 1")
 	assert.Contains(t, m.Status.Conditions[0].Message, `VolumeNode refused 1 (local volumes are pinned to Node "a")`)
 }
 
-func TestVolumeNode_AMachineWhoseNodeExpiredIsNotReboundAwayFromItsLocalVolume(t *testing.T) {
-	setup := func(t *testing.T, v *api.Volume) (*fakeAPI, api.Machine) {
+func TestVolumeNode_AMicroVMWhoseNodeExpiredIsNotReboundAwayFromItsLocalVolume(t *testing.T) {
+	setup := func(t *testing.T, v *api.Volume) (*fakeAPI, api.MicroVM) {
 		f, client := newFakeAPI(t)
 		f.addNode(withCondition(node("n1", "4", "8Gi"), api.NodeLeaseExpired, api.ConditionTrue))
 		f.addNode(node("n2", "4", "8Gi"))
 		f.addVolume(v)
-		f.addMachine(withVolumes(bound(newMachine("m1", "1", "1Gi"), "n1", 1), "v"))
+		f.addMicroVM(withVolumes(bound(newMicroVM("m1", "1", "1Gi"), "n1", 1), "v"))
 		reconcile(t, client)
-		return f, f.machine("m1")
+		return f, f.microvm("m1")
 	}
 
 	f, m := setup(t, volume("v", api.StorageClassLocal, "n1"))
 	assert.Equal(t, "n1", m.Spec.NodeName)
 	assert.Equal(t, api.Epoch(1), m.Spec.BindingEpoch)
 	assert.Zero(t, f.bindingCount())
-	assert.Zero(t, f.statusPutCount(), "a bound Machine keeps the status of its dead Node's epoch")
+	assert.Zero(t, f.statusPutCount(), "a bound MicroVM keeps the status of its dead Node's epoch")
 
 	_, m = setup(t, volume("v", api.StorageClassLocal, ""))
-	assert.Equal(t, "n2", m.Spec.NodeName, "control: the same Machine with an unpinned Volume is rebound")
+	assert.Equal(t, "n2", m.Spec.NodeName, "control: the same MicroVM with an unpinned Volume is rebound")
 	assert.Equal(t, api.Epoch(2), m.Spec.BindingEpoch)
 }
 
-func TestReconcile_AForbiddenVolumeListIsReportedAndMachinesThatNameNoVolumeAreStillBound(t *testing.T) {
+func TestReconcile_AForbiddenVolumeListIsReportedAndMicroVMsThatNameNoVolumeAreStillBound(t *testing.T) {
 	setup := func(t *testing.T, fail *api.APIError) (*fakeAPI, error) {
 		f, client := newFakeAPI(t)
 		f.volumesFail = fail
 		f.addNode(node("a", "4", "8Gi"))
 		f.addNode(node("b", "4", "8Gi"))
 		f.addVolume(volume("v", api.StorageClassLocal, "b"))
-		f.addMachine(newMachine("plain", "1", "1Gi"))
-		f.addMachine(withVolumes(newMachine("disk", "1", "1Gi"), "v"))
+		f.addMicroVM(newMicroVM("plain", "1", "1Gi"))
+		f.addMicroVM(withVolumes(newMicroVM("disk", "1", "1Gi"), "v"))
 		return f, newService(client).Reconcile(context.Background())
 	}
 
 	f, err := setup(t, api.NewAPIError(api.ReasonForbidden, "no"))
 	require.ErrorIs(t, err, api.ErrForbidden)
 	assert.Contains(t, err.Error(), "list volumes")
-	assert.Equal(t, "a", f.machine("plain").Spec.NodeName)
-	assert.Empty(t, f.machine("disk").Spec.NodeName, "its Volume cannot be read, so no Node is known to take it")
+	assert.Equal(t, "a", f.microvm("plain").Spec.NodeName)
+	assert.Empty(t, f.microvm("disk").Spec.NodeName, "its Volume cannot be read, so no Node is known to take it")
 	assert.Zero(t, f.statusPutCount(), "no Unschedulable condition is written on a guess")
 
 	f, err = setup(t, nil)
 	require.NoError(t, err)
-	assert.Equal(t, "a", f.machine("plain").Spec.NodeName, "control: the list succeeds")
-	assert.Equal(t, "b", f.machine("disk").Spec.NodeName)
+	assert.Equal(t, "a", f.microvm("plain").Spec.NodeName, "control: the list succeeds")
+	assert.Equal(t, "b", f.microvm("disk").Spec.NodeName)
 }
 
 func TestReconcile_AVolumeListThatFailsOtherwiseEndsThePass(t *testing.T) {
 	f, client := newFakeAPI(t)
 	f.volumesFail = api.NewAPIError(api.ReasonInternalError, "boom")
 	f.addNode(node("a", "4", "8Gi"))
-	f.addMachine(newMachine("plain", "1", "1Gi"))
+	f.addMicroVM(newMicroVM("plain", "1", "1Gi"))
 
 	err := newService(client).Reconcile(context.Background())
 
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, api.ErrForbidden)
-	assert.Empty(t, f.machine("plain").Spec.NodeName)
+	assert.Empty(t, f.microvm("plain").Spec.NodeName)
 }

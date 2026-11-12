@@ -40,14 +40,14 @@ func newEditorFixture(t *testing.T, verbs ...api.Verb) *editorFixture {
 
 func TestEscalation_ARoleGrantingWhatTheCallerLacksIsForbidden(t *testing.T) {
 	f := newEditorFixture(t)
-	reader := clusterRole("machine-reader", rule(api.Group, "machines", api.VerbGet))
+	reader := clusterRole("microvm-reader", rule(api.Group, "microvms", api.VerbGet))
 
 	_, err := f.editorRBAC.PutClusterRole(ctx(t), reader)
 	assert.ErrorIs(t, err, api.ErrForbidden)
-	_, err = f.adminRBAC.GetClusterRole(ctx(t), "machine-reader")
+	_, err = f.adminRBAC.GetClusterRole(ctx(t), "microvm-reader")
 	assert.ErrorIs(t, err, api.ErrNotFound, "a refused role is not stored")
 	_, err = f.adminRBAC.PutClusterRole(ctx(t), reader)
-	assert.NoError(t, err, "control: the same request from a caller holding get on machines")
+	assert.NoError(t, err, "control: the same request from a caller holding get on microvms")
 }
 
 func TestEscalation_ARoleWithinWhatTheCallerHoldsIsCreated(t *testing.T) {
@@ -91,7 +91,7 @@ func TestEscalation_AWildcardIsHeldOnlyByAWildcard(t *testing.T) {
 
 func TestEscalation_ARoleIsCheckedRuleByRule(t *testing.T) {
 	f := newEditorFixture(t)
-	two := clusterRole("two", rule(api.RBACGroup, "clusterroles", api.VerbGet), rule(api.Group, "machines", api.VerbGet))
+	two := clusterRole("two", rule(api.RBACGroup, "clusterroles", api.VerbGet), rule(api.Group, "microvms", api.VerbGet))
 
 	_, err := f.editorRBAC.PutClusterRole(ctx(t), two)
 	assert.ErrorIs(t, err, api.ErrForbidden, "the second rule is not held")
@@ -150,7 +150,7 @@ func TestEscalation_ABindingUpdateIsCheckedLikeACreate(t *testing.T) {
 
 func TestEscalation_DeletingNeedsOnlyDelete(t *testing.T) {
 	f := newEditorFixture(t, api.VerbCreate, api.VerbUpdate, api.VerbGet, api.VerbList, api.VerbDelete)
-	role, err := f.adminRBAC.PutClusterRole(ctx(t), clusterRole("machine-reader", rule(api.Group, "machines", api.VerbGet)))
+	role, err := f.adminRBAC.PutClusterRole(ctx(t), clusterRole("microvm-reader", rule(api.Group, "microvms", api.VerbGet)))
 	require.NoError(t, err)
 	viewer := clusterRole("viewer", rule(api.RBACGroup, "clusterroles", api.VerbGet))
 	_, err = f.adminRBAC.PutClusterRole(ctx(t), viewer)
@@ -159,9 +159,9 @@ func TestEscalation_DeletingNeedsOnlyDelete(t *testing.T) {
 	require.NoError(t, err)
 	_, viewerRBAC := f.c.clients(t, f.addr, who{"viewer", nil})
 
-	_, err = viewerRBAC.DeleteClusterRole(ctx(t), "machine-reader", role.Metadata.ResourceVersion)
+	_, err = viewerRBAC.DeleteClusterRole(ctx(t), "microvm-reader", role.Metadata.ResourceVersion)
 	assert.ErrorIs(t, err, api.ErrForbidden, "a caller with get alone")
-	_, err = f.editorRBAC.DeleteClusterRole(ctx(t), "machine-reader", role.Metadata.ResourceVersion)
+	_, err = f.editorRBAC.DeleteClusterRole(ctx(t), "microvm-reader", role.Metadata.ResourceVersion)
 	assert.NoError(t, err, "a caller with delete deletes a role that grants what it does not hold")
 }
 
@@ -173,11 +173,11 @@ func TestEscalation_TheNodeAuthorizersPermissionsAreNotCounted(t *testing.T) {
 	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("role-editor", "role-editor", userSubject("node-1")))
 	require.NoError(t, err)
 	_, nodeRBAC := f.c.clients(t, f.addr, nodeID("node-1"))
-	_, err = f.node1.ListMachines(ctx(t))
-	require.NoError(t, err, "the Node authorizer lets node-1 list Machines")
+	_, err = f.node1.ListMicroVMs(ctx(t))
+	require.NoError(t, err, "the Node authorizer lets node-1 list MicroVMs")
 
-	_, err = nodeRBAC.PutClusterRole(ctx(t), clusterRole("machine-lister", rule(api.Group, "machines", api.VerbList)))
-	assert.ErrorIs(t, err, api.ErrForbidden, "a role granting list on machines")
+	_, err = nodeRBAC.PutClusterRole(ctx(t), clusterRole("microvm-lister", rule(api.Group, "microvms", api.VerbList)))
+	assert.ErrorIs(t, err, api.ErrForbidden, "a role granting list on microvms")
 	_, err = nodeRBAC.PutClusterRole(ctx(t), clusterRole("role-getter", rule(api.RBACGroup, "clusterroles", api.VerbGet)))
 	assert.NoError(t, err, "control: a role within what a bound role grants it")
 }

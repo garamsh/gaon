@@ -10,7 +10,7 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// nodeFixture is an RBAC server with Nodes node-1 and node-2, and a Machine m1
+// nodeFixture is an RBAC server with Nodes node-1 and node-2, and a MicroVM m1
 // bound to node-1 at epoch 1 that mounts the Volume v1. The Volumes v1 and v2
 // exist.
 type nodeFixture struct {
@@ -37,11 +37,11 @@ func newNodeFixture(t *testing.T) *nodeFixture {
 	require.NoError(t, err)
 	f.v2, err = f.admin.PutVolume(ctx(t), volume("v2"))
 	require.NoError(t, err)
-	m := machine("m1")
-	m.Spec.Volumes = []api.MachineVolume{{Name: "v1", MountPath: "/data"}}
-	m, err = f.admin.PutMachine(ctx(t), m)
+	m := microvm("m1")
+	m.Spec.Volumes = []api.MicroVMVolume{{Name: "v1", MountPath: "/data"}}
+	m, err = f.admin.PutMicroVM(ctx(t), m)
 	require.NoError(t, err)
-	_, err = f.admin.BindMachine(ctx(t), "m1", api.Binding{ResourceVersion: m.Metadata.ResourceVersion, NodeName: "node-1", BindingEpoch: 1})
+	_, err = f.admin.BindMicroVM(ctx(t), "m1", api.Binding{ResourceVersion: m.Metadata.ResourceVersion, NodeName: "node-1", BindingEpoch: 1})
 	require.NoError(t, err)
 	f.v1, err = f.admin.GetVolume(ctx(t), "v1")
 	require.NoError(t, err, "the binding pinned v1 to node-1")
@@ -106,103 +106,103 @@ func TestNodeAuthorizer_ANodeWritesOnlyItsOwnLease(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestNodeAuthorizer_ANodeWritesTheStatusOfOnlyAMachineBoundToIt(t *testing.T) {
+func TestNodeAuthorizer_ANodeWritesTheStatusOfOnlyAMicroVMBoundToIt(t *testing.T) {
 	f := newNodeFixture(t)
-	m, err := f.admin.GetMachine(ctx(t), "m1")
+	m, err := f.admin.GetMicroVM(ctx(t), "m1")
 	require.NoError(t, err)
-	m.Status = api.MachineStatus{Phase: api.MachineRunning, BindingEpoch: 1}
+	m.Status = api.MicroVMStatus{Phase: api.MicroVMRunning, BindingEpoch: 1}
 
-	_, err = f.node2.PutMachineStatus(ctx(t), m)
+	_, err = f.node2.PutMicroVMStatus(ctx(t), m)
 	assert.ErrorIs(t, err, api.ErrForbidden)
-	_, err = f.node1.PutMachineStatus(ctx(t), m)
-	assert.NoError(t, err, "control: the node the Machine is bound to")
+	_, err = f.node1.PutMicroVMStatus(ctx(t), m)
+	assert.NoError(t, err, "control: the node the MicroVM is bound to")
 }
 
-func TestNodeAuthorizer_ANodeUpdatesOnlyAMachineBoundToItAndCreatesNone(t *testing.T) {
+func TestNodeAuthorizer_ANodeUpdatesOnlyAMicroVMBoundToItAndCreatesNone(t *testing.T) {
 	f := newNodeFixture(t)
-	m, err := f.admin.GetMachine(ctx(t), "m1")
+	m, err := f.admin.GetMicroVM(ctx(t), "m1")
 	require.NoError(t, err)
 	m.Metadata.Finalizers = []string{nodeAgentFinalizer}
 
-	_, err = f.node2.PutMachine(ctx(t), m)
+	_, err = f.node2.PutMicroVM(ctx(t), m)
 	assert.ErrorIs(t, err, api.ErrForbidden)
-	_, err = f.node1.PutMachine(ctx(t), machine("fresh"))
-	assert.ErrorIs(t, err, api.ErrForbidden, "a Node Agent does not create a Machine")
-	_, err = f.node1.PutMachine(ctx(t), m)
-	assert.NoError(t, err, "control: node-1 updates the Machine bound to it")
+	_, err = f.node1.PutMicroVM(ctx(t), microvm("fresh"))
+	assert.ErrorIs(t, err, api.ErrForbidden, "a Node Agent does not create a MicroVM")
+	_, err = f.node1.PutMicroVM(ctx(t), m)
+	assert.NoError(t, err, "control: node-1 updates the MicroVM bound to it")
 }
 
-func TestNodeAuthorizer_ANodeAttachesOnlyTheVolumesItsMachinesUse(t *testing.T) {
+func TestNodeAuthorizer_ANodeAttachesOnlyTheVolumesItsMicroVMsUse(t *testing.T) {
 	f := newNodeFixture(t)
 
 	_, err := f.node2.PutVolumeStatus(ctx(t), attached(f.v1, "m1", 1))
-	assert.ErrorIs(t, err, api.ErrForbidden, "a Node whose Machines do not use the Volume")
+	assert.ErrorIs(t, err, api.ErrForbidden, "a Node whose MicroVMs do not use the Volume")
 	_, err = f.node1.PutVolumeStatus(ctx(t), attached(f.v2, "m1", 1))
-	assert.ErrorIs(t, err, api.ErrForbidden, "a Volume that none of its Machines uses")
+	assert.ErrorIs(t, err, api.ErrForbidden, "a Volume that none of its MicroVMs uses")
 	_, err = f.node1.PutVolumeStatus(ctx(t), attached(f.v1, "m1", 1))
-	assert.NoError(t, err, "control: the Volume its Machine mounts")
+	assert.NoError(t, err, "control: the Volume its MicroVM mounts")
 }
 
 const nodeAgentFinalizer = "compute.gaon.garam.sh/node-agent"
 
-func TestNodeAuthorizer_ANodeChangesOnlyItsFinalizerOfAMachineBoundToIt(t *testing.T) {
+func TestNodeAuthorizer_ANodeChangesOnlyItsFinalizerOfAMicroVMBoundToIt(t *testing.T) {
 	f := newNodeFixture(t)
-	m, err := f.admin.GetMachine(ctx(t), "m1")
+	m, err := f.admin.GetMicroVM(ctx(t), "m1")
 	require.NoError(t, err)
 
 	retarget := *m
 	retarget.Spec.Image = "other-image"
-	_, err = f.node1.PutMachine(ctx(t), &retarget)
+	_, err = f.node1.PutMicroVM(ctx(t), &retarget)
 	assert.ErrorIs(t, err, api.ErrForbidden, "a spec change")
 	other := *m
 	other.Metadata.Finalizers = []string{"example.com/other"}
-	_, err = f.node1.PutMachine(ctx(t), &other)
+	_, err = f.node1.PutMicroVM(ctx(t), &other)
 	assert.ErrorIs(t, err, api.ErrForbidden, "a finalizer of another owner")
 	both := *m
 	both.Spec.Image = "other-image"
 	both.Metadata.Finalizers = []string{nodeAgentFinalizer}
-	_, err = f.node1.PutMachine(ctx(t), &both)
+	_, err = f.node1.PutMicroVM(ctx(t), &both)
 	assert.ErrorIs(t, err, api.ErrForbidden, "its finalizer together with a spec change")
 
 	added := *m
 	added.Metadata.Finalizers = []string{nodeAgentFinalizer}
-	added.Status.Phase = api.MachineRunning
-	m, err = f.node1.PutMachine(ctx(t), &added)
+	added.Status.Phase = api.MicroVMRunning
+	m, err = f.node1.PutMicroVM(ctx(t), &added)
 	require.NoError(t, err, "control: adding its finalizer")
 	removed := *m
 	removed.Metadata.Finalizers = nil
-	_, err = f.node1.PutMachine(ctx(t), &removed)
+	_, err = f.node1.PutMicroVM(ctx(t), &removed)
 	assert.NoError(t, err, "control: removing its finalizer")
 }
 
-func TestNodeAuthorizer_ARoleThatGrantsUpdateOnMachinesAllowsASpecChange(t *testing.T) {
+func TestNodeAuthorizer_ARoleThatGrantsUpdateOnMicroVMsAllowsASpecChange(t *testing.T) {
 	f := newNodeFixture(t)
-	m, err := f.admin.GetMachine(ctx(t), "m1")
+	m, err := f.admin.GetMicroVM(ctx(t), "m1")
 	require.NoError(t, err)
 	m.Spec.IdleTimeoutSeconds = 30
-	_, err = f.node1.PutMachine(ctx(t), m)
+	_, err = f.node1.PutMicroVM(ctx(t), m)
 	require.ErrorIs(t, err, api.ErrForbidden)
 	_, adminRBAC := f.c.clients(t, f.addr, adminID)
-	_, err = adminRBAC.PutClusterRole(ctx(t), clusterRole("machine-writer", rule(api.Group, "machines", api.VerbUpdate)))
+	_, err = adminRBAC.PutClusterRole(ctx(t), clusterRole("microvm-writer", rule(api.Group, "microvms", api.VerbUpdate)))
 	require.NoError(t, err)
-	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("machine-writer", "machine-writer", userSubject("node-1")))
+	_, err = adminRBAC.PutClusterRoleBinding(ctx(t), clusterRoleBinding("microvm-writer", "microvm-writer", userSubject("node-1")))
 	require.NoError(t, err)
 
-	_, err = f.node1.PutMachine(ctx(t), m)
+	_, err = f.node1.PutMicroVM(ctx(t), m)
 	assert.NoError(t, err)
 }
 
-func TestNodeAuthorizer_ANodeReadsMachinesAndAStrangerDoesNot(t *testing.T) {
+func TestNodeAuthorizer_ANodeReadsMicroVMsAndAStrangerDoesNot(t *testing.T) {
 	f := newNodeFixture(t)
 	ghost, _ := f.c.clients(t, f.addr, nodeID("ghost"))
 
-	_, err := ghost.ListMachines(ctx(t))
+	_, err := ghost.ListMicroVMs(ctx(t))
 	assert.ErrorIs(t, err, api.ErrForbidden, "no Node is named ghost")
-	_, err = ghost.GetMachine(ctx(t), "m1")
+	_, err = ghost.GetMicroVM(ctx(t), "m1")
 	assert.ErrorIs(t, err, api.ErrForbidden)
-	_, err = f.node2.ListMachines(ctx(t))
-	assert.NoError(t, err, "control: every Node reads Machines, bound to it or not")
-	_, err = f.node2.GetMachine(ctx(t), "m1")
+	_, err = f.node2.ListMicroVMs(ctx(t))
+	assert.NoError(t, err, "control: every Node reads MicroVMs, bound to it or not")
+	_, err = f.node2.GetMicroVM(ctx(t), "m1")
 	assert.NoError(t, err)
 }
 
