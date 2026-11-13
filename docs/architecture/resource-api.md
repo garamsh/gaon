@@ -169,7 +169,7 @@ All three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, with `a
 
 ### Service, Endpoints and NetworkPolicy
 
-The three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, modelled on Kubernetes' Service, Endpoints and NetworkPolicy, and served by the core ([ADR 0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md)). The contract is in `lib/api/`. The API server serves them on the paths of the route table and allocates a Service's addresses ([apiserver.md](./apiserver.md) §Writes); the endpoints controller and enforcement in the network plugin are later issues.
+The three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, modelled on Kubernetes' Service, Endpoints and NetworkPolicy, and served by the core ([ADR 0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md)). The contract is in `lib/api/`. The API server serves them on the paths of the route table and allocates a Service's addresses ([apiserver.md](./apiserver.md) §Writes); the endpoints controller writes a selector Service's Endpoints ([endpoints-controller.md](./endpoints-controller.md)), and enforcement in the network plugin is a later issue.
 
 - **`Service`** has `spec` and `status`. A name is a DNS label of at most 63 characters that starts with a letter, because DNS names it. `spec`:
   - `selector`, a map of labels that selects MicroVMs by equality; empty, it selects none and the Service's Endpoints is written by its user.
@@ -446,7 +446,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
   - The Node authorizer's and the bootstrap roles' rules for them are settled, in §Authorization and the RBAC table.
   - CLI short names: open; the CLI's naming of kinds is not part of this change.
   - Dual-stack Services and `SCTP`: open; one address per Service and `TCP` and `UDP` only, until a need is met.
-  - Whether an Endpoints lists a MicroVM that is not `Ready` (`publishNotReadyAddresses`): open; the endpoints controller that decides it is not written.
+  - Whether an Endpoints lists a MicroVM that is not `Ready` (`publishNotReadyAddresses`): open; the endpoints controller lists only `Ready` MicroVMs and the Endpoints has no field to list others, until a need is met.
   - More than one LAN pool or service prefix: open; each flag takes one CIDR, and no need for more has been met.
   - What an API server does when started with a different `--service-cluster-ip-range` or `--load-balancer-pool` than another's: open; the server does not compare, and an allocation checks only the ranges of the server that serves it, so one that holds an address outside another's range is neither moved nor refused.
   - Whether a NetworkPolicy exempts traffic between a MicroVM and its own Node, as Kubernetes' plugins do for the kubelet's probes: open; it is the network plugin's enforcement, which is a later issue.
