@@ -18,6 +18,10 @@ jq -Rr '. as $l | try (fromjson | empty) catch $l' "$log"
 # TestMain prints.
 jq -Rr 'try (fromjson | select(.Action == "output" and .Test == null) | .Output | rtrimstr("\n")) catch empty' "$log"
 
+# Output of the build of a package (compiler errors, vet findings): since Go
+# 1.24 it arrives as build-output events keyed by ImportPath, not as output.
+jq -Rr 'try (fromjson | select(.Action == "build-output") | .Output | rtrimstr("\n")) catch empty' "$log"
+
 # Output of each test that failed.
 jq -Rrs '
   [split("\n")[] | try fromjson catch empty] as $events
