@@ -450,3 +450,23 @@ func TestLocal_RunMakesNoEmptyDiskForAVolumeWhoseSnapshotIsGone(t *testing.T) {
 	_, ok = r.mvmd.Disk("volume-z-kept")
 	assert.True(t, ok, "control: the Volume whose snapshot exists gets its disk")
 }
+
+func TestLocal_RunMakesNoDiskForAVolumeWhoseSnapshotHasNoUID(t *testing.T) {
+	r := newRig(t)
+	for name, id := range map[string]api.UID{"nouid": "", "backup": uid} {
+		s := snapshotOf(name, "source", id)
+		s.Status = api.VolumeSnapshotStatus{ReadyToUse: true, RestoreSize: "10485760", StorageClass: api.StorageClassLocal, NodeName: node}
+		r.gaon.SetSnapshot(s)
+	}
+	r.gaon.SetVolume(restoredVolume("a-nouid", "nouid"))
+	r.gaon.SetVolume(restoredVolume("z-kept", "backup"))
+	r.run(t)
+
+	eventually(t, "a-nouid is Failed", r.phase("a-nouid", api.VolumeFailed))
+	eventually(t, "z-kept is Available", r.phase("z-kept", api.VolumeAvailable))
+
+	_, ok := r.mvmd.Disk("volume-a-nouid")
+	assert.False(t, ok, "a snapshot with no uid has no identifier to make a disk from")
+	_, ok = r.mvmd.Disk("volume-z-kept")
+	assert.True(t, ok, "control: the Volume whose snapshot has a uid gets its disk")
+}

@@ -549,3 +549,27 @@ func TestVolumeValidateStatusChecksConditions(t *testing.T) {
 	v.Status.Conditions[0].Status = "Maybe"
 	assert.ErrorIs(t, v.ValidateStatus(), api.ErrInvalid)
 }
+
+func TestVolumeValidateResizeRefusesAShrinkOfAVolumeFromASnapshotBeforeItHasADisk(t *testing.T) {
+	class := newClass("local", "local", true)
+	pending := func(dataSource string) *api.Volume {
+		v := newVolume("data")
+		v.Spec.Storage = "1Gi"
+		v.Spec.DataSource = dataSource
+		return v
+	}
+
+	from := pending("snap-1")
+	shrunk := *from
+	shrunk.Spec.Storage = "1Mi"
+	assert.ErrorIs(t, shrunk.ValidateResize(from, class), api.ErrInvalid, "below the size the snapshot was checked against, with no capacity yet")
+
+	grown := *from
+	grown.Spec.Storage = "2Gi"
+	assert.NoError(t, grown.ValidateResize(from, class), "control: a growth of the same Volume")
+
+	plain := pending("")
+	lowered := *plain
+	lowered.Spec.Storage = "1Mi"
+	assert.NoError(t, lowered.ValidateResize(plain, class), "control: the same shrink of a Volume with no data source, which has no disk yet")
+}

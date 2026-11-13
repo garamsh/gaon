@@ -129,7 +129,9 @@ func (v *Volume) ValidateUpdate(old *Volume) error {
 // ValidateResize checks v as an update of old that changes nothing of the spec
 // but storage, which it may change as follows. Storage may not fall below
 // old's status.capacity, so a Volume never shrinks, and a request for more than
-// the disk holds may be lowered down to it. A change of storage on a Volume
+// the disk holds may be lowered down to it, except that a Volume with a data
+// source never takes a storage below the one it holds, which create checked
+// against the snapshot's restore size. A change of storage on a Volume
 // that is being deleted is ErrConflict. A growth, a storage above old's, needs
 // a class that allows expansion: class is the StorageClass v names, nil when
 // none exists.
@@ -152,6 +154,9 @@ func (v *Volume) ValidateResize(old *Volume, class *StorageClass) error {
 	}
 	if want.Cmp(was) == 0 {
 		return nil
+	}
+	if v.Spec.DataSource != "" && want.Cmp(was) < 0 {
+		return invalid("spec.storage is %q, below %q, which was checked against the restore size of volume snapshot %q", v.Spec.Storage, old.Spec.Storage, v.Spec.DataSource)
 	}
 	have, err := old.Status.Capacity.Value()
 	if err != nil {
