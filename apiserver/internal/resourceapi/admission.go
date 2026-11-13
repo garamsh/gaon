@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/garamsh/gaon/apiserver/internal/admission"
@@ -196,6 +197,28 @@ func admitDelete[T any](ctx context.Context, s *service, k kind[T], old *T) erro
 		return err
 	}
 	return s.hooks.Validate(ctx, req)
+}
+
+// ensure creates obj when the Store holds none of its name, without calling a
+// webhook: the write is the server's own and no caller's, so a webhook that
+// cannot be reached must not stop the server. An object that exists is neither
+// written nor sent to a webhook, and one created at the same moment by another
+// server counts as one that was there.
+func ensure[T any](ctx context.Context, s *service, k kind[T], obj *T, validate func() error) error {
+	name := k.meta(obj).Name
+	if _, _, err := k.get(ctx, s.st, name); err == nil {
+		return nil
+	} else if !errors.Is(err, api.ErrNotFound) {
+		return err
+	}
+	if err := validate(); err != nil {
+		return err
+	}
+	_, err := k.put(ctx, s.st, obj, func() error { return nil }, func(*T) error { return nil })
+	if errors.Is(err, api.ErrAlreadyExists) {
+		return nil
+	}
+	return err
 }
 
 // admittedPut is kind.put with the validating webhooks called on the object as

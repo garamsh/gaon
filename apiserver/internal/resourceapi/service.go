@@ -46,12 +46,14 @@ type Service interface {
 	WatchCertificateSigningRequests(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutClusterRole(ctx context.Context, name string, r *api.ClusterRole) (*api.ClusterRole, error)
+	EnsureClusterRole(ctx context.Context, r *api.ClusterRole) error
 	DeleteClusterRole(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterRole, error)
 	GetClusterRole(ctx context.Context, name string) (*api.ClusterRole, error)
 	ListClusterRoles(ctx context.Context, sel api.Selector) (*api.ClusterRoleList, error)
 	WatchClusterRoles(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutClusterRoleBinding(ctx context.Context, name string, b *api.ClusterRoleBinding) (*api.ClusterRoleBinding, error)
+	EnsureClusterRoleBinding(ctx context.Context, b *api.ClusterRoleBinding) error
 	DeleteClusterRoleBinding(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterRoleBinding, error)
 	GetClusterRoleBinding(ctx context.Context, name string) (*api.ClusterRoleBinding, error)
 	ListClusterRoleBindings(ctx context.Context, sel api.Selector) (*api.ClusterRoleBindingList, error)
@@ -118,6 +120,7 @@ type Service interface {
 	WatchEndpoints(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
 	PutStorageClass(ctx context.Context, name string, c *api.StorageClass) (*api.StorageClass, error)
+	EnsureStorageClass(ctx context.Context, c *api.StorageClass) error
 	DeleteStorageClass(ctx context.Context, name string, rv api.ResourceVersion) (*api.StorageClass, error)
 	GetStorageClass(ctx context.Context, name string) (*api.StorageClass, error)
 	ListStorageClasses(ctx context.Context, sel api.Selector) (*api.StorageClassList, error)
