@@ -543,3 +543,26 @@ func TestQuestionThatIsNotAQueryOrHasNoSingleQuestion(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, dns.RcodeSuccess, reply.Rcode)
 }
+
+func TestMicroVMNameThatIsNotADNSLabelIsNXDOMAIN(t *testing.T) {
+	f := newFakeAPI(t, fakeToken)
+	f.setLists(
+		[]api.Service{service("ring", api.ClusterIPNone)},
+		[]api.Endpoints{endpointsOf("ring", map[string]string{"ring-0": "10.0.0.1", "x_y": "10.0.0.2"})})
+	u := startSynced(t, f)
+
+	assert.Equal(t, dns.RcodeNameError, ask(t, "udp", u.udp, "x_y."+svcName("ring"), dns.TypeA).Rcode)
+	// Control: a MicroVM whose name is a label answers under the same Service.
+	assert.Equal(t, []string{"10.0.0.1"}, ips(ask(t, "udp", u.udp, "ring-0."+svcName("ring"), dns.TypeA)))
+}
+
+func TestAddressListedTwiceIsAnsweredOnce(t *testing.T) {
+	f := newFakeAPI(t, fakeToken)
+	both := endpointsOf("ring", map[string]string{"ring-0": "10.0.0.1"})
+	other := endpointsOf("ring", map[string]string{"ring-1": "10.0.0.1", "ring-2": "10.0.0.2"})
+	both.Subsets = append(both.Subsets, other.Subsets...)
+	f.setLists([]api.Service{service("ring", api.ClusterIPNone)}, []api.Endpoints{both})
+	u := startSynced(t, f)
+
+	assert.ElementsMatch(t, []string{"10.0.0.1", "10.0.0.2"}, ips(ask(t, "udp", u.udp, svcName("ring"), dns.TypeA)))
+}

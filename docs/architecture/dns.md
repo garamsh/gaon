@@ -2,7 +2,7 @@
 
 What a MicroVM resolves for a Service: the name form, what the DNS server answers, how that server is delivered and how its address reaches every MicroVM.
 
-Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-at-service-default-svc-zone-and-its-service-address-is-the-resolver-mvmd-gives-every-microvm.md). Kubernetes' statements hold for `kubernetes/dns` at commit `4f2becc8aeb54116398e6a33e34af756db5b9fe7`, `docs/specification.md`, schema version 1.1.0. The mvmd statements hold for garamsh/mvmd at commit `223e3eca764caf60b8dd72c7399b83ff6b437d49`, runtime API `v1alpha2`. The gaon statements hold for garamsh/gaon at commit `34d75c3170c239a1b2b96f2efd41ef3eb6b7318b`.
+Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-at-service-default-svc-zone-and-its-service-address-is-the-resolver-mvmd-gives-every-microvm.md). Kubernetes' statements hold for `kubernetes/dns` at commit `4f2becc8aeb54116398e6a33e34af756db5b9fe7`, `docs/specification.md`, schema version 1.1.0. The mvmd statements hold for garamsh/mvmd at commit `223e3eca764caf60b8dd72c7399b83ff6b437d49`, runtime API `v1alpha2`. The statements about the rest of gaon, such as the resource API, the Node Agent and the network plugin, hold for garamsh/gaon at commit `34d75c3170c239a1b2b96f2efd41ef3eb6b7318b`. The statements about `dns/` describe this repository and are not pinned.
 
 ## Current decisions
 
