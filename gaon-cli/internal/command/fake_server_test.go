@@ -23,6 +23,13 @@ var listKinds = map[string]string{
 	"leases":   api.KindLeaseList,
 	"volumes":  "VolumeList",
 
+	"secrets":         api.KindSecretList,
+	"configmaps":      api.KindConfigMapList,
+	"serviceaccounts": api.KindServiceAccountList,
+	"services":        "ServiceList",
+	"endpoints":       "EndpointsList",
+	"networkpolicies": "NetworkPolicyList",
+
 	"clusterroles":               api.KindClusterRoleList,
 	"clusterrolebindings":        api.KindClusterRoleBindingList,
 	"customresourcedefinitions":  api.KindCustomResourceDefinitionList,

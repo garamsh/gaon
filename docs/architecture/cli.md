@@ -55,17 +55,25 @@ A verb works for a kind where `resource-api.md` §Paths has a path for it. A ver
 | ClusterRole | `GET /clusterroles/{name}` | `GET /clusterroles` | `DELETE /clusterroles/{name}` | `PUT /clusterroles/{name}` |
 | ClusterRoleBinding | `GET /clusterrolebindings/{name}` | `GET /clusterrolebindings` | `DELETE /clusterrolebindings/{name}` | `PUT /clusterrolebindings/{name}` |
 | CustomResourceDefinition | `GET /customresourcedefinitions/{name}` | `GET /customresourcedefinitions` | `DELETE /customresourcedefinitions/{name}` | `PUT /customresourcedefinitions/{name}` |
+| Secret | `GET /secrets/{name}` | `GET /secrets` | `DELETE /secrets/{name}` | `PUT /secrets/{name}` |
+| ConfigMap | `GET /configmaps/{name}` | `GET /configmaps` | `DELETE /configmaps/{name}` | `PUT /configmaps/{name}` |
+| ServiceAccount | `GET /serviceaccounts/{name}` | `GET /serviceaccounts` | `DELETE /serviceaccounts/{name}` | `PUT /serviceaccounts/{name}` |
+| Service | `GET /services/{name}` | `GET /services` | `DELETE /services/{name}` | `PUT /services/{name}` |
+| Endpoints | `GET /endpoints/{name}` | `GET /endpoints` | `DELETE /endpoints/{name}` | `PUT /endpoints/{name}` |
+| NetworkPolicy | `GET /networkpolicies/{name}` | `GET /networkpolicies` | `DELETE /networkpolicies/{name}` | `PUT /networkpolicies/{name}` |
 | A registered kind | `GET /<plural>/{name}` | `GET /<plural>` | `DELETE /<plural>/{name}` | `PUT /<plural>/{name}` |
 
-The paths of the last four rows are under the root of their group; a registered kind's is `/apis/<group>/<version>`.
+The paths of the six core kinds and of MicroVM, Node, Lease, Volume and CertificateSigningRequest are under the compute root; those of ClusterRole and ClusterRoleBinding are under the RBAC root, CustomResourceDefinition under the apiextensions root, and a registered kind's under `/apis/<group>/<version>`.
 
 - `apply` never writes a status path, so a status is never applied: a signer's `PUT /certificatesigningrequests/{name}/status` and a custom object's `/status` are not reached. A Volume's `spec` and a CertificateSigningRequest's `spec` are immutable after creation, which the API server enforces.
-- Table columns: MicroVM `NAME PHASE NODE EPOCH` (phase is the effective phase, so a void status reads `Pending`), Node `NAME STATE ADMITTED`, Lease `NAME HOLDER DURATION`, Volume `NAME CLASS SIZE PHASE NODE`, CertificateSigningRequest `NAME USERNAME STATE` (`Denied` when a true Denied condition is there, else `Approved` when a true Approved one is, else `Pending`), ClusterRole `NAME RULES` (the number of rules), ClusterRoleBinding `NAME ROLE SUBJECTS` (each `Kind/name`), CustomResourceDefinition `NAME KIND VERSION ESTABLISHED` (the status of the Established condition, or `-`), a registered kind `NAME GENERATION`.
-- The built-in kinds are the eight of `lib/api/` that §Paths gives a path the CLI reaches. The admission-registration kinds, every `/status` path and watch are not reached by the CLI yet.
+- Table columns: MicroVM `NAME PHASE NODE EPOCH` (phase is the effective phase, so a void status reads `Pending`), Node `NAME STATE ADMITTED`, Lease `NAME HOLDER DURATION`, Volume `NAME CLASS SIZE PHASE NODE`, CertificateSigningRequest `NAME USERNAME STATE` (`Denied` when a true Denied condition is there, else `Approved` when a true Approved one is, else `Pending`), ClusterRole `NAME RULES` (the number of rules), ClusterRoleBinding `NAME ROLE SUBJECTS` (each `Kind/name`), CustomResourceDefinition `NAME KIND VERSION ESTABLISHED` (the status of the Established condition, or `-`), Secret and ConfigMap `NAME KEYS` (the number of keys), ServiceAccount `NAME`, Service `NAME TYPE CLUSTER-IP EXTERNAL-IP PORTS` (each `[name:]port/protocol[->targetPort]`), Endpoints `NAME ADDRESSES` (the number of addresses), NetworkPolicy `NAME POLICY-TYPES INGRESS EGRESS` (the effective policy types and the number of rules of each direction), a registered kind `NAME GENERATION`.
+- **A Secret's data is never printed by a table or by `describe`**, which list only its key names and the size of each value. `get secret NAME -o yaml` and `-o json` print the object as the API returned it, so `data` is there, each value base64, to anyone who can read the Secret.
+- **A Service keeps its allocated addresses on `apply`.** A document that leaves `spec.clusterIP` or `spec.loadBalancerIP` empty is compared as if it held the stored value, as the API server's update does (`Service.KeepAllocated`), so it prints `unchanged` when nothing else differs, and `configured` when it does. The document is sent as written, and the server keeps the address. A document naming another address is sent, and the server refuses it.
+- The built-in kinds are the fourteen of `lib/api/` that §Paths gives a path the CLI reaches. The admission-registration kinds, every `/status` path and watch are not reached by the CLI yet.
 
 ### Kind names
 
-A kind is accepted by its singular, its plural and a short name, [ADR 0014](./adr/0014-the-gaon-cli-reads-like-kubectl-get-lists-and-reads-describe-shows-a-kind-has-a-plural-and-a-short-name-and-list-is-removed.md) fixing the short names. No two kinds share a name.
+A kind is accepted by its singular, its plural and a short name where it has one, [ADR 0014](./adr/0014-the-gaon-cli-reads-like-kubectl-get-lists-and-reads-describe-shows-a-kind-has-a-plural-and-a-short-name-and-list-is-removed.md) fixing the short names. No two kinds share a name.
 
 | Kind | Singular | Plural | Short |
 |---|---|---|---|
@@ -77,6 +85,12 @@ A kind is accepted by its singular, its plural and a short name, [ADR 0014](./ad
 | ClusterRole | `clusterrole` | `clusterroles` | `cr` |
 | ClusterRoleBinding | `clusterrolebinding` | `clusterrolebindings` | `crb` |
 | CustomResourceDefinition | `customresourcedefinition` | `customresourcedefinitions` | `crd` |
+| Secret | `secret` | `secrets` | none |
+| ConfigMap | `configmap` | `configmaps` | `cm` |
+| ServiceAccount | `serviceaccount` | `serviceaccounts` | `sa` |
+| Service | `service` | `services` | `svc` |
+| Endpoints | `endpoints` | `endpoints` | `ep` |
+| NetworkPolicy | `networkpolicy` | `networkpolicies` | `netpol` |
 
 ### Registered kinds
 
@@ -92,7 +106,7 @@ A kind a CustomResourceDefinition registers is reached on the same verbs, [ADR 0
 `describe KIND NAME` reads the object once and prints, in this order:
 
 - labelled lines `Name`, `Kind`, `Resource version`, `Generation`, `Deletion timestamp` (only when set) and `Finalizers`;
-- the kind's own lines: MicroVM image, kernel, run strategy, node, binding epoch, effective phase, requests, limits, volumes, networks, ports, addresses, restart count and last exit; Node admitted, state, capacity and addresses; Lease holder, renew time and duration; Volume storage class, access modes, size, data source, node, phase, capacity and attachment; CertificateSigningRequest username, state and whether a certificate is issued; ClusterRole one `Rule N` line per rule with its API groups, resources and verbs; ClusterRoleBinding role and subjects; CustomResourceDefinition group, names, scope, versions and whether the status subresource is on; a registered kind's `Spec` and `Status`, each as one line of compact JSON;
+- the kind's own lines: MicroVM image, kernel, run strategy, node, binding epoch, effective phase, requests, limits, volumes, networks, ports, addresses, restart count and last exit; Node admitted, state, capacity and addresses; Lease holder, renew time and duration; Volume storage class, access modes, size, data source, node, phase, capacity and attachment; CertificateSigningRequest username, state and whether a certificate is issued; ClusterRole one `Rule N` line per rule with its API groups, resources and verbs; ClusterRoleBinding role and subjects; CustomResourceDefinition group, names, scope, versions and whether the status subresource is on; Secret its key names with the size of each value, never a value; ConfigMap its key names; ServiceAccount none; Service type, selector, cluster IP, load balancer IP, external IP and ports; Endpoints one `Subset N` line per subset with its addresses and ports; NetworkPolicy pod selector, policy types and the number of ingress and egress rules; a registered kind's `Spec` and `Status`, each as one line of compact JSON;
 - for a MicroVM, a Node, a CertificateSigningRequest and a CustomResourceDefinition, the `Conditions` table with `TYPE STATUS REASON LAST TRANSITION MESSAGE`, or `-` when the status has none. The other kinds have no conditions in the contract, so they print no such section.
 
 An empty value prints as `-`.
@@ -114,7 +128,7 @@ An empty value prints as `-`.
 `helm template RELEASE CHART | gaon apply -f -` applies a chart whose templates emit gaon kinds. Helm is the template engine only; gaon does not serve the Kubernetes API, so a chart that emits Kubernetes kinds is not supported. The example chart is `tooling/e2e/testdata/helm/web/`, and `tooling/e2e/extensions/helm_test.go` renders it with the release name `rel` and applies it twice, a second time reporting every object `unchanged`.
 
 - **Order** in the stream is Helm's: a kind Helm knows (`Secret`, `ClusterRole`, `Deployment`, `Job` and the other Kubernetes kinds) in Helm's install order, then every other kind in template file-name order. A chart that needs one gaon-only kind before another names its files so they sort that way.
-- **Kinds reached** are those of §Verbs by kind and a registered kind, so a document of any other kind (`Secret`, `ConfigMap`, `ServiceAccount`, `Service`, `Endpoints`, `NetworkPolicy`) is refused and nothing in the stream is sent.
+- **Kinds reached** are those of §Verbs by kind and a registered kind, so a document of any other kind is refused and nothing in the stream is sent. A chart may emit `Secret`, `ConfigMap`, `ServiceAccount`, `Service`, `Endpoints` and `NetworkPolicy` documents.
 - **Not offered, and what to use:**
   - **Removing an object a later render no longer holds:** nothing. `apply` records no owner or label of the render, so it cannot tell an object the chart made from one made by another client. Delete it with `gaon delete KIND NAME`.
   - **History and rollback:** nothing. gaon keeps no record of a render. Rolling back is rendering the earlier chart version and applying it.
@@ -138,5 +152,4 @@ An empty value prints as `-`.
 
 - **Namespace:** the CLI sends no namespace, as the paths have none yet ([resource-api.md](./resource-api.md) §Open questions).
 - **Prune, history and hooks for a rendered stream:** not offered, §Applying a Helm-rendered stream. A prune needs a record of what a render made, which `apply` has no field for.
-- **`Secret`, `ConfigMap`, `ServiceAccount`, `Service`, `Endpoints` and `NetworkPolicy` have no CLI verbs yet,** so a chart cannot emit them.
 - **A `--context` flag, embedded credential data, bearer tokens, output formats beyond `table`, `yaml` and `json`:** out of scope.
