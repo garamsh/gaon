@@ -77,6 +77,8 @@ type Attachment struct {
 
 // Validate checks the identity and the spec of v. A Volume of the local
 // class is a disk of a positive size, ReadWriteOnce, with no data source.
+// CreateFromSnapshot holds the rules of one that names a VolumeSnapshot; the
+// API server drops this refusal in the change that applies them.
 func (v *Volume) Validate() error {
 	if err := validateIdentity(v.TypeMeta, GroupVersion, KindVolume, v.Metadata); err != nil {
 		return err
@@ -170,6 +172,43 @@ func (v *Volume) ValidateResize(old *Volume, class *StorageClass) error {
 		}
 	}
 	return nil
+}
+
+// CreateFromSnapshot checks the create of v against s, the VolumeSnapshot that
+// v.spec.dataSource names, nil when none exists, and for the class local pins
+// v to the Node that holds s, as Pin does. It changes nothing of a Volume with
+// no data source. A missing snapshot, a storage class other than the
+// snapshot's and a storage below its restore size are ErrInvalid; a snapshot
+// that is not ready to use, or is being deleted, is ErrConflict. On a refusal v
+// is unchanged.
+func (v *Volume) CreateFromSnapshot(s *VolumeSnapshot) error {
+	if v.Spec.DataSource == "" {
+		return nil
+	}
+	if s == nil {
+		return invalid("spec.dataSource names volume snapshot %q, which does not exist", v.Spec.DataSource)
+	}
+	if s.Metadata.DeletionTimestamp != nil {
+		return NewAPIError(ReasonConflict, "volume snapshot %q is being deleted", s.Metadata.Name)
+	}
+	if !s.Status.ReadyToUse {
+		return NewAPIError(ReasonConflict, "volume snapshot %q is not ready to use", s.Metadata.Name)
+	}
+	if v.Spec.StorageClass != s.Status.StorageClass {
+		return invalid("spec.storageClass is %q, want %q, the class of volume snapshot %q", v.Spec.StorageClass, s.Status.StorageClass, s.Metadata.Name)
+	}
+	want, err := v.Spec.Storage.Value()
+	if err != nil {
+		return invalid("spec.storage: %v", err)
+	}
+	floor, err := s.Status.RestoreSize.Value()
+	if err != nil {
+		return invalid("status.restoreSize of volume snapshot %q: %v", s.Metadata.Name, err)
+	}
+	if want.Cmp(floor) < 0 {
+		return invalid("spec.storage is %q, below %q, the restore size of volume snapshot %q", v.Spec.Storage, s.Status.RestoreSize, s.Metadata.Name)
+	}
+	return v.Pin(s.Status.NodeName)
 }
 
 // Pin pins a local v to node: it sets spec.nodeName and adds

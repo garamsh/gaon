@@ -110,7 +110,7 @@ func TestVolumeValidateCreate(t *testing.T) {
 	assert.NoError(t, pinned.Validate(), "a pinned volume is valid once it exists")
 
 	broken := newVolume("data")
-	broken.Spec.DataSource = "snap-1"
+	broken.Spec.AccessModes = nil
 	assert.ErrorIs(t, broken.ValidateCreate(), api.ErrInvalid, "a create applies Validate")
 }
 
