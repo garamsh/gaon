@@ -269,3 +269,52 @@ func TestClientWatchRequiresAVersion(t *testing.T) {
 	_, err := c.WatchMicroVMs(testContext(t), "")
 	assert.Error(t, err)
 }
+
+func TestClientReachesStorageClassesOnTheirPaths(t *testing.T) {
+	var seen []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/storageclasses" {
+			_, _ = io.WriteString(w, `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"StorageClassList","metadata":{"resourceVersion":"7"},"items":[{"metadata":{"name":"fast"},"provisioner":"ceph","allowVolumeExpansion":true}]}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"StorageClass","metadata":{"name":"fast","resourceVersion":"7"},"provisioner":"ceph","allowVolumeExpansion":true}`)
+	}))
+	t.Cleanup(ts.Close)
+	c := api.NewClient(ts.URL, ts.Client())
+	ctx := testContext(t)
+
+	class := &api.StorageClass{
+		TypeMeta:    api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindStorageClass},
+		Metadata:    api.ObjectMeta{Name: "fast"},
+		Provisioner: "ceph",
+	}
+	put, err := c.PutStorageClass(ctx, class)
+	require.NoError(t, err)
+	assert.Equal(t, "ceph", put.Provisioner)
+
+	got, err := c.GetStorageClass(ctx, "fast")
+	require.NoError(t, err)
+	assert.True(t, got.AllowVolumeExpansion)
+
+	list, err := c.ListStorageClasses(ctx)
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	assert.Equal(t, "fast", list.Items[0].Metadata.Name)
+
+	deleted, err := c.DeleteStorageClass(ctx, "fast", "7")
+	require.NoError(t, err)
+	assert.Equal(t, "fast", deleted.Metadata.Name)
+
+	assert.Equal(t, []string{
+		"PUT /storageclasses/fast",
+		"GET /storageclasses/fast",
+		"GET /storageclasses",
+		"DELETE /storageclasses/fast?resourceVersion=7",
+	}, seen)
+
+	_, err = c.DeleteStorageClass(ctx, "fast", "")
+	assert.Error(t, err, "a delete without a version is refused before any request")
+	assert.Len(t, seen, 4)
+}

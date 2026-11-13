@@ -191,6 +191,32 @@ func (c *Client) PutVolumeStatus(ctx context.Context, v *Volume) (*Volume, error
 	return put(ctx, c, "/volumes/"+url.PathEscape(v.Metadata.Name)+"/status", v)
 }
 
+// PutStorageClass creates c, or changes it when c carries the ResourceVersion
+// it was read at (PUT /storageclasses/{name}).
+func (c *Client) PutStorageClass(ctx context.Context, class *StorageClass) (*StorageClass, error) {
+	return put(ctx, c, "/storageclasses/"+url.PathEscape(class.Metadata.Name), class)
+}
+
+// DeleteStorageClass removes the named StorageClass, if it is still at version
+// rv (DELETE /storageclasses/{name}).
+func (c *Client) DeleteStorageClass(ctx context.Context, name string, rv ResourceVersion) (*StorageClass, error) {
+	if rv == "" {
+		return nil, errors.New("delete storageclass: resource version is empty")
+	}
+	return call[StorageClass](ctx, c, http.MethodDelete, "/storageclasses/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetStorageClass returns the named StorageClass (GET /storageclasses/{name}).
+func (c *Client) GetStorageClass(ctx context.Context, name string) (*StorageClass, error) {
+	return call[StorageClass](ctx, c, http.MethodGet, "/storageclasses/"+url.PathEscape(name), nil, nil)
+}
+
+// ListStorageClasses returns every StorageClass and the version to watch from
+// (GET /storageclasses).
+func (c *Client) ListStorageClasses(ctx context.Context) (*StorageClassList, error) {
+	return call[StorageClassList](ctx, c, http.MethodGet, "/storageclasses", c.listQuery(), nil)
+}
+
 // PutLease creates l, or renews it when l carries the ResourceVersion it was
 // read at (PUT /leases/{name}).
 func (c *Client) PutLease(ctx context.Context, l *Lease) (*Lease, error) {
