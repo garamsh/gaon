@@ -209,7 +209,17 @@ func (s *Server) ReadExecOutput(r *v1alpha2.ReadExecOutputRequest, stream grpc.S
 	_, held := s.machines[r.GetMachineId()]
 	rec, set := s.records[r.GetMachineId()]
 	silent := s.silent[r.GetMachineId()]
+	key := execKey(r.GetMachineId(), r.GetExecId())
+	e, hasState := s.execs[key]
+	s.opens[key] = append(s.opens[key], r.GetAfterOffset())
+	failure := s.readFailure
 	s.mu.Unlock()
+	if failure != v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED {
+		return v1alpha2.NewError(failure, "read refused")
+	}
+	if hasState && held {
+		return s.serveExec(stream.Context(), e, r.GetAfterOffset(), stream)
+	}
 	if !held || r.GetExecId() != "entrypoint" {
 		return v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such exec")
 	}

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/garamsh/gaon/node-agent/internal/clock"
+	"github.com/garamsh/gaon/node-agent/internal/guest"
 	"github.com/garamsh/gaon/node-agent/internal/liveness"
 	"github.com/garamsh/gaon/node-agent/internal/microvms"
 	"github.com/garamsh/gaon/node-agent/internal/node"
@@ -27,7 +28,7 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 	}
 	defer func() { _ = conn.Close() }()
 	runtime := v1alpha2.NewRuntimeServiceClient(conn)
-	client, renewCertificate, err := connect(ctx, cfg, clk, log)
+	client, holder, renewCertificate, err := connect(ctx, cfg, clk, log)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil
@@ -35,7 +36,8 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 		return err
 	}
 
-	nodes := node.NewService(cfg.NodeName, client, runtime, clk, log)
+	getCertificate, serving := servingCertificate(cfg, holder, clk, log)
+	nodes := node.NewService(cfg.NodeName, reach(cfg, serving), client, runtime, clk, log)
 	live := liveness.NewService(cfg.NodeName, cfg.Liveness, client, runtime, clk, log)
 	plugins, err := dialPlugins(cfg)
 	if err != nil {
@@ -52,6 +54,19 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 		TokenAudience:     cfg.ServiceAccountAudience,
 	}, client, runtime, plugins.network, plugins.storage, clk, log)
 
+	var listener *guest.Listener
+	if serving {
+		listener, err = guest.Listen(guest.ListenConfig{
+			Addrs: cfg.AgentAddresses, Port: cfg.AgentPort, CAFile: cfg.TLSCA,
+			Certificate: getCertificate,
+			Handler:     guest.Handler(guest.NewService(runs, runtime, guest.Params{}), log),
+			Log:         log,
+		})
+		if err != nil {
+			return fmt.Errorf("serve a MicroVM's log and exec: %w", err)
+		}
+	}
+
 	// Everything but the certificate renewal needs the Node, which the API
 	// server's authorization refuses until it exists.
 	loops := []func(context.Context){func(ctx context.Context) {
@@ -60,6 +75,9 @@ func Run(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger) err
 		}
 		runAll(ctx, live.Run, func(ctx context.Context) { nodes.Run(ctx, cfg.ResyncPeriod) }, runs.Run)
 	}}
+	if listener != nil {
+		loops = append(loops, listener.Run)
+	}
 	if renewCertificate != nil {
 		loops = append(loops, renewCertificate)
 	}

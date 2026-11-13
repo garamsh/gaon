@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/pem"
 	"io"
 	"log/slog"
@@ -113,6 +114,20 @@ func (r *rig) seed(t *testing.T, certPEM, keyPEM []byte) {
 	}
 }
 
+// extUsage returns the OIDs of the extended key usage extension of req.
+func extUsage(t *testing.T, req *x509.CertificateRequest) []asn1.ObjectIdentifier {
+	t.Helper()
+	for _, e := range req.Extensions {
+		if e.Id.Equal(asn1.ObjectIdentifier{2, 5, 29, 37}) {
+			var oids []asn1.ObjectIdentifier
+			_, err := asn1.Unmarshal(e.Value, &oids)
+			require.NoError(t, err)
+			return oids
+		}
+	}
+	return nil
+}
+
 func readLeaf(t *testing.T, dir string) *x509.Certificate {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(dir, certificate.PairFile))
@@ -165,6 +180,9 @@ func TestStart_BootstrapsWithTheTokenAndKeepsTheIssuedPairOnDisk(t *testing.T) {
 	assert.Empty(t, req.IPAddresses)
 	assert.Empty(t, req.EmailAddresses)
 	assert.Empty(t, req.URIs)
+	require.Len(t, req.Extensions, 1, "the request carries one extension")
+	assert.Equal(t, []asn1.ObjectIdentifier{{1, 3, 6, 1, 5, 5, 7, 3, 2}, {1, 3, 6, 1, 5, 5, 7, 3, 1}}, extUsage(t, req),
+		"asking for client auth and server auth")
 	pub, ok := req.PublicKey.(*ecdsa.PublicKey)
 	require.True(t, ok, "the request carries an ECDSA key")
 	assert.Equal(t, elliptic.P256(), pub.Curve)

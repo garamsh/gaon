@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
@@ -16,6 +17,23 @@ import (
 	"github.com/garamsh/gaon/lib/api"
 )
 
+var (
+	oidExtKeyUsage = asn1.ObjectIdentifier{2, 5, 29, 37}
+	oidClientAuth  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
+	oidServerAuth  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
+)
+
+// extKeyUsage returns the extended key usage extension of a request: client
+// auth for the agent's calls to the API server and server auth for its
+// listener (ADR 0043).
+func extKeyUsage() (pkix.Extension, error) {
+	value, err := asn1.Marshal([]asn1.ObjectIdentifier{oidClientAuth, oidServerAuth})
+	if err != nil {
+		return pkix.Extension{}, fmt.Errorf("encode extended key usage: %w", err)
+	}
+	return pkix.Extension{Id: oidExtKeyUsage, Value: value}, nil
+}
+
 // obtain creates a request for a certificate with a new key, waits for the
 // signer's decision and returns the key and the certificate, both PEM.
 func (s *service) obtain(ctx context.Context, reqs Requests) (keyPEM, certPEM []byte, err error) {
@@ -23,8 +41,13 @@ func (s *service) obtain(ctx context.Context, reqs Requests) (keyPEM, certPEM []
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate key: %w", err)
 	}
+	usage, err := extKeyUsage()
+	if err != nil {
+		return nil, nil, err
+	}
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
-		Subject: pkix.Name{CommonName: s.params.NodeName, Organization: []string{api.NodeGroup}},
+		Subject:         pkix.Name{CommonName: s.params.NodeName, Organization: []string{api.NodeGroup}},
+		ExtraExtensions: []pkix.Extension{usage},
 	}, key)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create certificate request: %w", err)

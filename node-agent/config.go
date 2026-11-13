@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/garamsh/gaon/lib/api"
@@ -27,6 +31,9 @@ const (
 	EnvTLSCA          = "GAON_TLS_CA"
 	EnvTLSCert        = "GAON_TLS_CERT"
 	EnvTLSKey         = "GAON_TLS_KEY"
+
+	EnvAgentAddresses = "GAON_AGENT_ADDRESSES"
+	EnvAgentPort      = "GAON_AGENT_PORT"
 
 	EnvBootstrapTokenFile = "GAON_BOOTSTRAP_TOKEN_FILE"
 	EnvCertDir            = "GAON_CERT_DIR"
@@ -54,8 +61,17 @@ type Config struct {
 	// reaches APIServer with, trusting only the CAs in TLSCA. BootstrapToken is
 	// the token it asks for a first certificate with, empty when it has none.
 	CertDir        string
-	TLSCA          string
 	BootstrapToken string
+	// TLSCA is the file of the CA certificates the API server's certificate
+	// must chain to, and a client certificate of the listener must chain to.
+	// TLSCert and TLSKey are the files of the certificate an operator supplies
+	// instead of CertDir.
+	TLSCA, TLSCert, TLSKey string
+	// AgentAddresses and AgentPort are where the agent serves a MicroVM's log
+	// and exec, and what the Node's status states. Both are empty when it
+	// serves none.
+	AgentAddresses []netip.Addr
+	AgentPort      int
 	// NodeName names the Node and the Lease.
 	NodeName string
 	// MvmdSocket is the path of mvmd's runtime API Unix socket.
@@ -132,6 +148,17 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	str(&tlsFiles.CA, "tls-ca", EnvTLSCA, "file of the CA certificates the API server's certificate must chain to")
 	str(&tlsFiles.Cert, "tls-cert", EnvTLSCert, "file of the client certificate presented to the API server")
 	str(&tlsFiles.Key, "tls-key", EnvTLSKey, "file of the key of --tls-cert")
+	var agentAddresses string
+	str(&agentAddresses, "agent-addresses", EnvAgentAddresses, "comma-separated IP addresses the agent serves a MicroVM's log and exec on, and the Node's status.addresses; none when empty")
+	port := 0
+	if v := getenv(EnvAgentPort); v != "" {
+		p, err := strconv.Atoi(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", EnvAgentPort, err))
+		}
+		port = p
+	}
+	fs.IntVar(&c.AgentPort, "agent-port", port, "port the agent serves a MicroVM's log and exec on at --agent-addresses; 0 serves none (env "+EnvAgentPort+")")
 	var tokenFile string
 	str(&tokenFile, "bootstrap-token-file", EnvBootstrapTokenFile, "file of the bootstrap token the agent asks for its client certificate with")
 	str(&c.CertDir, "cert-dir", EnvCertDir, "directory where the agent keeps its key and client certificate")
@@ -190,16 +217,53 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 		}
 	}
 	var err error
+	if c.AgentAddresses, err = agentListen(agentAddresses, c.AgentPort); err != nil {
+		return Config{}, err
+	}
+	c.TLSCA, c.TLSCert, c.TLSKey = tlsFiles.CA, tlsFiles.Cert, tlsFiles.Key
+	if len(c.AgentAddresses) > 0 && (tlsFiles.CA == "" || (c.CertDir == "" && (tlsFiles.Cert == "" || tlsFiles.Key == ""))) {
+		return Config{}, errors.New("--agent-addresses needs --tls-ca and a certificate to serve with: --cert-dir, or --tls-cert and --tls-key")
+	}
 	if tokenFile != "" || c.CertDir != "" {
 		token, err := bootstrapToken(tokenFile, c.CertDir, tlsFiles)
 		if err != nil {
 			return Config{}, err
 		}
-		c.TLSCA, c.BootstrapToken = tlsFiles.CA, token
+		c.BootstrapToken = token
 		return c, nil
 	}
 	if c.HTTPClient, err = tlsFiles.Client(); err != nil {
 		return Config{}, err
 	}
 	return c, nil
+}
+
+// agentListen returns the addresses the list names, each an IP literal given
+// once, and checks that they and the port are given together and the port is
+// one a process can listen on.
+func agentListen(list string, port int) ([]netip.Addr, error) {
+	if list == "" && port == 0 {
+		return nil, nil
+	}
+	if list == "" || port == 0 {
+		return nil, errors.New("--agent-addresses and --agent-port are given together or not at all")
+	}
+	if port < 1 || port > 65535 {
+		return nil, fmt.Errorf("--agent-port is %d, want 1 to 65535", port)
+	}
+	var addrs []netip.Addr
+	for _, part := range strings.Split(list, ",") {
+		a, err := netip.ParseAddr(strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("--agent-addresses: %w", err)
+		}
+		if a.IsUnspecified() || a.Zone() != "" {
+			return nil, fmt.Errorf("--agent-addresses: %s is not an address of the Node", a)
+		}
+		if slices.Contains(addrs, a) {
+			return nil, fmt.Errorf("--agent-addresses: %s is given twice", a)
+		}
+		addrs = append(addrs, a)
+	}
+	return addrs, nil
 }

@@ -31,6 +31,7 @@ type env struct {
 	gaon *fakegaon.Server
 	mvmd *fakemvmd.Server
 	rt   v1alpha2.RuntimeServiceClient
+	svc  microvms.Service
 	// network and storage are the plugins the service runs with; a setup
 	// function may replace them, and they default to plugins that serve every
 	// MicroVM with the empty policy and no disk.
@@ -75,6 +76,7 @@ func start(t *testing.T, armed bool, wrap func(microvms.API) microvms.API, setup
 		RestartBackoff: time.Hour, RestartBackoffMax: time.Hour, RestartResetAfter: time.Hour,
 	},
 		client, e.rt, e.network, e.storage, clk, slog.New(slog.NewTextHandler(e.log, nil)))
+	e.svc = svc
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { svc.Run(ctx); close(done) }()
