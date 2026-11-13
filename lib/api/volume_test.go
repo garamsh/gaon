@@ -80,7 +80,8 @@ func TestVolumeValidate(t *testing.T) {
 		}, false},
 		{"local, no storage", func(v *api.Volume) { v.Spec.Storage = "" }, false},
 		{"local, zero storage", func(v *api.Volume) { v.Spec.Storage = "0" }, false},
-		{"local, data source", func(v *api.Volume) { v.Spec.DataSource = "snap-1" }, false},
+		{"local, data source", func(v *api.Volume) { v.Spec.DataSource = "snap-1" }, true},
+		{"local, data source that is not a name", func(v *api.Volume) { v.Spec.DataSource = "Snap_1" }, false},
 		{"other class, other access mode and a data source", func(v *api.Volume) {
 			v.Spec.StorageClass = "ceph"
 			v.Spec.AccessModes = []string{"ReadWriteMany"}
@@ -110,7 +111,7 @@ func TestVolumeValidateCreate(t *testing.T) {
 	assert.NoError(t, pinned.Validate(), "a pinned volume is valid once it exists")
 
 	broken := newVolume("data")
-	broken.Spec.DataSource = "snap-1"
+	broken.Spec.AccessModes = nil
 	assert.ErrorIs(t, broken.ValidateCreate(), api.ErrInvalid, "a create applies Validate")
 }
 
