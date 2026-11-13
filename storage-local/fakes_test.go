@@ -22,6 +22,8 @@ type fakeVolumes struct {
 	mu      sync.Mutex
 	rev     int
 	volumes map[string]api.Volume
+
+	statuses []api.VolumeStatus
 }
 
 func newFakeVolumes() *fakeVolumes { return &fakeVolumes{volumes: map[string]api.Volume{}} }
@@ -116,17 +118,27 @@ func (f *fakeVolumes) PutVolumeStatus(_ context.Context, next *api.Volume) (*api
 	v.Metadata.ResourceVersion = api.ResourceVersion(strconv.Itoa(f.rev))
 	v.Status = next.Status
 	f.volumes[v.Metadata.Name] = v
+	f.statuses = append(f.statuses, v.Status)
 	return &v, nil
+}
+
+// Statuses returns every status written through PutVolumeStatus, in order.
+func (f *fakeVolumes) Statuses() []api.VolumeStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.statuses)
 }
 
 // fakeDisks is the disk calls of mvmd's runtime API held in memory: a disk is
 // held by at most one machine, and one a machine holds cannot be deleted.
 type fakeDisks struct {
-	mu       sync.Mutex
-	disks    map[string]*v1alpha2.Disk
-	calls    []string
-	failure  v1alpha2.OutcomeKind
-	machines map[string][]string
+	mu            sync.Mutex
+	disks         map[string]*v1alpha2.Disk
+	calls         []string
+	failure       v1alpha2.OutcomeKind
+	resizeFailure v1alpha2.OutcomeKind
+	onResize      func()
+	machines      map[string][]string
 }
 
 func newFakeDisks() *fakeDisks {
@@ -219,6 +231,45 @@ func (f *fakeDisks) ListDisks(context.Context, *v1alpha2.ListDisksRequest, ...gr
 	}
 	slices.SortFunc(out.Disks, func(a, b *v1alpha2.Disk) int { return strings.Compare(a.Id, b.Id) })
 	return out, nil
+}
+
+// FailDiskResizesWith makes every ResizeDisk fail with an error of kind, until
+// it is called with OUTCOME_KIND_UNSPECIFIED.
+func (f *fakeDisks) FailDiskResizesWith(kind v1alpha2.OutcomeKind) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resizeFailure = kind
+}
+
+// OnResize sets fn to run at the start of every ResizeDisk, before it answers.
+func (f *fakeDisks) OnResize(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onResize = fn
+}
+
+func (f *fakeDisks) ResizeDisk(_ context.Context, r *v1alpha2.ResizeDiskRequest, _ ...grpc.CallOption) (*v1alpha2.ResizeDiskResponse, error) {
+	f.mu.Lock()
+	fn := f.onResize
+	f.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "ResizeDisk "+r.GetDiskId()+" "+strconv.FormatUint(r.GetSizeBytes(), 10))
+	if f.resizeFailure != v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED {
+		return nil, v1alpha2.NewError(f.resizeFailure, "mvmd refuses the growth")
+	}
+	d, ok := f.disks[r.GetDiskId()]
+	switch {
+	case !ok:
+		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such disk")
+	case r.GetSizeBytes() < d.SizeBytes:
+		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_REJECTED, "size is below the disk's")
+	}
+	d.SizeBytes = r.GetSizeBytes()
+	return &v1alpha2.ResizeDiskResponse{}, nil
 }
 
 func (f *fakeDisks) DeleteDisk(_ context.Context, r *v1alpha2.DeleteDiskRequest, _ ...grpc.CallOption) (*v1alpha2.DeleteDiskResponse, error) {

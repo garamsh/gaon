@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 
 	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/lib/plugin"
@@ -42,6 +43,19 @@ const (
 	ReasonVolumeFailed = "VolumeFailed"
 )
 
+// The reasons of the Resizing condition of a Volume whose growth is open.
+const (
+	// ReasonResizeInProgress is the reason while the growth is taken and not
+	// finished.
+	ReasonResizeInProgress = "InProgress"
+	// ReasonResizeHolderNotResizable is the reason while mvmd answers that the
+	// Machine holding the disk cannot have it grown.
+	ReasonResizeHolderNotResizable = "HolderNotResizable"
+	// ReasonResizeFailed is the reason while mvmd answers a growth with any
+	// other error.
+	ReasonResizeFailed = "Failed"
+)
+
 // statusAttempts bounds how often a status write that conflicts is retried
 // from a fresh read within one call; the next call or round tries again.
 const statusAttempts = 3
@@ -59,6 +73,7 @@ type Disks interface {
 	CreateDisk(ctx context.Context, in *v1alpha2.CreateDiskRequest, opts ...grpc.CallOption) (*v1alpha2.CreateDiskResponse, error)
 	ListDisks(ctx context.Context, in *v1alpha2.ListDisksRequest, opts ...grpc.CallOption) (*v1alpha2.ListDisksResponse, error)
 	DeleteDisk(ctx context.Context, in *v1alpha2.DeleteDiskRequest, opts ...grpc.CallOption) (*v1alpha2.DeleteDiskResponse, error)
+	ResizeDisk(ctx context.Context, in *v1alpha2.ResizeDiskRequest, opts ...grpc.CallOption) (*v1alpha2.ResizeDiskResponse, error)
 }
 
 // Sleeper waits, for the loop's period.
@@ -86,7 +101,8 @@ func (SystemSleeper) Sleep(ctx context.Context, d time.Duration) error {
 // Local serves the Volumes of class local pinned to its Node as disks on
 // mvmd, named after the Volume. Attach makes the disk of each Volume a
 // MicroVM names and writes the Volume's attachment; Run keeps each Volume's
-// phase and capacity, and deletes the disk of a Volume being deleted that no
+// phase and capacity, grows the disk of a Volume whose storage is above its
+// capacity, and deletes the disk of a Volume being deleted that no
 // MicroVM holds.
 type Local struct {
 	node    string
@@ -296,12 +312,17 @@ func (l *Local) reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// sync writes v's phase and capacity from its disk: Bound while a MicroVM
-// holds the disk, Released once none does but an attachment remains, and
-// Available before any. A conflicting write is left to the next round.
+// sync writes v's phase, capacity and Resizing condition from its disk: Bound
+// while a MicroVM holds the disk, Released once none does but an attachment
+// remains, and Available before any. A disk held with no attachment yet keeps
+// the phase. A conflicting write is left to the next round.
 func (l *Local) sync(ctx context.Context, v *api.Volume, disks map[string]*v1alpha2.Disk) error {
 	disk, err := l.ensureDisk(ctx, v, disks)
 	if err != nil {
+		return err
+	}
+	v, size, resizing, err := l.grow(ctx, v, disk)
+	if err != nil || v == nil {
 		return err
 	}
 	phase := api.VolumeAvailable
@@ -309,19 +330,104 @@ func (l *Local) sync(ctx context.Context, v *api.Volume, disks map[string]*v1alp
 	case disk.GetHolderMachineId() != "" && v.Status.Attachment != nil:
 		phase = api.VolumeBound
 	case disk.GetHolderMachineId() != "":
-		return nil
+		phase = v.Status.Phase
 	case v.Status.Attachment != nil:
 		phase = api.VolumeReleased
 	}
-	if v.Status.Phase == phase && v.Status.Capacity == capacity(disk) {
+	conditions := withResizing(v.Status.Conditions, resizing)
+	if v.Status.Phase == phase && v.Status.Capacity == size && slices.Equal(v.Status.Conditions, conditions) {
 		return nil
 	}
 	next := *v
-	next.Status.Phase, next.Status.Capacity = phase, capacity(disk)
+	next.Status.Phase, next.Status.Capacity, next.Status.Conditions = phase, size, conditions
 	if _, err := l.volumes.PutVolumeStatus(ctx, &next); err != nil && !errors.Is(err, api.ErrConflict) && !errors.Is(err, api.ErrNotFound) {
 		return fmt.Errorf("write status: %w", err)
 	}
 	return nil
+}
+
+// grow asks mvmd to grow the disk of v while v's storage is above its
+// capacity, which is the disk's size when v has none. It returns the Volume as
+// last written (nil when a write conflicted and the round ends), the capacity
+// to report and the Resizing condition to keep, nil when no growth is open. A
+// growth with no condition yet is written InProgress first, so the Volume shows
+// it while mvmd works.
+func (l *Local) grow(ctx context.Context, v *api.Volume, disk *v1alpha2.Disk) (*api.Volume, api.Quantity, *api.Condition, error) {
+	size := capacity(disk)
+	have := v.Status.Capacity
+	if have == "" {
+		have = size
+	}
+	want, err := sizeBytes(v.Spec.Storage)
+	if err != nil {
+		return v, size, resizingCondition(ReasonResizeFailed, err.Error()), nil
+	}
+	if cmp, err := compareQuantity(have, v.Spec.Storage); err != nil || cmp >= 0 {
+		return v, size, nil, nil
+	}
+	if findResizing(v.Status.Conditions) == nil {
+		next := *v
+		next.Status.Conditions = withResizing(v.Status.Conditions, resizingCondition(ReasonResizeInProgress, ""))
+		written, err := l.volumes.PutVolumeStatus(ctx, &next)
+		switch {
+		case err == nil:
+			v = written
+		case errors.Is(err, api.ErrConflict), errors.Is(err, api.ErrNotFound):
+			return nil, "", nil, nil
+		default:
+			return nil, "", nil, fmt.Errorf("write status: %w", err)
+		}
+	}
+	_, err = l.runtime.ResizeDisk(ctx, &v1alpha2.ResizeDiskRequest{DiskId: diskID(v.Metadata.Name), SizeBytes: want})
+	switch {
+	case err == nil:
+		return v, api.Quantity(strconv.FormatUint(want, 10)), nil, nil
+	case ctx.Err() != nil:
+		return nil, "", nil, fmt.Errorf("resize disk %s: %w", disk.GetId(), err)
+	case v1alpha2.KindOf(err) == v1alpha2.OutcomeKind_OUTCOME_KIND_PRECONDITION_FAILED:
+		return v, size, resizingCondition(ReasonResizeHolderNotResizable, status.Convert(err).Message()), nil
+	default:
+		return v, size, resizingCondition(ReasonResizeFailed, status.Convert(err).Message()), nil
+	}
+}
+
+func resizingCondition(reason, message string) *api.Condition {
+	return &api.Condition{Type: api.VolumeConditionResizing, Status: api.ConditionTrue, Reason: reason, Message: message}
+}
+
+func findResizing(conditions []api.Condition) *api.Condition {
+	for i := range conditions {
+		if conditions[i].Type == api.VolumeConditionResizing {
+			return &conditions[i]
+		}
+	}
+	return nil
+}
+
+// withResizing returns conditions with the Resizing one replaced by c, or
+// removed when c is nil, and every other condition kept.
+func withResizing(conditions []api.Condition, c *api.Condition) []api.Condition {
+	out := slices.DeleteFunc(slices.Clone(conditions), func(x api.Condition) bool { return x.Type == api.VolumeConditionResizing })
+	if c != nil {
+		out = append(out, *c)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// compareQuantity returns -1, 0 or 1 as a is below, equal to or above b.
+func compareQuantity(a, b api.Quantity) (int, error) {
+	x, err := a.Value()
+	if err != nil {
+		return 0, err
+	}
+	y, err := b.Value()
+	if err != nil {
+		return 0, err
+	}
+	return x.Cmp(y), nil
 }
 
 // finish deletes the disk of the deleting v and removes the agent's finalizer,
