@@ -244,19 +244,27 @@ func TestVolumeCreateFromSnapshotLeavesAVolumeWithoutADataSourceAlone(t *testing
 	assert.Empty(t, v.Spec.NodeName)
 }
 
-func TestVolumeDataSourceIsImmutable(t *testing.T) {
-	old := volumeFromSnapshot("10Gi")
-	same := volumeFromSnapshot("10Gi")
-	assert.NoError(t, same.ValidateUpdate(old), "control: an unchanged data source")
-	assert.NoError(t, same.ValidateResize(old, newClass("local", "local", true)), "control: an unchanged data source")
+// otherClassFromSnapshot is a Volume of a class that is not local, since
+// Validate still refuses a data source for local.
+func otherClassFromSnapshot() *api.Volume {
+	v := volumeFromSnapshot("10Gi")
+	v.Spec.StorageClass = "ceph"
+	return v
+}
 
-	moved := volumeFromSnapshot("10Gi")
+func TestVolumeDataSourceIsImmutable(t *testing.T) {
+	old := otherClassFromSnapshot()
+	same := otherClassFromSnapshot()
+	assert.NoError(t, same.ValidateUpdate(old), "control: an unchanged data source")
+	assert.NoError(t, same.ValidateResize(old, newClass("ceph", "ceph", true)), "control: an unchanged data source")
+
+	moved := otherClassFromSnapshot()
 	moved.Spec.DataSource = "other"
 	assert.ErrorIs(t, moved.ValidateUpdate(old), api.ErrInvalid)
-	assert.ErrorIs(t, moved.ValidateResize(old, newClass("local", "local", true)), api.ErrInvalid)
+	assert.ErrorIs(t, moved.ValidateResize(old, newClass("ceph", "ceph", true)), api.ErrInvalid)
 
-	cleared := volumeFromSnapshot("10Gi")
+	cleared := otherClassFromSnapshot()
 	cleared.Spec.DataSource = ""
 	assert.ErrorIs(t, cleared.ValidateUpdate(old), api.ErrInvalid)
-	assert.ErrorIs(t, cleared.ValidateResize(old, newClass("local", "local", true)), api.ErrInvalid)
+	assert.ErrorIs(t, cleared.ValidateResize(old, newClass("ceph", "ceph", true)), api.ErrInvalid)
 }
