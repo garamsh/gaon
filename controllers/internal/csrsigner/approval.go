@@ -15,6 +15,7 @@ import (
 var (
 	oidExtKeyUsage = asn1.ObjectIdentifier{2, 5, 29, 37}
 	oidClientAuth  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
+	oidServerAuth  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
 	oidCommonName  = asn1.ObjectIdentifier{2, 5, 4, 3}
 	oidOrg         = asn1.ObjectIdentifier{2, 5, 4, 10}
 )
@@ -25,54 +26,75 @@ type denial struct {
 }
 
 // approve applies the approval rule to r in order and returns the parsed
-// request, or the first failure.
-func approve(r *api.CertificateSigningRequest) (*x509.CertificateRequest, *denial) {
+// request and the extended key usage to sign, or the first failure.
+func approve(r *api.CertificateSigningRequest) (*x509.CertificateRequest, []x509.ExtKeyUsage, *denial) {
 	block, _ := pem.Decode([]byte(r.Spec.Request))
 	if block == nil || block.Type != "CERTIFICATE REQUEST" {
-		return nil, &denial{reasonInvalidRequest, "spec.request is not a PEM CERTIFICATE REQUEST"}
+		return nil, nil, &denial{reasonInvalidRequest, "spec.request is not a PEM CERTIFICATE REQUEST"}
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
-		return nil, &denial{reasonInvalidRequest, fmt.Sprintf("spec.request does not parse: %v", err)}
+		return nil, nil, &denial{reasonInvalidRequest, fmt.Sprintf("spec.request does not parse: %v", err)}
 	}
 	if err := csr.CheckSignature(); err != nil {
-		return nil, &denial{reasonInvalidRequest, fmt.Sprintf("spec.request signature does not verify: %v", err)}
+		return nil, nil, &denial{reasonInvalidRequest, fmt.Sprintf("spec.request signature does not verify: %v", err)}
 	}
 
 	// A certificate's Organization values are its groups, so the subject is
 	// one CN and the one Organization that marks a Node.
 	cn, org, ok := nodeSubject(csr.Subject.Names)
 	if !ok {
-		return nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject has %d attributes: it must be exactly one CN and one O=%s", len(csr.Subject.Names), api.NodeGroup)}
+		return nil, nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject has %d attributes: it must be exactly one CN and one O=%s", len(csr.Subject.Names), api.NodeGroup)}
 	}
 	if org != api.NodeGroup {
-		return nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject O %q is not %s", org, api.NodeGroup)}
+		return nil, nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject O %q is not %s", org, api.NodeGroup)}
 	}
 	if cn == "" || strings.HasPrefix(cn, usernamePrefix) {
-		return nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject CN %q is not a Node name", cn)}
+		return nil, nil, &denial{reasonInvalidSubject, fmt.Sprintf("subject CN %q is not a Node name", cn)}
 	}
 
+	usages := []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
 	for _, ext := range csr.Extensions {
-		if !clientAuthOnly(ext.Id, ext.Value) {
-			return nil, &denial{reasonDisallowedExt, fmt.Sprintf("extension %s is not allowed: only an extended key usage of client auth is", ext.Id)}
+		u, ok := allowedExtKeyUsage(ext.Id, ext.Value)
+		if !ok {
+			return nil, nil, &denial{reasonDisallowedExt, fmt.Sprintf("extension %s is not allowed: only an extended key usage of client auth, or of client auth and server auth, is", ext.Id)}
 		}
+		usages = u
 	}
 
 	if !strings.HasPrefix(r.Spec.Username, usernamePrefix) && r.Spec.Username != cn {
-		return nil, &denial{reasonUnauthorized, fmt.Sprintf("username %q is neither a bootstrap token nor the CN %q", r.Spec.Username, cn)}
+		return nil, nil, &denial{reasonUnauthorized, fmt.Sprintf("username %q is neither a bootstrap token nor the CN %q", r.Spec.Username, cn)}
 	}
-	return csr, nil
+	return csr, usages, nil
 }
 
-// clientAuthOnly reports whether the extension is an extended key usage that
-// holds client auth and nothing else.
-func clientAuthOnly(id asn1.ObjectIdentifier, value []byte) bool {
+// allowedExtKeyUsage returns the usage of an extended key usage extension that
+// holds exactly client auth, or exactly client auth and server auth in either
+// order, in the order the extension states.
+func allowedExtKeyUsage(id asn1.ObjectIdentifier, value []byte) ([]x509.ExtKeyUsage, bool) {
 	if !id.Equal(oidExtKeyUsage) {
-		return false
+		return nil, false
 	}
-	var usages []asn1.ObjectIdentifier
-	rest, err := asn1.Unmarshal(value, &usages)
-	return err == nil && len(rest) == 0 && slices.EqualFunc(usages, []asn1.ObjectIdentifier{oidClientAuth}, asn1.ObjectIdentifier.Equal)
+	var oids []asn1.ObjectIdentifier
+	rest, err := asn1.Unmarshal(value, &oids)
+	if err != nil || len(rest) != 0 || len(oids) == 0 || len(oids) > 2 {
+		return nil, false
+	}
+	var usages []x509.ExtKeyUsage
+	for _, oid := range oids {
+		switch {
+		case oid.Equal(oidClientAuth):
+			usages = append(usages, x509.ExtKeyUsageClientAuth)
+		case oid.Equal(oidServerAuth):
+			usages = append(usages, x509.ExtKeyUsageServerAuth)
+		default:
+			return nil, false
+		}
+	}
+	if !slices.Contains(usages, x509.ExtKeyUsageClientAuth) || (len(usages) == 2 && usages[0] == usages[1]) {
+		return nil, false
+	}
+	return usages, true
 }
 
 // nodeSubject returns the CN and the Organization of a subject made of exactly

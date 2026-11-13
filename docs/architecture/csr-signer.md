@@ -27,7 +27,7 @@ The rules are checked in order and the first failure is recorded as `Denied`, wi
 |---|---|---|
 | 1 | `spec.request` parses as PKCS#10 and its signature verifies | `InvalidRequest` |
 | 2 | The subject is exactly two attributes: a CN, which is non-empty and does not start with `bootstrap:`, and one Organization, `gaon:nodes` | `InvalidSubject` |
-| 3 | The request carries no subject alternative name and no extension other than an extended key usage of client auth alone | `DisallowedExtension` |
+| 3 | The request carries no subject alternative name and no extension other than an extended key usage of exactly client auth, or of exactly client auth and server auth in either order | `DisallowedExtension` |
 | 4 | `spec.username` starts with `bootstrap:`, or equals the CN, which is a renewal | `UnauthorizedRequester` |
 
 - **The CN has no other format rule than rule 2's**, and its Node need not exist: an agent asks for its certificate before it registers its Node. A token can therefore obtain a certificate for any Node name ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) §Consequences).
@@ -35,8 +35,7 @@ The rules are checked in order and the first failure is recorded as `Denied`, wi
 
 ### What it signs
 
-- **The subject and public key of the request**, with a random 128-bit serial, key usage digital signature and extended key usage client auth only. The certificate is not a CA and carries no name but the subject.
-- **Decided, not yet done ([ADR 0043](./adr/0043-a-microvms-log-and-exec-are-subresources-authorized-apart-from-get-and-the-api-server-proxies-them-to-its-nodes-agent-over-mutual-tls.md)).** A Node Agent is to serve a MicroVM's log and exec, so its request will ask for the extended key usage client auth and server auth. Rule 3 will accept an extended key usage of exactly client auth alone or exactly client auth and server auth, and the certificate will carry exactly the usage the request states; any other request stays `DisallowedExtension`. This signer change lands before the agent's, because an agent that asks for both first is `Denied` and cannot renew. Until then rule 3 and the usage above are what the signer does.
+- **The subject and public key of the request**, with a random 128-bit serial, key usage digital signature and exactly the extended key usage the request states: client auth, or client auth and server auth in the order the request lists them. A request with no extended key usage gets client auth. The certificate is not a CA and carries no name but the subject.
 - **`NotBefore` is the signing time minus 5 minutes**, for clock skew between Nodes, as the Kubernetes signer does. **`NotAfter` is the signing time plus `--signing-duration`**, never later than the CA certificate's `NotAfter`.
 
 ### Configuration
@@ -48,7 +47,7 @@ The rules are checked in order and the first failure is recorded as `Denied`, wi
 ## Rationale
 
 - The approval rule is the one the contract states ([resource-api.md](./resource-api.md) §CertificateSigningRequest), split into four checks so each denial names the one that failed.
-- Rule 3 keeps a certificate to what a Node Agent asks for, client authentication under its CN, and nothing a request could add to it.
+- Rule 3 keeps a certificate to what a Node Agent asks for, client authentication under its CN and, to serve a MicroVM's log and exec, server authentication ([ADR 0043](./adr/0043-a-microvms-log-and-exec-are-subresources-authorized-apart-from-get-and-the-api-server-proxies-them-to-its-nodes-agent-over-mutual-tls.md) Decision 7), and nothing a request could add to it. The signer signs the usage the request states and adds none ([ADR 0022](./adr/0022-a-nodes-certificate-carries-the-organization-gaon-nodes-and-the-signer-signs-no-other-organization.md) §Rejected alternatives).
 - Rule 2 allows one Organization, `gaon:nodes`, because a certificate's Organization values are its groups ([ADR 0008](./adr/0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md)) and the signer copies the subject it is given; the one value marks a Node to a verifier outside gaon and no role grants it ([ADR 0022](./adr/0022-a-nodes-certificate-carries-the-organization-gaon-nodes-and-the-signer-signs-no-other-organization.md)). Refusing every other attribute, a second Organization included, means no attribute a later authorizer reads can be requested.
 - A request is decided once, because `status` is the signer's only output and a second decision could replace a certificate the Node Agent already holds.
 - `NotBefore` is set back so that a Node whose clock is behind the signer's does not refuse the certificate it has just been given.

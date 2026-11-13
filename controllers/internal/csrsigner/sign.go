@@ -8,10 +8,11 @@ import (
 	"math/big"
 )
 
-// sign issues the certificate for csr: its subject and public key, valid from
-// five minutes before now for the configured duration, and never past the end
-// of the CA certificate. It returns the certificate in PEM.
-func (s *service) sign(csr *x509.CertificateRequest) (string, error) {
+// sign issues the certificate for csr: its subject and public key, the given
+// extended key usage, valid from five minutes before now for the configured
+// duration, and never past the end of the CA certificate. It returns the
+// certificate in PEM.
+func (s *service) sign(csr *x509.CertificateRequest, usages []x509.ExtKeyUsage) (string, error) {
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
 		return "", fmt.Errorf("serial number: %w", err)
@@ -27,7 +28,7 @@ func (s *service) sign(csr *x509.CertificateRequest) (string, error) {
 		NotBefore:    now.Add(-clockSkew),
 		NotAfter:     notAfter,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		ExtKeyUsage:  usages,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, s.cfg.CA.cert, csr.PublicKey, s.cfg.CA.key)
 	if err != nil {

@@ -60,9 +60,10 @@ func (c testCA) load(t *testing.T) *csrsigner.CA {
 type csrOption func(*x509.CertificateRequest)
 
 var (
-	oidEKU        = asn1.ObjectIdentifier{2, 5, 29, 37}
-	oidClientAuth = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
-	oidServerAuth = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
+	oidEKU         = asn1.ObjectIdentifier{2, 5, 29, 37}
+	oidClientAuth  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 2}
+	oidServerAuth  = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}
+	oidCodeSigning = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 3}
 
 	oidCommonName         = asn1.ObjectIdentifier{2, 5, 4, 3}
 	oidOrganization       = asn1.ObjectIdentifier{2, 5, 4, 10}
