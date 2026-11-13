@@ -56,6 +56,9 @@ type NodeStatus struct {
 	State     NodeState    `json:"state,omitempty"`
 	Capacity  NodeCapacity `json:"capacity"`
 	Addresses []string     `json:"addresses,omitempty"`
+	// AgentPort is the port the Node Agent serves a MicroVM's log and exec
+	// on, at an address of Addresses (ADR 0043). Zero means it serves none.
+	AgentPort int `json:"agentPort,omitempty"`
 	// MicroVMPrefixes are the CIDR prefixes the Node's MicroVMs are addressed
 	// from, as mvmd reports them.
 	MicroVMPrefixes []string    `json:"microvmPrefixes,omitempty"`
@@ -68,8 +71,8 @@ func (n *Node) Validate() error {
 }
 
 // ValidateStatus checks that n's status names a known state, that each of its
-// MicroVM prefixes is a CIDR and that each of its conditions has a known
-// status.
+// MicroVM prefixes is a CIDR, that its agent port is a port and that each of
+// its conditions has a known status.
 func (n *Node) ValidateStatus() error {
 	switch n.Status.State {
 	case NodeStateDiscovered, NodeStateAdmitted:
@@ -80,6 +83,9 @@ func (n *Node) ValidateStatus() error {
 		if _, err := netip.ParsePrefix(p); err != nil {
 			return invalid("status.microvmPrefixes has %q, which is not a CIDR", p)
 		}
+	}
+	if n.Status.AgentPort < 0 || n.Status.AgentPort > 65535 {
+		return invalid("status.agentPort is %d, want 1 to 65535", n.Status.AgentPort)
 	}
 	for _, c := range n.Status.Conditions {
 		if err := c.validate(); err != nil {
