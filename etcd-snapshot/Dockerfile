@@ -2,7 +2,7 @@
 # Both base images are pinned by digest. Their mover is a manual bump by the
 # owner of this file: the golang tag follows the toolchain directive in go.work,
 # and the distroless digest is re-read when its tag is rebuilt.
-FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS build
+FROM golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452 AS build
 WORKDIR /src
 # go.work names every module of the repository; this build sees only this one.
 ENV GOWORK=off GOFLAGS=-mod=readonly
