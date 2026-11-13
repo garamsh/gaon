@@ -59,7 +59,7 @@ func execute(t *testing.T, f *fakeServer, args ...string) (stdout, stderr string
 func executeAt(t *testing.T, server string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	code = command.Run(context.Background(), server, nil, args, &out, &errOut)
+	code = command.Run(context.Background(), server, nil, args, nil, &out, &errOut)
 	return out.String(), errOut.String(), code
 }
 

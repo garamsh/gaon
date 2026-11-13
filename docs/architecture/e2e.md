@@ -28,6 +28,12 @@ Basis: [node-lifecycle.md](./node-lifecycle.md), [resource-api.md](./resource-ap
 - **Webhook.** A ValidatingWebhookConfiguration served by the test refuses an object carrying a marked field with Forbidden and the webhook's message, and the object is not stored. The control is the same write without the field, which is accepted.
 - **Extender.** The extender refuses the Node LeastAllocated would choose for MicroVMs whose name starts with `filtered-`, so the MicroVM is bound to the other Node. The control is a MicroVM the extender does not filter, which goes to LeastAllocated's choice. Before each, the test asserts the Nodes' capacities differ (4 CPU and 8Gi against 8 CPU and 16Gi) and that the larger Node is the freer one. The filtered MicroVM goes first, so the choice of the larger Node is a score and not the name-order tie it would be after one MicroVM on each.
 - **Workloads.** `gaon-workloads`, with its own certificate, is refused until `workloads/deploy/rbac.yaml` is applied with the `gaon` CLI; the control is that it then registers a definition it labels and is still refused one it does not. It registers the Job kind, which becomes Established; a Job of two completions runs two MicroVMs and completes, each owned by the Job's uid; a Job with `backoffLimit: 1` whose MicroVMs fail ends Failed with two failures and no third MicroVM; deleting the first Job has the garbage collector remove its MicroVMs and keep the other Job's. The test's mvmd moves a machine whose id starts with `exits-` to STOPPED with exit code 0 and one whose id starts with `fails-` with code 1, on `StartMachine`, and answers `ReadExecOutput` with that record.
+- **Helm.** The chart `tooling/e2e/testdata/helm/web/` (a ClusterRole and a workloads Deployment) is rendered by `helm template rel` and piped to the built `gaon apply -f -` as the administrator, after the Deployment kind is Established. Three runs:
+  - the first prints `clusterrole/rel-web-reader created` and `deployment/rel-web created`, and the stored Deployment's spec equals the chart's;
+  - the second, of the same render, prints `unchanged` for both, and neither object's `resourceVersion` moves;
+  - the third, with `--set replicas=3`, prints `unchanged` for the role and `configured` for the Deployment, whose stored spec holds `replicas` 3 and whose role is not written.
+
+  The subtest skips with a message when `helm` is not on `PATH`, so it is a skip, not a pass, where helm is absent (CI has none).
 
 ### The failover bound
 
@@ -54,7 +60,7 @@ Basis: [node-lifecycle.md](./node-lifecycle.md), [resource-api.md](./resource-ap
 
 ### What the host needs
 
-- **For `make e2e-extensions`:** Go, `make`, loopback networking and about 1 GiB of memory. The module `tooling/e2e` requires etcd's server library and mvmd's runtime API, so the first run needs them in the module cache.
+- **For `make e2e-extensions`:** Go, `make`, loopback networking and about 1 GiB of memory. `helm` on `PATH` for the Helm subtest; without it the subtest skips with a message naming `helm`, and the rest run. The module `tooling/e2e` requires etcd's server library and mvmd's runtime API, so the first run needs them in the module cache.
 - **For `make e2e`:**
   - `/dev/kvm`, with nested virtualization when the host is itself a VM, and `qemu-system-x86_64`, `qemu-img`, the OVMF files and `e2fsprogs`, as `naru-cluster` requires ([harness.md](https://github.com/garamsh/naru/blob/5b42b429c6b41447f2ea267fe606c2b5d44ea63e/docs/architecture/harness.md) §What the command needs).
   - About 3 GiB of memory per Node, so 6 GiB for the two Nodes.

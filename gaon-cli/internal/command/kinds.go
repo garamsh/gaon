@@ -34,8 +34,16 @@ type change struct {
 	name string
 	// version is the resourceVersion the file carries; empty when it carries none.
 	version api.ResourceVersion
-	current func(ctx context.Context, cl *cluster) (api.ResourceVersion, error)
+	current func(ctx context.Context, cl *cluster) (stored, error)
 	send    func(ctx context.Context, cl *cluster, version api.ResourceVersion) error
+}
+
+// stored is the object a change would replace: its version, and whether it
+// already holds what the file says, so that sending the file would change
+// nothing.
+type stored struct {
+	version api.ResourceVersion
+	same    bool
 }
 
 // kind is one resource kind and the verbs the API has a path for. A verb
@@ -367,12 +375,12 @@ func (s spec[T, L]) kind() kind {
 			return change{
 				name:    meta.Name,
 				version: meta.ResourceVersion,
-				current: func(ctx context.Context, cl *cluster) (api.ResourceVersion, error) {
+				current: func(ctx context.Context, cl *cluster) (stored, error) {
 					cur, err := s.fetch(ctx, cl, meta.Name)
 					if err != nil {
-						return "", err
+						return stored{}, err
 					}
-					return s.meta(cur).ResourceVersion, nil
+					return stored{s.meta(cur).ResourceVersion, holds(cur, obj)}, nil
 				},
 				send: func(ctx context.Context, cl *cluster, version api.ResourceVersion) error {
 					c, err := cl.client(s.group)
