@@ -33,6 +33,9 @@ type Config struct {
 	// IdleTimeout and KeepAlive take their defaults when zero.
 	IdleTimeout time.Duration
 	KeepAlive   time.Duration
+	// HelloTimeout is how long a TLS passthrough connection may take to send
+	// its ClientHello; it takes handshakeTimeout when zero.
+	HelloTimeout time.Duration
 	// Listen opens the port of a listener; the default listens on every address.
 	Listen func(port int32) (net.Listener, error)
 }
@@ -68,6 +71,9 @@ func New(cfg Config, log *slog.Logger) *Proxy {
 	}
 	if cfg.KeepAlive <= 0 {
 		cfg.KeepAlive = DefaultKeepAlive
+	}
+	if cfg.HelloTimeout <= 0 {
+		cfg.HelloTimeout = handshakeTimeout
 	}
 	if cfg.Listen == nil {
 		cfg.Listen = func(port int32) (net.Listener, error) {

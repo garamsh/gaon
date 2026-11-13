@@ -16,7 +16,10 @@ const (
 )
 
 // certificates holds the certificate each HTTPS listener presents, by the name
-// of its Secret. A pair that does not load leaves the last good one in place.
+// of its Secret. A Secret that is gone, or no longer labelled, leaves no
+// certificate: removing it revokes the certificate. A pair that does not load
+// leaves the last good one in place, so a renewal that writes bad content does
+// not take the listener down.
 type certificates struct {
 	log     *slog.Logger
 	mu      sync.Mutex
@@ -47,7 +50,8 @@ func (c *certificates) get(secret string) *tls.Certificate {
 }
 
 // sync loads the certificate of each wanted Secret from secrets, and forgets
-// the Secrets no longer wanted. It logs a problem once. A log line names the
+// the Secrets no longer wanted. It logs a problem once, until the problem
+// changes. A log line names the
 // Secret and the standard library's error, and never a value.
 func (c *certificates) sync(wanted []string, secrets []api.Secret) {
 	byName := make(map[string]api.Secret, len(secrets))
@@ -66,6 +70,7 @@ func (c *certificates) sync(wanted []string, secrets []api.Secret) {
 		}
 		s, ok := byName[name]
 		if !ok {
+			e.cert, e.read = nil, false
 			c.report(name, e, "the Secret is not among the Secrets labelled for certificates")
 			continue
 		}

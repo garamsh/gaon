@@ -112,6 +112,26 @@ func TestHTTPS_InvalidPairKeepsTheLastGoodOne(t *testing.T) {
 	assert.True(t, other.cert.Equal(c.ConnectionState().PeerCertificates[0]), "control: a valid pair is loaded")
 }
 
+func TestHTTPS_SecretThatIsGoneRevokesTheCertificate(t *testing.T) {
+	good := newKeyPair(t, "app.example.com")
+	h := newHarness(t, proxy.Config{})
+	h.Apply(httpsObjects(t, good.secret("app-cert")))
+	addr := h.addr(t, 443)
+	c, err := servedBy(t, addr, "app.example.com")
+	require.NoError(t, err, "setup: the certificate is served")
+	c.Close()
+
+	h.Apply(httpsObjects(t))
+	_, err = servedBy(t, addr, "app.example.com")
+	assert.Error(t, err, "a Secret that is deleted or no longer labelled is not served")
+	assert.Contains(t, h.logs.String(), "no certificate is served for it")
+
+	h.Apply(httpsObjects(t, good.secret("app-cert")))
+	c, err = servedBy(t, addr, "app.example.com")
+	require.NoError(t, err, "control: the Secret back in the list is served again")
+	c.Close()
+}
+
 func TestHTTPS_NoCertificateFailsTheHandshake(t *testing.T) {
 	good := newKeyPair(t, "app.example.com")
 	for _, c := range []struct {
@@ -170,4 +190,30 @@ func TestHTTPS_LogsCarryNoKeyMaterial(t *testing.T) {
 	}
 	assert.NotContains(t, logs, "PRIVATE KEY")
 	assert.NotContains(t, logs, "junk")
+}
+
+func TestHTTPS_TLSVersionBelow1Point2IsRefused(t *testing.T) {
+	pair := newKeyPair(t, "app.example.com")
+	h := newHarness(t, proxy.Config{})
+	h.Apply(httpsObjects(t, pair.secret("app-cert")))
+	addr := h.addr(t, 443)
+	for _, c := range []struct {
+		name string
+		min  uint16
+		max  uint16
+		ok   bool
+	}{
+		{"TLS 1.1 is refused", tls.VersionTLS10, tls.VersionTLS11, false},
+		{"control: TLS 1.2 is served", tls.VersionTLS12, tls.VersionTLS12, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			conn, _, err := dialTLS(t, addr, &tls.Config{ServerName: "app.example.com", RootCAs: pair.pool(), MinVersion: c.min, MaxVersion: c.max})
+			defer conn.Close()
+			if c.ok {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
 }

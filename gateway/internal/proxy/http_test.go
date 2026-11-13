@@ -174,6 +174,16 @@ func TestHTTP_ForwardedHeaders(t *testing.T) {
 		assert.Contains(t, body, "xff=127.0.0.1 ")
 		assert.Contains(t, body, "proto=http ")
 	})
+	t.Run("a client cannot strip them by naming them in Connection", func(t *testing.T) {
+		_, body := get(t, addr, "", "/", "Connection", "X-Forwarded-Proto, X-Forwarded-For", "X-Forwarded-For", "10.0.0.9")
+		assert.Contains(t, body, "proto=http ")
+		assert.Contains(t, body, "xff=10.0.0.9, 127.0.0.1 ", "the peer is appended to what the client sent")
+	})
+	t.Run("control: Connection naming another header leaves them as they are", func(t *testing.T) {
+		_, body := get(t, addr, "", "/", "Connection", "X-Other", "X-Forwarded-For", "10.0.0.9")
+		assert.Contains(t, body, "proto=http ")
+		assert.Contains(t, body, "xff=10.0.0.9, 127.0.0.1 ")
+	})
 }
 
 func TestHTTP_NoRouteIs404AndNoReadyAddressIs503(t *testing.T) {
@@ -380,4 +390,84 @@ func TestHTTP_ListenerWithHostnameServesItsHostnameOnly(t *testing.T) {
 	assert.Equal(t, http.StatusOK, status)
 	status, _ = get(t, addr, "example.org", "/")
 	assert.Equal(t, http.StatusNotFound, status)
+}
+
+func TestHTTP_LongerWildcardBeatsShorter(t *testing.T) {
+	h := newHarness(t, proxy.Config{})
+	h.Apply(objects(t, gatewayOf(t, httpListener("wide", 80, "*.example.com"), httpListener("narrow", 80, "*.a.example.com")),
+		[]api.CustomObject{
+			routeOn(t, "z-wide", "wide", rule(t, ruleTo{prefixes: []string{"/"}, backend: "w"})),
+			routeOn(t, "a-narrow", "narrow", rule(t, ruleTo{prefixes: []string{"/"}, backend: "n"})),
+		}, map[string][]string{"w": {serving(t, "wide")}, "n": {serving(t, "narrow")}}))
+	addr := h.addr(t, 80)
+	for _, c := range []struct{ host, body string }{
+		{"x.a.example.com", "narrow"},
+		{"x.example.com", "wide"},
+	} {
+		t.Run(c.host, func(t *testing.T) {
+			status, body := get(t, addr, c.host, "/")
+			assert.Equal(t, http.StatusOK, status)
+			assert.Equal(t, c.body, body)
+		})
+	}
+}
+
+func TestHTTP_TieGoesToTheRouteWhoseNameSortsFirst(t *testing.T) {
+	// The route that sorts last is listed first, so the order of the list does not decide.
+	for _, c := range []struct{ name, aBackend, bBackend, want string }{
+		{"a-route goes to one", "one", "two", "one"},
+		{"control: a-route goes to two", "two", "one", "two"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, proxy.Config{})
+			h.Apply(objects(t, gatewayOf(t, httpListener("web", 80, "")),
+				[]api.CustomObject{
+					httpRoute(t, "b-route", nil, true, rule(t, ruleTo{prefixes: []string{"/"}, backend: c.bBackend})),
+					httpRoute(t, "a-route", nil, true, rule(t, ruleTo{prefixes: []string{"/"}, backend: c.aBackend})),
+				}, map[string][]string{"one": {serving(t, "one")}, "two": {serving(t, "two")}}))
+			_, body := get(t, h.addr(t, 80), "", "/")
+			assert.Equal(t, c.want, body)
+		})
+	}
+}
+
+func TestHTTP_OnlyTheAcceptedConditionServes(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		cond   api.Condition
+		status int
+	}{
+		{"ResolvedRefs True is not Accepted", api.Condition{Type: gateway.CondResolvedRefs, Status: api.ConditionTrue}, http.StatusNotFound},
+		{"control: Accepted True serves", api.Condition{Type: gateway.CondAccepted, Status: api.ConditionTrue}, http.StatusOK},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, proxy.Config{})
+			route := customObject(t, gateway.KindHTTPRoute, "app",
+				gateway.RouteSpec{ParentRefs: []gateway.ParentRef{{Name: gwName}}, Rules: []gateway.Rule{rule(t, ruleTo{prefixes: []string{"/"}, backend: "a"})}},
+				gateway.RouteStatus{Parents: []gateway.ParentStatus{{ParentRef: gateway.ParentRef{Name: gwName}, Conditions: []api.Condition{c.cond}}}})
+			addr := serveHTTP(t, h, []api.CustomObject{route}, map[string][]string{"a": {serving(t, "a")}})
+			status, _ := get(t, addr, "", "/")
+			assert.Equal(t, c.status, status)
+		})
+	}
+}
+
+func TestHTTP_BackendIsTheEndpointsPortNamedLikeTheServicePort(t *testing.T) {
+	h := newHarness(t, proxy.Config{})
+	o := objects(t, gatewayOf(t, httpListener("web", 80, "")),
+		[]api.CustomObject{httpRoute(t, "app", nil, true, rule(t, ruleTo{prefixes: []string{"/"}, backend: "a"}))},
+		map[string][]string{"a": {serving(t, "web")}})
+	host, port, err := net.SplitHostPort(serving(t, "metrics"))
+	require.NoError(t, err)
+	n, err := strconv.Atoi(port)
+	require.NoError(t, err)
+	o.Endpoints[0].Subsets = append(o.Endpoints[0].Subsets, api.EndpointSubset{
+		Addresses: []api.EndpointAddress{{IP: host}},
+		Ports:     []api.EndpointPort{{Name: "metrics", Port: int32(n), Protocol: api.ProtocolTCP}},
+	})
+	h.Apply(o)
+	for range 6 {
+		_, body := get(t, h.addr(t, 80), "", "/")
+		require.Equal(t, "web", body, "only the Endpoints port named like the Service port is used")
+	}
 }

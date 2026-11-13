@@ -173,6 +173,19 @@ func httpRoute(t *testing.T, name string, hostnames []string, accepted bool, rul
 	return customObject(t, gateway.KindHTTPRoute, name, spec, acceptedStatus(accepted))
 }
 
+// routeOn is an HTTPRoute whose parent reference names the listener, recorded
+// as Accepted.
+func routeOn(t *testing.T, name, section string, rules ...gateway.Rule) api.CustomObject {
+	t.Helper()
+	ref := gateway.ParentRef{Name: gwName, SectionName: section}
+	return customObject(t, gateway.KindHTTPRoute, name,
+		gateway.RouteSpec{ParentRefs: []gateway.ParentRef{ref}, Rules: rules},
+		gateway.RouteStatus{Parents: []gateway.ParentStatus{{
+			ParentRef:  ref,
+			Conditions: []api.Condition{{Type: gateway.CondAccepted, Status: api.ConditionTrue}},
+		}}})
+}
+
 func tlsRoute(t *testing.T, name string, hostnames []string, backend string) api.CustomObject {
 	t.Helper()
 	spec := gateway.RouteSpec{

@@ -127,3 +127,34 @@ func TestPassthrough_NoReadyAddressClosesTheConnection(t *testing.T) {
 	require.NoError(t, err, "control: with an address the same name is served")
 	c.Close()
 }
+
+func TestPassthrough_ConnectionThatSendsNoHelloIsClosed(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		cfg    proxy.Config
+		closed bool
+	}{
+		{"a short hello timeout closes it", proxy.Config{HelloTimeout: 150 * time.Millisecond}, true},
+		{"control: the default hello timeout leaves it open", proxy.Config{}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t, c.cfg)
+			h.Apply(passthroughObjects(t, nil, "db.example.com"))
+			conn, err := net.Dial("tcp", h.addr(t, 8443))
+			require.NoError(t, err)
+			defer conn.Close()
+			assert.Equal(t, c.closed, closedWithin(t, conn, time.Second))
+		})
+	}
+}
+
+func TestPassthrough_CloseClosesTheOpenConnections(t *testing.T) {
+	h := newHarness(t, proxy.Config{})
+	h.Apply(passthroughObjects(t, nil, "db.example.com"))
+	conn, err := net.Dial("tcp", h.addr(t, 8443))
+	require.NoError(t, err)
+	defer conn.Close()
+	require.False(t, closedWithin(t, conn, 200*time.Millisecond), "control: the connection is open before Close")
+	h.Close()
+	assert.True(t, closedWithin(t, conn, 2*time.Second), "Close closes the connection that is open")
+}

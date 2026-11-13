@@ -32,6 +32,7 @@ type fakeAPI struct {
 	down      bool
 	lists     map[string]any
 	selectors map[string]map[string]bool
+	refused   map[string]int
 	events    map[string]chan api.WatchEvent
 }
 
@@ -39,7 +40,7 @@ var kinds = []string{"gateways", "httproutes", "tlsroutes", "services", "endpoin
 
 func newFakeAPI(t *testing.T, token string) *fakeAPI {
 	t.Helper()
-	f := &fakeAPI{token: token, lists: map[string]any{}, selectors: map[string]map[string]bool{}, events: map[string]chan api.WatchEvent{}}
+	f := &fakeAPI{token: token, lists: map[string]any{}, selectors: map[string]map[string]bool{}, refused: map[string]int{}, events: map[string]chan api.WatchEvent{}}
 	for _, k := range kinds {
 		f.selectors[k] = map[string]bool{}
 		f.events[k] = make(chan api.WatchEvent, 16)
@@ -54,6 +55,9 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 	down, token := f.down, f.token
 	f.mu.Unlock()
 	if down {
+		f.mu.Lock()
+		f.refused[path.Base(r.URL.Path)]++
+		f.mu.Unlock()
 		http.Error(w, "down", http.StatusServiceUnavailable)
 		return
 	}
@@ -148,6 +152,19 @@ func (f *fakeAPI) setDown(down bool) {
 	if down {
 		f.CloseClientConnections()
 	}
+}
+
+// refusedEveryKind reports whether the fake has refused every kind at least n
+// times, so the proxy has met the outage and retried.
+func (f *fakeAPI) refusedEveryKind(n int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, k := range kinds {
+		if f.refused[k] < n {
+			return false
+		}
+	}
+	return true
 }
 
 func (f *fakeAPI) selectorsOf(kind string) map[string]bool {
@@ -296,7 +313,8 @@ func TestSource_LastStateIsServedWhileTheAPIIsDown(t *testing.T) {
 	servedWithin(t, h, http.StatusOK, "old")
 
 	f.setDown(true)
-	time.Sleep(200 * time.Millisecond)
+	require.Eventually(t, func() bool { return f.refusedEveryKind(2) }, 5*time.Second, 5*time.Millisecond,
+		"the proxy found the API down and tried again")
 	servedWithin(t, h, http.StatusOK, "old")
 
 	f.setObjects(sourceObjects(t, true, serving(t, "new")))

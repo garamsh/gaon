@@ -73,8 +73,12 @@ func (h httpHandler) route(w http.ResponseWriter, r *http.Request) {
 		proto = "https"
 	}
 	rp := &httputil.ReverseProxy{
-		Director: func(out *http.Request) {
+		// Rewrite runs after the hop-by-hop headers are removed, so a client
+		// cannot strip a header the proxy sets by naming it in Connection.
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			out := pr.Out
 			out.URL.Scheme, out.URL.Host = "http", addr
+			forwardedFor(pr)
 			out.Header.Set("X-Forwarded-Proto", proto)
 			if m.rule.hasRewrite {
 				out.URL.Path = replacePrefix(out.URL.Path, m.prefix, m.rule.rewrite)
@@ -90,6 +94,19 @@ func (h httpHandler) route(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	rp.ServeHTTP(w, r)
+}
+
+// forwardedFor appends the address of the peer to the X-Forwarded-For the
+// request carries, or sets it where there is none.
+func forwardedFor(pr *httputil.ProxyRequest) {
+	peer, _, err := net.SplitHostPort(pr.In.RemoteAddr)
+	if err != nil {
+		peer = pr.In.RemoteAddr
+	}
+	if prior := pr.In.Header["X-Forwarded-For"]; len(prior) > 0 {
+		peer = strings.Join(prior, ", ") + ", " + peer
+	}
+	pr.Out.Header.Set("X-Forwarded-For", peer)
 }
 
 // newHTTPServer returns the server of an HTTP or HTTPS port.

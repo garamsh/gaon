@@ -42,12 +42,28 @@ func serverName(c net.Conn) (string, []byte) {
 	return strings.ToLower(name), rec.read
 }
 
+// acceptPassthrough accepts the connections of a TLS port. A temporary error
+// of Accept is retried after a delay that doubles to a second, as net/http
+// does; any other error ends the port, which the next Apply opens again.
 func (p *Proxy) acceptPassthrough(s *portServer, ln net.Listener, port int32) {
+	var delay time.Duration
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			var temp interface{ Temporary() bool }
+			if errors.As(err, &temp) && temp.Temporary() {
+				delay = min(max(2*delay, 5*time.Millisecond), time.Second)
+				p.log.Warn("accept failed, retrying", "port", port, "error", err, "delay", delay)
+				time.Sleep(delay)
+				continue
+			}
+			p.stopped(port, s, err)
 			return
 		}
+		delay = 0
 		if !s.track(c) {
 			_ = c.Close()
 			continue
@@ -64,7 +80,7 @@ func (p *Proxy) acceptPassthrough(s *portServer, ln net.Listener, port int32) {
 // without a reply.
 func (p *Proxy) passthrough(c net.Conn, port int32) {
 	defer c.Close()
-	_ = c.SetReadDeadline(time.Now().Add(handshakeTimeout))
+	_ = c.SetReadDeadline(time.Now().Add(p.cfg.HelloTimeout))
 	name, hello := serverName(c)
 	_ = c.SetReadDeadline(time.Time{})
 	if name == "" {

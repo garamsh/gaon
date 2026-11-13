@@ -57,7 +57,7 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
   - The proxy serves a route on a listener only where `status.parents` records it `Accepted`.
 - **What the proxy reads**, through the API with its ServiceAccount token: its Gateway, the routes, the Services and Endpoints, and the Secrets labelled `gateway.gaon.garam.sh/certificate=true`. It lists and watches each kind, reads the token file again at each list and watch, and on losing the API server keeps serving what it last held and retries every 2 seconds.
 - **Flags of the proxy.** `-gateway`, `-server` and `-tls-ca`, all required, and `-token-file`, which defaults to `/var/run/secrets/gaon.garam.sh/serviceaccount/token`. The controller's Deployment passes the first three.
-- **Ports.** The proxy opens a port for each distinct port of its Gateway's served listeners and closes one the Gateway no longer has or whose protocol changed. A port that cannot be bound is logged and tried again at the next change.
+- **Ports.** The proxy opens a port for each distinct port of its Gateway's served listeners and closes one the Gateway no longer has or whose protocol changed. A port that cannot be bound, or whose listener fails with an error that is not temporary, is logged and opened again at the next change; a temporary error of accepting a passthrough connection is retried after a delay of up to a second.
 
 ### LAN address
 
@@ -79,7 +79,7 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
 
 - **Matching** is the Gateway API's (D16, D18). A request matches a route of its listener when the `Host` header, without a port, matches one of the route's hostnames (or the listener's, where the route has none) and the path matches a rule's prefix.
   - A prefix matches on path elements: `/abc` matches `/abc`, `/abc/` and `/abc/d`, and not `/abcd`. `/` matches every path.
-  - An exact hostname beats a wildcard, a longer wildcard beats a shorter, and among the routes that tie the rule with the longest matching prefix wins. A tie after that goes to the route whose name sorts first.
+  - An exact hostname beats a wildcard, a longer wildcard beats a shorter, and among the routes that tie the rule with the longest matching prefix wins. A tie after that goes to the route whose name sorts first. A request that the best-ranked route has no path match for is tried against the next-ranked route.
 - **Host and path are forwarded unmodified** (D16, D18): the backend receives the `Host` header and the request path as the client sent them, so a client that signs `Host` still verifies.
 - **A rule may replace its matched prefix** (D18): `urlRewrite.path.replacePrefixMatch` replaces the prefix the rule matched, as Gateway API `ReplacePrefixMatch` does, so one host can send `/api/` to a backend with the prefix removed and the rest unmodified to others. `Host` is never rewritten. A rule without the filter forwards the path unmodified.
 - **A backend** is a Service and one of its ports (`backendRefs[0]`). The proxy connects to an address of the Service's `Endpoints`, which lists only ready MicroVMs ([resource-api.md](./resource-api.md) §Service, Endpoints and NetworkPolicy), on the port of the Endpoints subset whose name is the Service port's. It does not connect to the Service's own address.
@@ -88,7 +88,7 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
 
 - **`X-Forwarded-For`** (D16): the proxy appends the address of the peer that connected to it to a value the request carries, or sets it where there is none.
 - **`X-Forwarded-Proto`** (D16): the proxy sets it to `http` on a plain listener and `https` on a terminating one, replacing any value the request carries.
-- **No other header is added or removed**, and none is set on a passthrough connection, which the proxy does not read.
+- **No other header is added**, and none is set on a passthrough connection, which the proxy does not read. The proxy removes the hop-by-hop headers of the request and of the response (`Connection` and the headers it names, `Keep-Alive`, `Te`, `Trailer`, `Transfer-Encoding`, `Proxy-Connection`, `Proxy-Authenticate`, `Proxy-Authorization` and `Upgrade`), as an HTTP/1.1 proxy does, except that an `Upgrade` request the proxy forwards keeps its `Upgrade`, and sets the two headers above after that removal, so a client cannot strip them by naming them in `Connection`.
 
 ### TLS passthrough
 
@@ -100,8 +100,8 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
 
 - **A listener's certificate is a `Secret`** (D14), the one `certificateRefs[0].name` names, with the keys `tls.crt` (the certificate chain, PEM) and `tls.key` (its private key, PEM).
 - **The proxy reloads it when the Secret changes** (D14): it watches the Secret, and a handshake that starts after the change uses the new pair. A connection already established keeps the pair it began with, and the proxy restarts nothing.
-- **A certificate reference that is not well formed** (an `HTTPS` listener without `certificateRefs`, or a `TLS` listener with them) makes the listener's `ResolvedRefs` False with reason `InvalidCertificateRef`. The controller reads no Secret, so it does not judge whether the Secret exists or its pair parses: the proxy does, and reports in its log only, once for each content, with the Secret's name and the parse error and never a value ([ADR 0039](./adr/0039-the-gateway-proxy-reads-only-the-secrets-labelled-as-certificates-and-reports-a-certificate-it-cannot-load-in-its-log.md)). The proxy keeps serving a pair it had loaded until a valid one replaces it, and a listener that never had one fails its handshakes.
-- **The Secret carries the label `gateway.gaon.garam.sh/certificate: "true"`.** The proxy's rule is limited to Secrets with that label, because a rule cannot name an object; a Secret without it is read as absent.
+- **A certificate reference that is not well formed** (an `HTTPS` listener without `certificateRefs`, or a `TLS` listener with them) makes the listener's `ResolvedRefs` False with reason `InvalidCertificateRef`. The controller reads no Secret, so it does not judge whether the Secret exists or its pair parses: the proxy does, and reports in its log only, once for each distinct problem, with the Secret's name and the parse error and never a value ([ADR 0039](./adr/0039-the-gateway-proxy-reads-only-the-secrets-labelled-as-certificates-and-reports-a-certificate-it-cannot-load-in-its-log.md)). The proxy keeps serving a pair it had loaded, when the Secret is present and no longer parses, until a valid one replaces it; a listener that never had one fails its handshakes.
+- **The Secret carries the label `gateway.gaon.garam.sh/certificate: "true"`.** The proxy's rule is limited to Secrets with that label, because a rule cannot name an object; a Secret without it is read as absent, and a Secret that is deleted or loses the label stops being served at once, which is how an operator revokes a certificate.
 - **Renewal is not the gateway's** (D14): a workload the operator declares writes the Secret, and the gateway only reads it.
 
 ### ACME

@@ -98,7 +98,7 @@ func (p *Proxy) open(port int32, protocol string) (*portServer, error) {
 	switch protocol {
 	case gateway.ProtocolHTTP:
 		s.srv = p.newHTTPServer(port, false)
-		go p.serve(s.srv, ln)
+		go p.serve(port, s, ln)
 	case gateway.ProtocolHTTPS:
 		s.srv = p.newHTTPServer(port, true)
 		cfg := &tls.Config{
@@ -106,7 +106,7 @@ func (p *Proxy) open(port int32, protocol string) (*portServer, error) {
 			NextProtos:     []string{"http/1.1"},
 			GetCertificate: func(h *tls.ClientHelloInfo) (*tls.Certificate, error) { return p.certificateFor(port, h) },
 		}
-		go p.serve(s.srv, tls.NewListener(ln, cfg))
+		go p.serve(port, s, tls.NewListener(ln, cfg))
 	case gateway.ProtocolTLS:
 		go p.acceptPassthrough(s, ln, port)
 	default:
@@ -116,10 +116,22 @@ func (p *Proxy) open(port int32, protocol string) (*portServer, error) {
 	return s, nil
 }
 
-func (p *Proxy) serve(srv *http.Server, ln net.Listener) {
-	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		p.log.Warn("server stopped", "error", err)
+func (p *Proxy) serve(port int32, s *portServer, ln net.Listener) {
+	if err := s.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		p.stopped(port, s, err)
 	}
+}
+
+// stopped logs a port whose listener failed and closes it, so the next Apply
+// opens the port again. A port already replaced or closed is left alone.
+func (p *Proxy) stopped(port int32, s *portServer, err error) {
+	p.log.Warn("port stopped serving", "port", port, "error", err)
+	p.mu.Lock()
+	if p.servers[port] == s {
+		delete(p.servers, port)
+	}
+	p.mu.Unlock()
+	s.close()
 }
 
 // certificateFor returns the certificate of the listener the server name

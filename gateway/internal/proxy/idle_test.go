@@ -53,7 +53,7 @@ func TestIdle_StreamKeepsGoingWhileBytesMoveAndEndsWhenTheyStop(t *testing.T) {
 		if r.URL.Path == "/stall" {
 			pause = 2 * time.Second
 		}
-		for range 6 {
+		for range 10 {
 			_, _ = w.Write([]byte("x"))
 			w.(http.Flusher).Flush()
 			select {
@@ -64,7 +64,7 @@ func TestIdle_StreamKeepsGoingWhileBytesMoveAndEndsWhenTheyStop(t *testing.T) {
 		}
 	}))
 	t.Cleanup(backend.Close)
-	h := newHarness(t, proxy.Config{IdleTimeout: 400 * time.Millisecond})
+	h := newHarness(t, proxy.Config{IdleTimeout: 300 * time.Millisecond})
 	addr := serveHTTP(t, h,
 		[]api.CustomObject{httpRoute(t, "app", nil, true, rule(t, ruleTo{prefixes: []string{"/"}, backend: "s"}))},
 		map[string][]string{"s": {hostPort(t, backend)}})
@@ -79,12 +79,12 @@ func TestIdle_StreamKeepsGoingWhileBytesMoveAndEndsWhenTheyStop(t *testing.T) {
 		return len(body), err
 	}
 	n, err := read("/steady")
-	require.NoError(t, err, "control: a stream whose bytes keep moving outlives the idle timeout")
-	assert.Equal(t, 6, n)
+	require.NoError(t, err, "control: a stream of 500ms, written to every 50ms, outlives the idle timeout of 300ms")
+	assert.Equal(t, 10, n)
 
 	n, err = read("/stall")
 	assert.Error(t, err, "a stream that stops is closed")
-	assert.Less(t, n, 6)
+	assert.Less(t, n, 10)
 }
 
 func TestIdle_KeepAliveConnectionIsClosedAfterTheKeepAlive(t *testing.T) {

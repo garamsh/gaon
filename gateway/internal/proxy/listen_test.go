@@ -1,10 +1,13 @@
 package proxy_test
 
 import (
+	"crypto/tls"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/garamsh/gaon/gateway/internal/gateway"
 	"github.com/garamsh/gaon/gateway/internal/proxy"
 	"github.com/garamsh/gaon/lib/api"
 )
@@ -80,4 +84,89 @@ func TestListen_CloseStopsListening(t *testing.T) {
 	assert.False(t, accepts(addr))
 	_, err := http.Get("http://" + addr)
 	assert.Error(t, err)
+}
+
+// temporaryError is an Accept error that net/http and the proxy retry.
+type temporaryError struct{}
+
+func (temporaryError) Error() string   { return "too many open files" }
+func (temporaryError) Timeout() bool   { return false }
+func (temporaryError) Temporary() bool { return true }
+
+// flakyListener returns the queued errors from Accept, one at each call, and
+// then accepts as the listener it wraps does.
+type flakyListener struct {
+	net.Listener
+	mu   sync.Mutex
+	errs []error
+}
+
+func (l *flakyListener) Accept() (net.Conn, error) {
+	l.mu.Lock()
+	if len(l.errs) > 0 {
+		err := l.errs[0]
+		l.errs = l.errs[1:]
+		l.mu.Unlock()
+		return nil, err
+	}
+	l.mu.Unlock()
+	return l.Listener.Accept()
+}
+
+func TestListen_PassthroughKeepsAcceptingAfterTemporaryErrors(t *testing.T) {
+	pair := newKeyPair(t, "db.example.com")
+	var addr string
+	p := proxy.New(proxy.Config{Gateway: gwName, Listen: func(int32) (net.Listener, error) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err == nil {
+			addr = ln.Addr().String()
+		}
+		return &flakyListener{Listener: ln, errs: []error{temporaryError{}, temporaryError{}, temporaryError{}}}, err
+	}}, slog.New(slog.DiscardHandler))
+	t.Cleanup(p.Close)
+	p.Apply(passthroughObjects(t, map[string][]string{"db": {echoTLS(t, pair)}}, "db.example.com"))
+
+	c, _, err := dialTLS(t, addr, &tls.Config{ServerName: "db.example.com", RootCAs: pair.pool()})
+	require.NoError(t, err, "the port serves after the temporary errors")
+	defer c.Close()
+	_, err = io.WriteString(c, "x")
+	require.NoError(t, err)
+}
+
+func TestListen_APortWhoseListenerFailsIsOpenedAgainByTheNextApply(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		listener gateway.Listener
+	}{
+		{"an HTTP port", httpListener("web", 80, "")},
+		{"a passthrough port", tlsListener("db", 8443, "")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			logs := &logBuffer{}
+			var attempts atomic.Int32
+			p := proxy.New(proxy.Config{Gateway: gwName, Listen: func(int32) (net.Listener, error) {
+				ln, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					return nil, err
+				}
+				if attempts.Add(1) == 1 {
+					return &flakyListener{Listener: ln, errs: []error{errors.New("listener broke")}}, nil
+				}
+				return ln, nil
+			}}, slog.New(slog.NewTextHandler(logs, nil)))
+			t.Cleanup(p.Close)
+			o := objects(t, gatewayOf(t, c.listener), nil, nil)
+
+			p.Apply(o)
+			require.Eventually(t, func() bool {
+				p.Apply(o)
+				return attempts.Load() == 2
+			}, 5*time.Second, 10*time.Millisecond, "the port is opened again")
+			assert.Contains(t, logs.String(), "listener broke", "the failure is logged")
+			for range 3 {
+				p.Apply(o)
+			}
+			assert.EqualValues(t, 2, attempts.Load(), "control: a port that serves is not opened again")
+		})
+	}
 }
