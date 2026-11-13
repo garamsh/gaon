@@ -48,6 +48,13 @@ Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-
 - **Its identity** may read Services and Endpoints and nothing else: the ServiceAccount `gaon-dns`, the user `gaon:serviceaccount:gaon-dns`, and a `ClusterRole` `gaon:dns` that allows `list` and `watch` of `services` and `endpoints`. The operator applies the role and its binding with the rest of the manifest; the API server does not create them at start.
 - **Its configuration** is flags: the API server's address and CA file, the token file (ADR 0029's path by default), the zone, the listen address and the upstreams.
 
+### The image
+
+- **The image is built from `dns/Dockerfile`:** a static binary in a distroless static base that runs as uid 65532, with no shell and no init. The module replaces `lib/api` with `../lib/api`, so the build takes `lib/api` as the named context `libapi` beside the context `dns/`.
+- **A release is a git tag `dns/v0.1.0-dev.N`, `dns/v0.1.0-rc.N` or `dns/v0.1.0`,** with N a positive integer without leading zeros (aurora#749, decision 14). The workflow `.github/workflows/dns-image.yml` refuses a tag of another shape before it assumes the role, builds the image from the tagged commit and pushes it to the ECR repository `gaon/dns` in account 486152169996, region ap-northeast-2, tagged with the version without the `dns/v` prefix. It assumes the IAM role `github-actions-gaon` by GitHub OIDC and stores no AWS key. The digest is in the run's job summary.
+- **The Deployment names the image by digest,** `<registry>/gaon/dns@<digest>`, which the Node Agent pulls ([node-agent.md](./node-agent.md) §MicroVMs).
+- **The base images are pinned by digest** in the Dockerfile and moved by Dependabot: the distroless digest within its `nonroot` tag, the golang digest within the tag's minor. The owner moves the golang minor with the toolchain directive in `go.work`.
+
 ### How the resolver reaches a MicroVM
 
 - **It is mvmd's node configuration, `network.resolvers`.** mvmd sends the addresses with the boot description and the Guest Agent writes them to `/etc/resolv.conf` in order. `CreateMachineRequest` has no field for a resolver, so the Node Agent passes none and a MicroVM cannot choose its own.
@@ -74,7 +81,7 @@ Each is a choice of ADR 0033.
 
 ## Open questions
 
-- **Who builds and publishes the image,** which the Node Agent pulls by digest ([node-agent.md](./node-agent.md) §MicroVMs).
+- **Whether uid 65532 can bind port 53 in a MicroVM.** The image runs as 65532, and the unit listens on `:53` by default. Under a kernel whose `net.ipv4.ip_unprivileged_port_start` is 1024 the bind fails (`listen udp :53: bind: permission denied`, seen with `docker run --sysctl`); what the guest's value is has not been observed. If it is 1024, the Deployment's template names `user: "0"` or the guest lowers the value.
 - **The resolver address:** whether the operator chooses it, as stated, or the API server reserves one in the service prefix. A Node whose `network.resolvers` differs is not detected.
 - **mvmd, garamsh/mvmd:** whether the Guest Agent can also write a `search` line, which would let short names resolve; whether a change of `network.resolvers` reaches running MicroVMs or only those created after an mvmd restart; and whether mvmd's policy at the tap sees a Service address before or after the network plugin translates it.
 - **A second resolver,** for a Service address that a failed network plugin does not translate. mvmd takes a list; gaon names one.

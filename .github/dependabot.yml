@@ -61,3 +61,12 @@ updates:
         update-types:
           - version-update:semver-minor
           - version-update:semver-major
+  - package-ecosystem: docker
+    directory: /dns
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: golang
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major

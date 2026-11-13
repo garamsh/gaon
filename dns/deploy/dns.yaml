@@ -1,6 +1,9 @@
 # The DNS unit as a workload, applied by an administrator with
 # `gaon apply -f dns/deploy/dns.yaml` (docs/architecture/dns.md §The unit and
-# its delivery). The values in angle brackets are the operator's.
+# its delivery). The values in angle brackets are the operator's; the image
+# is `<registry>/gaon/dns@<digest>`, the digest being the one the job summary of
+# the `dns-image` workflow reports for the release tag (docs/architecture/dns.md
+# §The image).
 #
 # The unit reads Services and Endpoints under the token of its ServiceAccount,
 # which the Node Agent writes into each MicroVM, so the ClusterRole below is
