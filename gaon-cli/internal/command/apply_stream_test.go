@@ -114,7 +114,7 @@ func TestApply_AnUnchangedDocumentStillNeverOverwritesAConcurrentChange(t *testi
 	assert.Equal(t, api.RunOnce, load[api.MicroVM](f, "/microvms/web").Spec.RunStrategy)
 }
 
-func TestApply_AStreamStopsAtItsFirstFailureAndARerunContinuesFromThere(t *testing.T) {
+func TestApply_AStreamWithAnUnknownKindWritesNothingAndAppliesOnceTheDefinitionIsEstablished(t *testing.T) {
 	f := newFakeServer(t) // no definition: the widget cannot be found
 	_, stderr, code := executeStdin(t, f, clusterRoleYAML+"---\n"+widgetYAML+"---\n"+microvmYAML, "apply", "-f", "-")
 	require.Equal(t, command.ExitFailure, code)
@@ -125,4 +125,18 @@ func TestApply_AStreamStopsAtItsFirstFailureAndARerunContinuesFromThere(t *testi
 	stdout, stderr, code := executeStdin(t, f, clusterRoleYAML+"---\n"+widgetYAML+"---\n"+microvmYAML, "apply", "-f", "-")
 	require.Equal(t, command.ExitOK, code, stderr)
 	assert.Equal(t, "clusterrole/reader created\nwidget/w2 created\nmicrovm/web created\n", stdout)
+}
+
+func TestApply_TheStatusAndTheServerSetMetadataDoNotMakeAnObjectDiffer(t *testing.T) {
+	f := newStreamServer(t)
+	stored := newMicroVM("web", api.RunAlways)
+	stored.Metadata.UID, stored.Metadata.Generation = "u1", 3
+	stored.Spec.Image, stored.Spec.Resources.Requests = "ubuntu", api.ResourceList{CPU: "500m", Memory: "1Gi"}
+	stored.Status = api.MicroVMStatus{Phase: api.MicroVMRunning}
+	f.seed("/microvms/web", stored)
+
+	stdout, stderr, code := executeStdin(t, f, microvmYAML, "apply", "-f", "-")
+	require.Equal(t, command.ExitOK, code, stderr)
+	assert.Equal(t, "microvm/web unchanged\n", stdout)
+	assert.Zero(t, f.writes())
 }
