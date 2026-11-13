@@ -33,11 +33,13 @@ type electionAPI struct {
 	work map[string]int
 	// polls counts the Lease reads, by instance.
 	polls map[string]int
+	// services counts the requests for Services, by instance.
+	services map[string]int
 }
 
 func newElectionAPI(t *testing.T) *electionAPI {
 	t.Helper()
-	a := &electionAPI{work: map[string]int{}, polls: map[string]int{}}
+	a := &electionAPI{work: map[string]int{}, polls: map[string]int{}, services: map[string]int{}}
 	ts := httptest.NewServer(http.HandlerFunc(a.serve))
 	t.Cleanup(ts.Close)
 	a.URL = ts.URL
@@ -49,6 +51,9 @@ func (a *electionAPI) serve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("watch") == "true" {
 		a.mu.Lock()
 		a.work[who]++
+		if strings.HasSuffix(r.URL.Path, "/services") {
+			a.services[who]++
+		}
 		a.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -61,6 +66,9 @@ func (a *electionAPI) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if !strings.Contains(r.URL.Path, "/"+api.CoordinationGroupVersion+"/leases/") {
 		a.work[who]++
+		if strings.HasSuffix(r.URL.Path, "/services") {
+			a.services[who]++
+		}
 		_, _ = io.WriteString(w, `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"NodeList","metadata":{"resourceVersion":"1"},"items":[]}`)
 		return
 	}
@@ -105,6 +113,12 @@ func (a *electionAPI) workOf(who string) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.work[who]
+}
+
+func (a *electionAPI) servicesOf(who string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.services[who]
 }
 
 func (a *electionAPI) pollsOf(who string) int {
@@ -190,6 +204,17 @@ func TestRun_OnlyTheHolderOfTheLeaseRunsControllersAndTheOtherTakesOverWhenItSto
 	require.NoError(t, <-doneA)
 	require.Eventually(t, func() bool { return a.workOf("b") > 0 }, 5*time.Second, 10*time.Millisecond, "the second instance takes over")
 	assert.Equal(t, "b", a.holder())
+}
+
+func TestRun_OnlyTheHolderOfTheLeaseRunsTheEndpointsController(t *testing.T) {
+	a := newElectionAPI(t)
+
+	startInstance(t, a, "a")
+	require.Eventually(t, func() bool { return a.servicesOf("a") > 0 }, 5*time.Second, 10*time.Millisecond, "the holder lists Services for the endpoints controller")
+
+	startInstance(t, a, "b")
+	require.Eventually(t, func() bool { return a.pollsOf("b") >= 5 }, 5*time.Second, 10*time.Millisecond, "the second instance polls the Lease")
+	assert.Zero(t, a.servicesOf("b"), "the instance without the Lease never lists Services")
 }
 
 func TestRun_WithLeaderElectionOffRunsAtOnceAndTouchesNoLease(t *testing.T) {

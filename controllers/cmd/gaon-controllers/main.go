@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/garamsh/gaon/controllers/internal/csrsigner"
+	"github.com/garamsh/gaon/controllers/internal/endpoints"
 	"github.com/garamsh/gaon/controllers/internal/garbagecollector"
 	"github.com/garamsh/gaon/controllers/internal/nodelifecycle"
 	"github.com/garamsh/gaon/controllers/internal/nodelifecycle/systemclock"
@@ -125,6 +126,7 @@ func run(ctx context.Context, cfg config, log *slog.Logger) error {
 	return api.RunLeading(ctx, elector, func(ctx context.Context) error {
 		runners := map[string]func(context.Context) error{
 			"node lifecycle controller": nodelifecycle.NewService(client, systemclock.Clock{}, cfg.lifecycle, log).Run,
+			"endpoints controller":      endpoints.NewService(client, systemclock.Clock{}, log).Run,
 		}
 		if cfg.signer != nil {
 			runners["csr signer"] = csrsigner.NewService(client, *cfg.signer, log).Run
