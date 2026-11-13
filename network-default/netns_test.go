@@ -42,7 +42,7 @@ func runAndReport(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, " (%s)", r)
 	}
 	fmt.Fprintln(os.Stderr)
-	return code
+	return code + 1
 }
 
 // TestMain re-runs the test binary in new user and network namespaces, where
