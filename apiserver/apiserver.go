@@ -35,6 +35,10 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 	if err := cfg.validateAuthorization(); err != nil {
 		return err
 	}
+	agents, err := cfg.agentClient()
+	if err != nil {
+		return err
+	}
 	if err := cfg.validateTokenSigning(); err != nil {
 		return err
 	}
@@ -94,7 +98,7 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 		accounts = &accountTokens{verifier: verifier, audiences: audiences, microvm: svc.GetMicroVM, now: time.Now}
 	}
 	srv := &http.Server{
-		Handler:           newHandler(svc, az, tokens, accounts, log),
+		Handler:           newHandler(svc, az, tokens, accounts, agents, log),
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig:         tlsCfg,

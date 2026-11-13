@@ -44,9 +44,11 @@ type traceKey struct{}
 
 // newHandler serves the paths of resource-api.md §Paths under root, rbacRoot,
 // extensionsRoot, admissionRoot, coordinationRoot and customRoot over svc, and answers NotFound to any other path. az authorizes
-// each request a certificate holder makes. It is the one place that maps a
+// each request a certificate holder makes. agents calls the Node Agents for a
+// MicroVM's log and exec, and is nil where the server has no client
+// certificate for them. It is the one place that maps a
 // failure to an HTTP status.
-func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tokenSet, accounts *accountTokens, log *slog.Logger) http.Handler {
+func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tokenSet, accounts *accountTokens, agents *agentClient, log *slog.Logger) http.Handler {
 	h := &handler{log: log, az: az}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +59,8 @@ func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tok
 	mux.HandleFunc("PUT "+root+"/microvms/{name}/status", h.guard(api.Group, "microvms/status", fixed(api.VerbUpdate), put(h, svc.PutMicroVMStatus)))
 	mux.HandleFunc("DELETE "+root+"/microvms/{name}", h.guard(api.Group, "microvms", fixed(api.VerbDelete), deleteObject(h, svc.DeleteMicroVM)))
 	mux.HandleFunc("GET "+root+"/microvms/{name}", h.guard(api.Group, "microvms", fixed(api.VerbGet), get(h, svc.GetMicroVM)))
+	mux.HandleFunc("GET "+root+"/microvms/{name}/log", h.guard(api.Group, "microvms/log", fixed(api.VerbGet), h.microVMLog(svc, agents)))
+	mux.HandleFunc("POST "+root+"/microvms/{name}/exec", h.guard(api.Group, "microvms/exec", fixed(api.VerbCreate), h.microVMExec(svc, agents)))
 	mux.HandleFunc("GET "+root+"/microvms", h.guard(api.Group, "microvms", readVerb, listOrWatch(h, svc.ListMicroVMs, svc.WatchMicroVMs)))
 	mux.HandleFunc("PUT "+root+"/volumes/{name}", h.guard(api.Group, "volumes", putVerb, h.putVolume(svc)))
 	mux.HandleFunc("DELETE "+root+"/volumes/{name}", h.guard(api.Group, "volumes", fixed(api.VerbDelete), deleteObject(h, svc.DeleteVolume)))
