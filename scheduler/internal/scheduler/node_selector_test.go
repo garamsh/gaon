@@ -54,6 +54,18 @@ func TestNodeSelector_KeepsOnlyNodesWhoseLabelsHoldEveryPair(t *testing.T) {
 			message:  "NodeSelector refused 2 (labels do not hold nodeSelector k=)",
 		},
 		{
+			name:     "an empty value is not held by an absent key",
+			selector: map[string]string{"k": ""},
+			labels:   map[string]string{"other": ""},
+			message:  "NodeSelector refused 2 (labels do not hold nodeSelector k=)",
+		},
+		{
+			name:     "the reason lists a long selector in key order",
+			selector: map[string]string{"f": "6", "d": "4", "b": "2", "a": "1", "e": "5", "c": "3"},
+			labels:   map[string]string{"a": "1"},
+			message:  "labels do not hold nodeSelector a=1,b=2,c=3,d=4,e=5,f=6",
+		},
+		{
 			name:     "control: an empty value held matches an empty value",
 			selector: map[string]string{"k": ""},
 			labels:   map[string]string{"k": ""},
