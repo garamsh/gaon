@@ -76,6 +76,7 @@ func checkGateway(name string, spec GatewaySpec) gatewayCheck {
 		g.listeners = append(g.listeners, c)
 	}
 	markConflicts(g.listeners)
+	markBindCollisions(g.listeners)
 	return g
 }
 
@@ -134,6 +135,23 @@ func markConflicts(ls []listenerCheck) {
 			case len(hosts[ls[i].listener.Hostname]) > 1:
 				refuse(&ls[i], ReasonHostnameConflict, fmt.Sprintf("another listener of port %d has hostname %s", port, ls[i].listener.Hostname))
 			}
+		}
+	}
+}
+
+// markBindCollisions refuses a listener of a port at which the proxy listens
+// for a listener of a lower port (BindPort), so that two ports never share one
+// bound port.
+func markBindCollisions(ls []listenerCheck) {
+	shifted := map[int32]int32{}
+	for _, l := range ls {
+		if l.served && l.listener.Port < firstUnprivilegedPort {
+			shifted[BindPort(l.listener.Port)] = l.listener.Port
+		}
+	}
+	for i := range ls {
+		if low, ok := shifted[ls[i].listener.Port]; ok && ls[i].served {
+			refuse(&ls[i], ReasonInvalid, fmt.Sprintf("the proxy listens on port %d for the listener of port %d", ls[i].listener.Port, low))
 		}
 	}
 }

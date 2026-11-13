@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/garamsh/gaon/gateway/internal/gateway"
 	"github.com/garamsh/gaon/lib/api"
 )
 
@@ -77,7 +78,7 @@ func New(cfg Config, log *slog.Logger) *Proxy {
 	}
 	if cfg.Listen == nil {
 		cfg.Listen = func(port int32) (net.Listener, error) {
-			return net.Listen("tcp", ":"+strconv.Itoa(int(port)))
+			return net.Listen("tcp", ":"+strconv.Itoa(int(gateway.BindPort(port))))
 		}
 	}
 	p := &Proxy{cfg: cfg, log: log, certs: newCertificates(log), trans: newTransport(), servers: map[int32]*portServer{}}
