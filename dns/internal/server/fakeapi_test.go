@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -20,9 +21,14 @@ type fakeAPI struct {
 	mu        sync.Mutex
 	services  []api.Service
 	endpoints []api.Endpoints
+	// version is what a list reports. setLists raises it, and a watch from an
+	// older version ends with an Expired event, as a server does that no
+	// longer holds the events since.
+	version   int
 	token     string
 	down      bool
 	gate      chan struct{}
+	watchGate chan struct{}
 
 	events       map[string]chan api.WatchEvent
 	refused      atomic.Int32
@@ -32,7 +38,8 @@ type fakeAPI struct {
 func newFakeAPI(t *testing.T, token string) *fakeAPI {
 	t.Helper()
 	f := &fakeAPI{
-		token: token,
+		token:   token,
+		version: 1,
 		events: map[string]chan api.WatchEvent{
 			"services":  make(chan api.WatchEvent, 16),
 			"endpoints": make(chan api.WatchEvent, 16),
@@ -71,18 +78,19 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	rv := api.ResourceVersion(strconv.Itoa(f.version))
 	w.Header().Set("Content-Type", "application/json")
 	switch kind {
 	case "services":
 		_ = json.NewEncoder(w).Encode(api.ServiceList{
 			TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindServiceList},
-			Metadata: api.ListMeta{ResourceVersion: "1"},
+			Metadata: api.ListMeta{ResourceVersion: rv},
 			Items:    f.services,
 		})
 	case "endpoints":
 		_ = json.NewEncoder(w).Encode(api.EndpointsList{
 			TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindEndpointsList},
-			Metadata: api.ListMeta{ResourceVersion: "1"},
+			Metadata: api.ListMeta{ResourceVersion: rv},
 			Items:    f.endpoints,
 		})
 	default:
@@ -91,10 +99,30 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fakeAPI) watch(w http.ResponseWriter, r *http.Request, kind string) {
+	f.mu.Lock()
+	gate := f.watchGate
+	f.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.(http.Flusher).Flush()
 	enc := json.NewEncoder(w)
+	f.mu.Lock()
+	current := strconv.Itoa(f.version)
+	f.mu.Unlock()
+	if r.URL.Query().Get("resourceVersion") != current {
+		ev, err := api.NewErrorEvent(api.NewAPIError(api.ReasonExpired, "version %s is gone", r.URL.Query().Get("resourceVersion")))
+		if err == nil {
+			_ = enc.Encode(ev)
+		}
+		return
+	}
 	for {
 		select {
 		case ev := <-f.events[kind]:
@@ -108,11 +136,13 @@ func (f *fakeAPI) watch(w http.ResponseWriter, r *http.Request, kind string) {
 	}
 }
 
-// setLists replaces what a list returns.
+// setLists replaces what a list returns and expires the versions listed so
+// far.
 func (f *fakeAPI) setLists(services []api.Service, endpoints []api.Endpoints) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.services, f.endpoints = services, endpoints
+	f.version++
 }
 
 // holdLists makes a list wait until the returned function is called.
@@ -120,6 +150,16 @@ func (f *fakeAPI) holdLists() (release func()) {
 	gate := make(chan struct{})
 	f.mu.Lock()
 	f.gate = gate
+	f.mu.Unlock()
+	return func() { close(gate) }
+}
+
+// holdWatches makes a watch wait, before it answers, until the returned
+// function is called.
+func (f *fakeAPI) holdWatches() (release func()) {
+	gate := make(chan struct{})
+	f.mu.Lock()
+	f.watchGate = gate
 	f.mu.Unlock()
 	return func() { close(gate) }
 }

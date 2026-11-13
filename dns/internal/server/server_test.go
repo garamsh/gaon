@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -351,6 +352,23 @@ func TestLastStateIsServedWhileTheAPIServerIsUnreachable(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return len(ips(ask(t, "udp", u.udp, svcName("web"), dns.TypeA))) == 1 &&
 			ips(ask(t, "udp", u.udp, svcName("web"), dns.TypeA))[0] == "10.96.0.99"
+	}, 5*time.Second, 10*time.Millisecond, "the unit did not list again")
+}
+
+func TestUnitListsAgainWhenAWatchStartsFromAListThatChanged(t *testing.T) {
+	f := newFakeAPI(t, fakeToken)
+	f.setLists([]api.Service{service("web", "10.96.0.10")}, nil)
+	release := f.holdWatches()
+	u := startSynced(t, f)
+
+	// The unit has listed and its watch waits at the server, as one does that
+	// is sent late. The list changes before the watch is answered, and the
+	// server cannot replay the change from the version the unit listed.
+	f.setLists([]api.Service{service("web", "10.96.0.99")}, nil)
+	assert.Equal(t, []string{"10.96.0.10"}, ips(ask(t, "udp", u.udp, svcName("web"), dns.TypeA)))
+	release()
+	require.Eventually(t, func() bool {
+		return slices.Equal(ips(ask(t, "udp", u.udp, svcName("web"), dns.TypeA)), []string{"10.96.0.99"})
 	}, 5*time.Second, 10*time.Millisecond, "the unit did not list again")
 }
 
