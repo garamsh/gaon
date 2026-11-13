@@ -63,7 +63,13 @@ func startAgentLogging(t *testing.T, cfg nodeagent.Config, clk clock.Clock) *syn
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- nodeagent.Run(ctx, cfg, clk, slog.New(slog.NewTextHandler(logs, nil))) }()
-	t.Cleanup(func() { cancel(); <-done })
+	t.Cleanup(func() {
+		cancel()
+		err := <-done
+		if t.Failed() {
+			t.Logf("the agent's Run returned: %v\nthe agent's log:\n%s", err, logs.String())
+		}
+	})
 	return logs
 }
 
@@ -137,7 +143,7 @@ func TestRun_ServesAMicroVMsLogOverTheCertificateItBootstrappedAndWritesWhereToR
 	args := []string{
 		"--api-server", gaon.URL, "--mvmd-socket", mvmd.Socket, "--tls-ca", gaon.CAFile(), "--cert-dir", filepath.Join(t.TempDir(), "certs"),
 		"--bootstrap-token-file", writeFile(t, "token", bootstrapToken),
-		"--agent-addresses", "127.0.0.1", "--agent-port", strconv.Itoa(port),
+		"--agent-addresses", "127.0.0.1", "--agent-port", strconv.Itoa(port), "--resync-period", "20ms",
 	}
 	cfg, err := nodeagent.ParseConfig(args, env(required), io.Discard)
 	require.NoError(t, err)
@@ -178,7 +184,7 @@ func operatorConfig(t *testing.T, gaon *fakegaon.Server, mvmd *fakemvmd.Server, 
 	t.Helper()
 	args := []string{
 		"--api-server", gaon.URL, "--mvmd-socket", mvmd.Socket, "--tls-ca", gaon.CAFile(), "--tls-cert", certFile, "--tls-key", keyFile,
-		"--agent-addresses", "127.0.0.1", "--agent-port", strconv.Itoa(port),
+		"--agent-addresses", "127.0.0.1", "--agent-port", strconv.Itoa(port), "--resync-period", "20ms",
 	}
 	cfg, err := nodeagent.ParseConfig(args, env(required), io.Discard)
 	require.NoError(t, err)
@@ -268,7 +274,7 @@ func TestRun_RenewsAtStartAHeldPairWithoutServerAuthAndThenServes(t *testing.T) 
 	port := freePort(t)
 	args := []string{
 		"--api-server", gaon.URL, "--mvmd-socket", mvmd.Socket, "--tls-ca", gaon.CAFile(), "--cert-dir", dir,
-		"--agent-addresses", "127.0.0.1", "--agent-port", strconv.Itoa(port),
+		"--agent-addresses", "127.0.0.1", "--agent-port", strconv.Itoa(port), "--resync-period", "20ms",
 	}
 	cfg, err := nodeagent.ParseConfig(args, env(required), io.Discard)
 	require.NoError(t, err)
