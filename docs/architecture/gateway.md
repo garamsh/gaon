@@ -80,7 +80,7 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
 - **Matching** is the Gateway API's (D16, D18). A request matches a route of its listener when the `Host` header, without a port, matches one of the route's hostnames (or the listener's, where the route has none) and the path matches a rule's prefix.
   - A prefix matches on path elements: `/abc` matches `/abc`, `/abc/` and `/abc/d`, and not `/abcd`. `/` matches every path.
   - An exact hostname beats a wildcard, a longer wildcard beats a shorter, and among the routes that tie the rule with the longest matching prefix wins. A tie after that goes to the route whose name sorts first. A request that the best-ranked route has no path match for is tried against the next-ranked route.
-- **Host and path are forwarded unmodified** (D16, D18): the backend receives the `Host` header and the request path as the client sent them, so a client that signs `Host` still verifies.
+- **Host and path are forwarded unmodified** (D16, D18): the backend receives the `Host` header, the request path and the query string as the client sent them, so a client that signs `Host` still verifies.
 - **A rule may replace its matched prefix** (D18): `urlRewrite.path.replacePrefixMatch` replaces the prefix the rule matched, as Gateway API `ReplacePrefixMatch` does, so one host can send `/api/` to a backend with the prefix removed and the rest unmodified to others. `Host` is never rewritten. A rule without the filter forwards the path unmodified.
 - **A backend** is a Service and one of its ports (`backendRefs[0]`). The proxy connects to an address of the Service's `Endpoints`, which lists only ready MicroVMs ([resource-api.md](./resource-api.md) §Service, Endpoints and NetworkPolicy), on the port of the Endpoints subset whose name is the Service port's. It does not connect to the Service's own address.
 
@@ -88,6 +88,7 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
 
 - **`X-Forwarded-For`** (D16): the proxy appends the address of the peer that connected to it to a value the request carries, or sets it where there is none.
 - **`X-Forwarded-Proto`** (D16): the proxy sets it to `http` on a plain listener and `https` on a terminating one, replacing any value the request carries.
+- **`Forwarded` and `X-Forwarded-Host`** the request carries are passed on as sent; the proxy neither sets nor replaces them.
 - **No other header is added**, and none is set on a passthrough connection, which the proxy does not read. The proxy removes the hop-by-hop headers of the request and of the response (`Connection` and the headers it names, `Keep-Alive`, `Te`, `Trailer`, `Transfer-Encoding`, `Proxy-Connection`, `Proxy-Authenticate`, `Proxy-Authorization` and `Upgrade`), as an HTTP/1.1 proxy does, except that an `Upgrade` request the proxy forwards keeps its `Upgrade`, and sets the two headers above after that removal, so a client cannot strip them by naming them in `Connection`.
 
 ### TLS passthrough

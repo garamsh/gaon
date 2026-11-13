@@ -78,6 +78,15 @@ func (h httpHandler) route(w http.ResponseWriter, r *http.Request) {
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			out := pr.Out
 			out.URL.Scheme, out.URL.Host = "http", addr
+			// Rewrite mode drops the client's Forwarded and X-Forwarded-Host
+			// and re-encodes a query it cannot parse; the proxy passes all
+			// three on as sent.
+			out.URL.RawQuery = pr.In.URL.RawQuery
+			for _, k := range []string{"Forwarded", "X-Forwarded-Host"} {
+				if v, ok := pr.In.Header[k]; ok {
+					out.Header[k] = append([]string(nil), v...)
+				}
+			}
 			forwardedFor(pr)
 			out.Header.Set("X-Forwarded-Proto", proto)
 			if m.rule.hasRewrite {

@@ -53,7 +53,7 @@ func serveHTTP(t *testing.T, h *harness, routes []api.CustomObject, backends map
 func echoing(t *testing.T) string {
 	t.Helper()
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprintf(w, "xff=%s proto=%s host=%s uri=%s", r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Forwarded-Proto"), r.Host, r.RequestURI)
+		_, _ = fmt.Fprintf(w, "xff=%s proto=%s host=%s uri=%s xfh=%s fwd=%s", r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Forwarded-Proto"), r.Host, r.RequestURI, r.Header.Get("X-Forwarded-Host"), r.Header.Get("Forwarded"))
 	}))
 	t.Cleanup(s.Close)
 	return hostPort(t, s)
@@ -183,6 +183,27 @@ func TestHTTP_ForwardedHeaders(t *testing.T) {
 		_, body := get(t, addr, "", "/", "Connection", "X-Other", "X-Forwarded-For", "10.0.0.9")
 		assert.Contains(t, body, "proto=http ")
 		assert.Contains(t, body, "xff=10.0.0.9, 127.0.0.1 ")
+	})
+}
+
+func TestHTTP_RequestIsForwardedAsSent(t *testing.T) {
+	h := newHarness(t, proxy.Config{})
+	addr := serveHTTP(t, h,
+		[]api.CustomObject{httpRoute(t, "app", nil, true, rule(t, ruleTo{prefixes: []string{"/"}, backend: "echo"}))},
+		map[string][]string{"echo": {echoing(t)}})
+	t.Run("Forwarded and X-Forwarded-Host reach the backend", func(t *testing.T) {
+		_, body := get(t, addr, "", "/", "X-Forwarded-Host", "shop.example.com", "Forwarded", "for=10.0.0.9;proto=https")
+		assert.Contains(t, body, "xfh=shop.example.com ")
+		assert.Contains(t, body, "fwd=for=10.0.0.9;proto=https")
+	})
+	t.Run("a query with a semicolon is not rewritten", func(t *testing.T) {
+		_, body := get(t, addr, "", "/p?a=1;b=2&c=%zz")
+		assert.Contains(t, body, "uri=/p?a=1;b=2&c=%zz ")
+	})
+	t.Run("control: a plain query and no forwarded headers", func(t *testing.T) {
+		_, body := get(t, addr, "", "/p?a=1&b=2")
+		assert.Contains(t, body, "uri=/p?a=1&b=2 ")
+		assert.Contains(t, body, "xfh= fwd=")
 	})
 }
 
