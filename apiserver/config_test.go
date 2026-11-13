@@ -77,23 +77,26 @@ func TestParseConfig_EtcdTLSNamesTheMissingFlag(t *testing.T) {
 
 func TestParseConfig_Refuses(t *testing.T) {
 	for name, args := range map[string][]string{
-		"no endpoint":      {"-etcd-endpoints", " , "},
-		"zero timeout":     {"-etcd-dial-timeout", "0s"},
-		"negative timeout": {"-etcd-dial-timeout", "-1s"},
-		"negative ping":    {"-etcd-keepalive-time", "-1s"},
-		"negative wait":    {"-etcd-keepalive-timeout", "-1s"},
-		"ping, no wait":    {"-etcd-keepalive-timeout", "0s"},
-		"unknown flag":     {"-colour"},
-		"only the CA":      {"-tls-client-ca", "ca.pem"},
-		"no key":           {"-tls-client-ca", "ca.pem", "-tls-cert", "cert.pem"},
-		"no CA":            {"-tls-cert", "cert.pem", "-tls-key", "key.pem"},
-		"issuer, no key":   {"-service-account-issuer", "https://gaon"},
-		"key, no issuer":   {"-service-account-signing-key-file", "key.pem"},
-		"verify keys only": {"-service-account-verify-key-files", "old.pem"},
-		"audiences only":   {"-api-audiences", "openbao"},
-		"http issuer":      {"-service-account-issuer", "http://gaon", "-service-account-signing-key-file", "key.pem"},
-		"issuer with path": {"-service-account-issuer", "https://gaon/path", "-service-account-signing-key-file", "key.pem"},
-		"issuer, query":    {"-service-account-issuer", "https://gaon?a=b", "-service-account-signing-key-file", "key.pem"},
+		"no endpoint":         {"-etcd-endpoints", " , "},
+		"zero timeout":        {"-etcd-dial-timeout", "0s"},
+		"negative timeout":    {"-etcd-dial-timeout", "-1s"},
+		"negative ping":       {"-etcd-keepalive-time", "-1s"},
+		"negative wait":       {"-etcd-keepalive-timeout", "-1s"},
+		"ping, no wait":       {"-etcd-keepalive-timeout", "0s"},
+		"unknown flag":        {"-colour"},
+		"only the CA":         {"-tls-client-ca", "ca.pem"},
+		"no key":              {"-tls-client-ca", "ca.pem", "-tls-cert", "cert.pem"},
+		"no CA":               {"-tls-cert", "cert.pem", "-tls-key", "key.pem"},
+		"agent cert, no key":  {"-tls-client-ca", "ca.pem", "-tls-cert", "cert.pem", "-tls-key", "key.pem", "-agent-client-cert-file", "agent.pem"},
+		"agent key, no cert":  {"-tls-client-ca", "ca.pem", "-tls-cert", "cert.pem", "-tls-key", "key.pem", "-agent-client-key-file", "agent-key.pem"},
+		"agent files, no TLS": {"-agent-client-cert-file", "agent.pem", "-agent-client-key-file", "agent-key.pem"},
+		"issuer, no key":      {"-service-account-issuer", "https://gaon"},
+		"key, no issuer":      {"-service-account-signing-key-file", "key.pem"},
+		"verify keys only":    {"-service-account-verify-key-files", "old.pem"},
+		"audiences only":      {"-api-audiences", "openbao"},
+		"http issuer":         {"-service-account-issuer", "http://gaon", "-service-account-signing-key-file", "key.pem"},
+		"issuer with path":    {"-service-account-issuer", "https://gaon/path", "-service-account-signing-key-file", "key.pem"},
+		"issuer, query":       {"-service-account-issuer", "https://gaon?a=b", "-service-account-signing-key-file", "key.pem"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := apiserver.ParseConfig(args)
@@ -141,6 +144,20 @@ func TestRun_RefusesATokenSigningKeyThatIsNotAnECKey(t *testing.T) {
 	err = apiserver.Run(context.Background(), cfg, ln, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	assert.ErrorContains(t, err, "token signing key")
+}
+
+func TestParseConfig_AgentClientFlags(t *testing.T) {
+	cfg, err := apiserver.ParseConfig([]string{
+		"-tls-client-ca", "ca.pem", "-tls-cert", "cert.pem", "-tls-key", "key.pem",
+		"-agent-client-cert-file", "agent.pem", "-agent-client-key-file", "agent-key.pem",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "agent.pem", cfg.AgentCert)
+	assert.Equal(t, "agent-key.pem", cfg.AgentKey)
+
+	cfg, err = apiserver.ParseConfig(nil)
+	require.NoError(t, err, "control: the agent client is optional")
+	assert.Empty(t, cfg.AgentCert)
 }
 
 func TestRun_RefusesANonLoopbackListener(t *testing.T) {
