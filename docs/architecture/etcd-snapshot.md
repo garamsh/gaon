@@ -48,4 +48,3 @@ Basis: [ADR 0028](./adr/0028-a-cronjob-runs-gaon-etcd-snapshot-which-uploads-a-c
 - **The image.** No Dockerfile builds `gaon-etcd-snapshot` and no image is published; the CronJob's `image` is the operator's.
 - **Multipart upload.** A Store whose snapshot passes 5 GiB needs it.
 - **Encryption of the snapshot.** It holds Secrets in clear; the bucket's server-side encryption and access policy are the operator's.
-- **`nodeSelector` is not honoured.** The scheduler does not read it ([scheduler.md](./scheduler.md)), so the MicroVM may run on a Node other than the one the network path in [deployment.md](./deployment.md) §Backup and restore names.

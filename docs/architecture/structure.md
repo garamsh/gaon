@@ -25,7 +25,9 @@ The units of milestone M1, each created by the pull request of the issue that ow
 - **`etcd-snapshot/`**: the backup of the Store, a client of etcd run as a CronJob, binary `gaon-etcd-snapshot`. Issue 174.
 - **`tooling/e2e/`**: the end-to-end test of M1 on QEMU nodes. Issue 9.
 
-The Gateway, the Cell Router and microvm and cluster management are in gaon's scope (Discussion #2 comments `discussioncomment-19466471` and `discussioncomment-19533418`, in garamsh/discussions) and have no unit planned yet.
+The Cell Router and microvm and cluster management are in gaon's scope (Discussion #2 comments `discussioncomment-19466471` and `discussioncomment-19533418`, in garamsh/discussions) and have no unit planned yet.
+
+The gateway is planned as the unit `gateway/`, holding the binaries `gaon-gateway-controller` and `gaon-gateway-proxy` ([ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds-of-their-own-group-a-gateway-unit-registers-and-runs-with-a-loadbalancer-service-and-a-deployment-of-proxies-for-each-gateway.md), [gateway.md](./gateway.md)); its folder is created by the serving issue's pull request.
 
 The rules for units:
 

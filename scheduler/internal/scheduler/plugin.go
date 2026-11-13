@@ -2,13 +2,17 @@ package scheduler
 
 import (
 	"fmt"
+	"maps"
 	"math/big"
+	"slices"
+	"strings"
 )
 
 // Names of the built-in plugins.
 const (
 	PluginNodeEligible     = "NodeEligible"
 	PluginNodeResourcesFit = "NodeResourcesFit"
+	PluginNodeSelector     = "NodeSelector"
 	PluginVolumeNode       = "VolumeNode"
 	PluginLeastAllocated   = "LeastAllocated"
 )
@@ -21,8 +25,9 @@ const (
 
 // demand is what a MicroVM asks of the Node it goes to.
 type demand struct {
-	req     resources
-	volumes volumeNeed
+	req      resources
+	volumes  volumeNeed
+	selector map[string]string
 }
 
 // filterPlugin decides whether a MicroVM can go to a Node.
@@ -42,7 +47,7 @@ type scorePlugin interface {
 
 // filterPlugins always run, in this order. NodeEligible comes first because
 // NodeResourcesFit reads the capacity only an eligible Node has.
-var filterPlugins = []filterPlugin{nodeEligible{}, nodeResourcesFit{}, volumeNode{}}
+var filterPlugins = []filterPlugin{nodeEligible{}, nodeResourcesFit{}, nodeSelector{}, volumeNode{}}
 
 // scorePlugins are the ones a configuration may enable, by name.
 var scorePlugins = map[string]scorePlugin{PluginLeastAllocated: leastAllocated{}}
@@ -67,6 +72,31 @@ func (nodeResourcesFit) Filter(d demand, n *nodeView) string {
 		return ""
 	}
 	return reasonInsufficientFree
+}
+
+// nodeSelector keeps only the Nodes whose labels hold every key and value of
+// the MicroVM's nodeSelector. An empty selector keeps every Node.
+type nodeSelector struct{}
+
+func (nodeSelector) Name() string { return PluginNodeSelector }
+
+func (nodeSelector) Filter(d demand, n *nodeView) string {
+	for k, v := range d.selector {
+		if got, ok := n.node.Metadata.Labels[k]; !ok || got != v {
+			return "labels do not hold nodeSelector " + formatSelector(d.selector)
+		}
+	}
+	return ""
+}
+
+// formatSelector writes selector as key=value pairs in key order, so the
+// reason is the same for every Node and every pass.
+func formatSelector(selector map[string]string) string {
+	pairs := make([]string, 0, len(selector))
+	for _, k := range slices.Sorted(maps.Keys(selector)) {
+		pairs = append(pairs, k+"="+selector[k])
+	}
+	return strings.Join(pairs, ",")
 }
 
 // volumeNode keeps only the Node the MicroVM's pinned local Volumes name.
