@@ -113,6 +113,7 @@ func TestRun_SignsExactlyTheExtendedKeyUsageTheRequestStates(t *testing.T) {
 		{"client auth alone", []csrOption{withExtKeyUsage(t, oidClientAuth)}, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}},
 		{"no extended key usage", nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}},
 		{"client auth and server auth", []csrOption{withExtKeyUsage(t, oidClientAuth, oidServerAuth)}, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth}},
+		{"server auth and client auth, in that order", []csrOption{withExtKeyUsage(t, oidServerAuth, oidClientAuth)}, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}},
 	}
 	for i, tt := range tests {
 		pemRequest, _ := newCSR(t, "node-1", tt.opts...)
@@ -195,6 +196,9 @@ func TestRun_DeniesEachFailureOfTheApprovalRuleWithItsOwnReason(t *testing.T) {
 	clientAuth, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidClientAuth))
 	clientAndCode, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidClientAuth, oidCodeSigning))
 	serverAndCode, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidServerAuth, oidCodeSigning))
+	reversed, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidServerAuth, oidClientAuth))
+	clientTwice, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidClientAuth, oidClientAuth))
+	serverTwice, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidServerAuth, oidServerAuth))
 	noUsage, _ := newCSR(t, "node-1", withExtKeyUsage(t))
 
 	tests := []struct {
@@ -218,6 +222,9 @@ func TestRun_DeniesEachFailureOfTheApprovalRuleWithItsOwnReason(t *testing.T) {
 		{"other extension", "bootstrap:abcdef", other, false, "DisallowedExtension"},
 		{"server auth only", "bootstrap:abcdef", serverAuth, false, "DisallowedExtension"},
 		{"control: client and server auth", "bootstrap:abcdef", both, true, ""},
+		{"control: server auth and client auth", "bootstrap:abcdef", reversed, true, ""},
+		{"client auth repeated", "bootstrap:abcdef", clientTwice, false, "DisallowedExtension"},
+		{"server auth repeated", "bootstrap:abcdef", serverTwice, false, "DisallowedExtension"},
 		{"client auth and another usage", "bootstrap:abcdef", clientAndCode, false, "DisallowedExtension"},
 		{"server auth and another usage", "bootstrap:abcdef", serverAndCode, false, "DisallowedExtension"},
 		{"empty extended key usage", "bootstrap:abcdef", noUsage, false, "DisallowedExtension"},

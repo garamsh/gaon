@@ -69,26 +69,32 @@ func approve(r *api.CertificateSigningRequest) (*x509.CertificateRequest, []x509
 }
 
 // allowedExtKeyUsage returns the usage of an extended key usage extension that
-// holds exactly client auth, or exactly client auth and server auth.
+// holds exactly client auth, or exactly client auth and server auth in either
+// order, in the order the extension states.
 func allowedExtKeyUsage(id asn1.ObjectIdentifier, value []byte) ([]x509.ExtKeyUsage, bool) {
 	if !id.Equal(oidExtKeyUsage) {
 		return nil, false
 	}
 	var oids []asn1.ObjectIdentifier
 	rest, err := asn1.Unmarshal(value, &oids)
-	if err != nil || len(rest) != 0 {
+	if err != nil || len(rest) != 0 || len(oids) == 0 || len(oids) > 2 {
 		return nil, false
 	}
-	equal := func(want ...asn1.ObjectIdentifier) bool {
-		return slices.EqualFunc(oids, want, asn1.ObjectIdentifier.Equal)
+	var usages []x509.ExtKeyUsage
+	for _, oid := range oids {
+		switch {
+		case oid.Equal(oidClientAuth):
+			usages = append(usages, x509.ExtKeyUsageClientAuth)
+		case oid.Equal(oidServerAuth):
+			usages = append(usages, x509.ExtKeyUsageServerAuth)
+		default:
+			return nil, false
+		}
 	}
-	switch {
-	case equal(oidClientAuth):
-		return []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}, true
-	case equal(oidClientAuth, oidServerAuth):
-		return []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth}, true
+	if !slices.Contains(usages, x509.ExtKeyUsageClientAuth) || (len(usages) == 2 && usages[0] == usages[1]) {
+		return nil, false
 	}
-	return nil, false
+	return usages, true
 }
 
 // nodeSubject returns the CN and the Organization of a subject made of exactly

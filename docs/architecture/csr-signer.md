@@ -27,7 +27,7 @@ The rules are checked in order and the first failure is recorded as `Denied`, wi
 |---|---|---|
 | 1 | `spec.request` parses as PKCS#10 and its signature verifies | `InvalidRequest` |
 | 2 | The subject is exactly two attributes: a CN, which is non-empty and does not start with `bootstrap:`, and one Organization, `gaon:nodes` | `InvalidSubject` |
-| 3 | The request carries no subject alternative name and no extension other than an extended key usage of exactly client auth, or of exactly client auth and server auth | `DisallowedExtension` |
+| 3 | The request carries no subject alternative name and no extension other than an extended key usage of exactly client auth, or of exactly client auth and server auth in either order | `DisallowedExtension` |
 | 4 | `spec.username` starts with `bootstrap:`, or equals the CN, which is a renewal | `UnauthorizedRequester` |
 
 - **The CN has no other format rule than rule 2's**, and its Node need not exist: an agent asks for its certificate before it registers its Node. A token can therefore obtain a certificate for any Node name ([ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) §Consequences).
@@ -35,7 +35,7 @@ The rules are checked in order and the first failure is recorded as `Denied`, wi
 
 ### What it signs
 
-- **The subject and public key of the request**, with a random 128-bit serial, key usage digital signature and exactly the extended key usage the request states: client auth, or client auth and server auth. A request with no extended key usage gets client auth. The certificate is not a CA and carries no name but the subject.
+- **The subject and public key of the request**, with a random 128-bit serial, key usage digital signature and exactly the extended key usage the request states: client auth, or client auth and server auth in the order the request lists them. A request with no extended key usage gets client auth. The certificate is not a CA and carries no name but the subject.
 - **`NotBefore` is the signing time minus 5 minutes**, for clock skew between Nodes, as the Kubernetes signer does. **`NotAfter` is the signing time plus `--signing-duration`**, never later than the CA certificate's `NotAfter`.
 
 ### Configuration
