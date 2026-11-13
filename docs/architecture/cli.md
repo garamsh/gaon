@@ -1,8 +1,8 @@
 # CLI
 
-The `gaon` client CLI: its commands and grammar, which resource kinds each command reaches, and how `apply` treats a concurrent change.
+The `gaon` client CLI: its commands and grammar, which resource kinds each command reaches, how `apply` treats a concurrent change, and how `logs` and `exec` end.
 
-Basis: [resource-api.md](./resource-api.md) §Paths and the types of `lib/api/`. The CLI is the unit `gaon-cli/`, binary `gaon` at `gaon-cli/cmd/gaon`, and talks to the API only through `lib/api/`.
+Basis: [resource-api.md](./resource-api.md) §Paths and the types of `lib/api/`. The CLI is the unit `gaon-cli/`, binary `gaon` at `gaon-cli/cmd/gaon`, and talks to the API only through `lib/api/`, except for the two subresource streams of §Logs and exec.
 
 ## Current decisions
 
@@ -15,6 +15,8 @@ Basis: [resource-api.md](./resource-api.md) §Paths and the types of `lib/api/`.
 | `gaon get [-o table\|yaml\|json] KIND NAME` | Prints one resource. Default `table`. |
 | `gaon describe KIND NAME` | Prints one resource as labelled lines and its status conditions. |
 | `gaon delete KIND NAME` | Sets the `deletionTimestamp` of a resource, which the server removes at once if no finalizer holds it. |
+| `gaon logs [-f\|--follow] [--tail-bytes N] NAME` | Prints the log of a MicroVM. |
+| `gaon exec [-e NAME=VALUE]... [-w DIR] NAME -- COMMAND [ARG...]` | Runs a command in a MicroVM, prints its output and exits with its exit code. |
 | `gaon config current-context` | Prints the name of the current context of the config file. |
 | `gaon config use-context NAME` | Sets the current context of the config file and writes the file. |
 
@@ -23,7 +25,7 @@ Basis: [resource-api.md](./resource-api.md) §Paths and the types of `lib/api/`.
 - **Operands:** a command's flags may stand anywhere among its operands, before, between or after, as `-o` does in `gaon get microvm web -o yaml`. A `--` ends the flags, and what follows it is an operand. A flag a command does not have is a usage error wherever it stands.
 - **`KIND`** is any name in §Kind names, matched without regard to case, or a name of a registered kind, §Registered kinds. An unknown kind is a usage error that lists the built-in kinds and the registered ones.
 - **No `list` command.** `get KIND` lists; `list` is an unknown command ([ADR 0014](./adr/0014-the-gaon-cli-reads-like-kubectl-get-lists-and-reads-describe-shows-a-kind-has-a-plural-and-a-short-name-and-list-is-removed.md)).
-- **Exit code:** 0 on success, 1 when a request or a check fails, 2 on a mistake in the command line.
+- **Exit code:** 0 on success, 1 when a request or a check fails, 2 on a mistake in the command line. `exec` exits with the exit code of its command, §Logs and exec.
 - **Output formats of `get`:** `table` prints the columns below, and is the default; `yaml` and `json` print the object, or the list object for `get KIND`, as the API returned it, with the API's field names. Any other value is a usage error, before any request. `describe` takes no `-o`.
 
 ### Config file
@@ -136,6 +138,18 @@ An empty value prints as `-`.
   - **History and rollback:** nothing. gaon keeps no record of a render. Rolling back is rendering the earlier chart version and applying it.
   - **Hooks:** nothing. Helm runs a hook as a Job or a pod around an install, which `helm template` does not do; a template carrying a hook annotation is applied as an ordinary document.
 - **Release names** are the chart's: gaon does not track a release, so a second `helm template` with another name applies a second set of objects.
+
+### Logs and exec
+
+`logs` and `exec` reach the subresources of one MicroVM, `GET /microvms/{name}/log` and `POST /microvms/{name}/exec`, [ADR 0043](./adr/0043-a-microvms-log-and-exec-are-subresources-authorized-apart-from-get-and-the-api-server-proxies-them-to-its-nodes-agent-over-mutual-tls.md), under the compute root. They take no `KIND`, since only a MicroVM has them. `lib/api/` has no client method for either, so the CLI sends both requests with the HTTP client it builds for `lib/api/` and reads an error answer as an `api.APIError`. The CLI sends no `bindingEpoch` or `uid`; the API server adds them.
+
+- **`logs`:** `-f` or `--follow` sends `follow=true`, and `--tail-bytes N` sends `tailBytes=N`; neither is sent unasked. An `N` below 1 is a usage error before any request. The body is printed as it arrives.
+  - **A clean end is an end of the body.** A body that is cut is an aborted stream: the output already received stays printed, and the CLI exits 1 with a message that the stream was aborted. Ending a `--follow` with an interrupt is not an abort and exits 0.
+- **`exec`:** the command is everything after the first `--`, so its own flags are not the CLI's; `-e NAME=VALUE` (repeatable, split at the first `=`, the value may be empty) and `-w DIR` stand before the `--`. A missing `--`, no command, not exactly one name, or an `-e` without a name or `=` is a usage error before any request. `exec` sends no standard input and allocates no terminal.
+  - **Output:** `Stdout` data goes to standard output and `Stderr` data to standard error, each as it arrives.
+  - **Exit code:** an `Exit` event with status `Exited` ends the CLI with its `exitCode`; 0 is success. A code of 1 is the command's and cannot be told from the CLI's own failure, and a command that exits 2 cannot be told from a usage error. A code below 0 or above 255 is no process exit status and ends with 1. Status `CutShort` and `NotStarted` end with 1 and print the signal and reason.
+  - **Only an `Exit` event is a clean end.** A stream that ends or is cut before one, or that carries an `Error` event, ends with 1 and a message; the command may still be running, since a disconnect does not stop it.
+- **Answers with no stream:** a non-2xx answer is printed as `<Reason>: <message>` and exits 1, so `NotRunning` (409) and `Unavailable` (503) show by reason.
 
 ### Delete
 
