@@ -259,7 +259,7 @@ Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where
 | `GET /microvms/{name}` | all | read one MicroVM |
 | `GET /microvms?watch=true` | all | subscribe to changes |
 | `GET /microvms/{name}/log` | users; `get` on `microvms/log` | read the output of the MicroVM's process, optionally following it; proxied to the agent of its Node (§Log and exec) |
-| `POST /microvms/{name}/exec` | users; `create` on `microvms/exec` | run a command in the MicroVM, as root, and stream its output; proxied to the agent of its Node (§Log and exec) |
+| `POST /microvms/{name}/exec` | users; `create` on `microvms/exec` | run a command in the MicroVM and stream its output; proxied to the agent of its Node (§Log and exec) |
 | `PUT /volumes/{name}` | users; the Node Agent for its finalizer only | create a Volume; add or remove a finalizer; raise `spec.storage`; the rest of `spec` is immutable after creation |
 | `PUT /volumes/{name}/status` | Node Agent, controllers | attachment and volume status |
 | `DELETE /volumes/{name}` | users | set `deletionTimestamp`; the Node Agent removes its finalizer after the disk is deleted |
@@ -441,18 +441,19 @@ A MicroVM's log and exec are served by the API server and proxied to the agent o
 
 - **`GET /microvms/{name}/log`,** authorized as `get` on `microvms/log`; the answer is `200` with `application/octet-stream`, the MicroVM's output, standard output and standard error interleaved as one sequence.
   - `follow`: boolean, default false; true keeps the response open until the process ends or the client disconnects.
-  - `tailBytes`: integer, 1 to 16 777 216 (`MaxLogTailBytes` in `lib/api/`); absent, the read starts at the oldest byte held. `0`, a negative number, a larger one or a non-integer is `Invalid`. Any other parameter is `Invalid`.
-  - Output is readable while the MicroVM exists, a finished one's included. What serves it once the Machine has stopped is open (§Open questions).
+  - `tailBytes`: an integer of at least 1 that fits in 64 bits; absent, the read starts at the oldest byte held, and one larger than what is held starts there too. `0`, a negative number or a non-integer is `Invalid`. Any other parameter is `Invalid`.
+  - Output is readable while the MicroVM exists, a finished one's included. mvmd is to keep a finished MicroVM's output; until it does, one whose Machine has stopped is not served (§Open questions).
+  - The body has no framing. It ends cleanly only when the process has ended or the held output has been sent; a failure after the response began aborts the response, so a cut log is a transport error to the client and not a short one.
   - There is no `previous`, `sinceTime`, `limitBytes`, `timestamps`, `container` or resume offset, and no `tailLines`.
-- **`POST /microvms/{name}/exec`,** authorized as `create` on `microvms/exec`; the answer is `200` with `application/x-ndjson`. **It runs as root in the guest,** so a role that holds `create` on `microvms/exec` holds the guest.
-  - The body has `command` (a non-empty list of strings whose first is non-empty), `env` (a list of `{name, value}`, default empty) and `workingDir` (a string); any other field is `Invalid`.
+- **`POST /microvms/{name}/exec`,** authorized as `create` on `microvms/exec`; the answer is `200` with `application/x-ndjson`. **mvmd does not say which user a command runs as,** so a role that holds `create` on `microvms/exec` is treated as holding the guest.
+  - The body has `command` (a non-empty list of strings whose first is non-empty), `env` (a list of `{name, value}`, default empty; names as in a MicroVM's `spec.env`, unique, and values only) and `workingDir` (a string); any other field is `Invalid`. mvmd's `env` is a map, so the order does not reach the guest.
   - Each line is one JSON object with a `type`: `Output` (`stream`, `Stdout` or `Stderr`, and `data`, base64), `Exit` (`status` `Exited`, `CutShort` or `NotStarted`, with `exitCode`, `termSignal` and `reason` where there are any), the last of a command that ran, and `Error` (the error object, §Watch) for a failure after the response began.
-  - The agent never repeats the call, and a client that disconnects does not stop the command.
+  - The agent never repeats the call. A client that disconnects does not stop the command, and the agent does not signal it (ADR 0043 Decision 3).
   - There is no standard input, terminal or resize: interactive exec is deferred until the runtime offers it.
 - **RBAC.** A rule names `microvms/log` or `microvms/exec` exactly, so `get` on `microvms` grants neither. `*` as a whole name matches both, so `gaon:controllers`' `get` on every resource reads every MicroVM's output, and `gaon:admin` may do both. The Node authorizer grants a Node neither, and no bootstrap role changes.
-- **The route.** The API server reads the MicroVM's `spec.nodeName` and the Node, dials an address of `status.addresses` on `status.agentPort` over mutual TLS 1.3, and calls the same path of the agent with `bindingEpoch` in the query, which the agent refuses when it holds the Machine at another epoch.
+- **The route.** The API server reads the MicroVM's `spec.nodeName` and the Node, dials an address of `status.addresses` on `status.agentPort` over mutual TLS 1.3, and calls the same path of the agent with `bindingEpoch` (`spec.bindingEpoch`) and `uid` (`metadata.uid`) in the query, which the agent refuses with `NotRunning` when it does not hold the Machine at that epoch or its MicroVM has another uid.
   - The agent accepts a client certificate that chains to the cluster CA and has the Organization `gaon:apiservers`, and no other; the API server presents one, other than its serving certificate. The operator issues it as for `gaon:schedulers`, and no role binds it.
-  - The agent presents its Node certificate, which carries `serverAuth` as well as `clientAuth`; the API server checks the chain and that the CN is the Node's name, and not a host name or an address.
+  - The agent presents its Node certificate, which must carry `serverAuth` as well as `clientAuth` (an agent asks for both and the signer signs what is asked, [csr-signer.md](./csr-signer.md); an operator-supplied one carries both too); the API server checks the chain and that the CN is the Node's name, and not a host name or an address.
   - The agent does not authenticate the end user; the API server has authorized them.
 - **Answers.** `NotFound` for a MicroVM that does not exist, `Invalid` for a query or a body, `Unauthorized` and `Forbidden` as everywhere, and two more reasons (§Watch): `NotRunning` (409) when the MicroVM has no `spec.nodeName`, the agent holds no Machine for it at the epoch, a log finds no output, or an exec finds the Machine not Running or the MicroVM being deleted; `Unavailable` (503) when the Node is missing or has no address or port, the dial, the handshake or the call fails or times out, or the agent cannot reach the runtime. The API server does not retry.
 
@@ -512,12 +513,12 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - **Unacknowledged renewals:** how the Node Agent bounds the expiry of an mvmd renewal whose acknowledgement never arrived; left to the Node Agent's document.
 - **Data-plane route:** how file and console traffic reaches a node. Log and exec are decided (ADR 0043); a file API and the console are not.
 - **Log and exec** (ADR 0043):
-  - A finished MicroVM's output: at mvmd `eebb760d62370c1ebf49bb86c5a9413d76c71650` a Stopped Machine's entrypoint is answered from the console log, not from output, and a `Once` MicroVM's Machine stops within 5 s of its exit; "readable until the MicroVM is deleted" needs mvmd to retain output or the Node Agent to copy it. Open; the PM decides before the serving issue is filed.
+  - A finished MicroVM's output: at mvmd `eebb760d62370c1ebf49bb86c5a9413d76c71650` a Stopped Machine's entrypoint is answered from the console log, not from output, and a `Once` MicroVM's Machine stops within 5 s of its exit; "readable until the MicroVM is deleted" is not yet kept. Decided (PM): mvmd keeps a finished MicroVM's output and the Node Agent does not copy it, per garamsh/mvmd#632, blocked by garamsh/mvmd#619; mvmd's ADR decides how much is kept and whether it survives a restart, and this contract states neither.
   - A read that does not follow, of a Running Machine: mvmd's stream has no caught-up marker, so it needs one or an idle interval.
   - `tailBytes` in `ReadExecOutputRequest` is garamsh/mvmd#619, an open issue, not merged; the guest-agent half is merged (`df306f633d99575a88003478987255db3cfc5d80`).
-  - Exec output in the guest is kept per exec and no call discards it, so the table is not bounded.
+  - Exec output in the guest is kept per exec and no call discards it, so the table is not bounded; and a client that disconnects from a command that never ends has no way to end it (the exec identifier is not given to it, and mvmd's `SignalExec` is not called).
   - Narrowing `gaon:controllers`, whose `get` on `*` reads every MicroVM's output.
-  - Output across a restart, and resuming a cut log: none; a new binding is a new Machine and a cut read starts again with `tailBytes`.
+  - Output across a rebinding, and resuming a cut log: none; a new binding is a new Machine and a cut read starts again with `tailBytes`.
   - Interactive exec (standard input, a terminal): waits for the runtime.
 - **Numbers:** measuring the provisional values in §Lease and fencing, the restart backoff and the `lastActiveTime` minimum interval (Discussion #2 section 6 item 13).
 - **Store growth and compaction interval:** [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).

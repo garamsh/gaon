@@ -1,6 +1,6 @@
 # ADR 0022: A Node's certificate carries the Organization gaon:nodes, and the signer signs no other Organization
 
-> Status: accepted
+> Status: accepted; amended by ADR-0043, which lets a Node's certificate carry server auth as well as client auth
 > Date: 2026-11-13
 
 Drafted for garamsh/gaon#122, step of goal garamsh/gaon#117, decision D12. It supersedes [ADR 0007](./0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md) as to the subject of a Node's certificate, which Decision 4 gives the signer's approval and Decision 5 gives the agent's request, and in no other part. It narrows the refusal that [ADR 0008](./0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md) §Consequences, "The signer must refuse an Organization in a request's subject", puts on the signer: the signer still refuses every Organization but one. ADR 0008's Decision stands.

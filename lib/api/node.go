@@ -85,7 +85,7 @@ func (n *Node) ValidateStatus() error {
 		}
 	}
 	if n.Status.AgentPort < 0 || n.Status.AgentPort > 65535 {
-		return invalid("status.agentPort is %d, want 1 to 65535", n.Status.AgentPort)
+		return invalid("status.agentPort is %d, want 0 (none) to 65535", n.Status.AgentPort)
 	}
 	for _, c := range n.Status.Conditions {
 		if err := c.validate(); err != nil {

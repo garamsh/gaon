@@ -9,9 +9,9 @@ Drafted for garamsh/gaon#275, part of goal #117, whose decision D5 is the PM's: 
 
 - **There is no way to read what a MicroVM printed, or to run a command in it.** The API server serves objects only, the Node Agent is a client of the API server and serves no endpoint, and [resource-api.md](../resource-api.md) §Open questions lists "Data-plane route: how exec, file and console traffic reaches a node" as undecided.
 - **What mvmd offers.** The statements in this list hold for garamsh/mvmd at commit `eebb760d62370c1ebf49bb86c5a9413d76c71650`, read from `lib/runtimeapi/proto/mvmd/runtime/v1alpha2/runtime.proto`, `docs/architecture/runtime-api.md` §Guest access and `docs/architecture/guest.md` §Current decisions:
-  - `Exec {exec_id, request_id, machine_id, command, env, working_dir}` starts a command in the guest. There is no user, no standard input and no terminal: the command runs as root with exactly the environment given. An exec runs at most once per request ID, and mvmd never ends one by itself.
+  - `Exec {exec_id, request_id, machine_id, command, env, working_dir}` starts a command in the guest. `ExecRequest.env` is a map of strings. There is no user, no standard input and no terminal, and none of the proto, `runtime-api.md` or `guest.md` at that commit says which user an exec runs as; the entrypoint's user is `RunConfig.user` (mvmd's ADR 0048), which an exec does not carry. An exec runs at most once per request ID, and mvmd never ends one by itself. `SignalExec {machine_id, exec_id, signal}` delivers a signal to a command that runs, and a repeat is not idempotent (`runtime-api.md` §Guest access).
   - `ReadExecOutput {machine_id, exec_id, after_offset}` streams `OutputChunk {stream, offset, data}`, standard output and standard error in one sequence of offsets, then an `ExecRecord {status, reason, exit_code, term_signal, ended_at}` whose status is `STARTED`, `NOT_STARTED`, `CUT_SHORT` or `EXITED`. An offset no longer held is answered `OutputGone {earliest_offset}`.
-  - The MicroVM's process is the exec whose ID is `entrypoint`. Its output is carried by this call and not by the serial console. The guest keeps the newest 16 MiB of output per command and ends the Machine within 5 s of the entrypoint's exit.
+  - The MicroVM's process is the exec whose ID is `entrypoint`. Its output is carried by this call and not by the serial console. The guest keeps the newest bytes of each command's output, up to a retention it is configured with, 16 MiB by default (`guest.md` §Current decisions), and ends the Machine within 5 s of the entrypoint's exit.
   - The call needs a Running Machine, unless the exec's record is already final, which is answered from the record. For a Stopped Machine the entrypoint's record is answered from the console log, and its output is not.
   - `Console` is a bidirectional serial console. It does not replay earlier output.
   - A `tail_bytes` field of `ReadExecOutputRequest`, with the rules garamsh/mvmd#438 point 5 states (a non-zero offset with it is invalid, a value larger than what is held starts at the oldest byte held, zero means unset), is garamsh/mvmd#619. **It is an open issue and is not merged.** The guest-agent half merged as `df306f633d99575a88003478987255db3cfc5d80`.
@@ -22,7 +22,7 @@ Drafted for garamsh/gaon#275, part of goal #117, whose decision D5 is the PM's: 
   - **no `previous`, `sinceTime`, `sinceSeconds`, `limitBytes`, `timestamps` or `container`:** one process per MicroVM, no kept earlier container, and mvmd keeps no timestamps;
   - **`tailBytes` where Kubernetes has `tailLines`:** mvmd can bound a read by bytes and not by lines;
   - **exec has no standard input, no terminal and no resize,** and its transport is not SPDY or WebSocket. Output is a stream of JSON objects, as [resource-api.md](../resource-api.md) §Watch is;
-  - **exec has no user:** mvmd runs every command as root, so `create` on `microvms/exec` is root in the guest. Kubernetes' `pods/exec` runs as the container's user;
+  - **exec has no user and says nothing of one:** mvmd's `Exec` carries none and its documents do not say which user the Guest Agent runs a command as, so the contract treats `create` on `microvms/exec` as holding the guest. Kubernetes' `pods/exec` runs as the container's user;
   - **a finished MicroVM's output is readable** while the MicroVM object exists, as Kubernetes' is while the Pod is. Consequence 1 says what that needs.
 
 ## Decision
@@ -40,20 +40,21 @@ Drafted for garamsh/gaon#275, part of goal #117, whose decision D5 is the PM's: 
 
 2. **The log query.**
    - `follow`: boolean, default false. True keeps the response open until the MicroVM's process ends or the client disconnects; false returns what is held and ends.
-   - `tailBytes`: integer from 1 to 16 777 216 (16 MiB, the most the guest holds). Absent, the read starts at the oldest byte held. `0`, a negative number, a value above the bound or one that is not an integer is `Invalid`: `0` is refused because mvmd reads it as unset and would answer the whole output where the caller asked for none.
+   - `tailBytes`: an integer of at least 1 that fits in 64 bits. Absent, the read starts at the oldest byte held. A value larger than what is held starts at the oldest byte held, as mvmd#438 point 5 states, so gaon sets no upper bound of its own: the retention is configurable and a bound here would be wrong where it is raised. `0`, a negative number or one that is not an integer is `Invalid`: `0` is refused because mvmd reads it as unset and would answer the whole output where the caller asked for none.
    - Any other parameter is `Invalid`. Unknown parameters are refused, not ignored, so that a parameter a later version adds is not silently dropped by an older server.
    - The body is standard output and standard error interleaved in the order the guest produced them, as one sequence. They cannot be told apart, because the stream of each chunk is not forwarded.
    - Output is readable while the MicroVM object exists, a finished `Once` MicroVM's included. Deleting the MicroVM ends it. What serves it after the Machine stops is Consequence 1.
    - There is no resume offset. A client that was cut reads again with `tailBytes`.
+   - A cut is not an end. The body has no framing, so the API server ends it cleanly only when the process has ended or the held output has been sent. When the agent or the connection to it fails after the response began, the API server aborts the response (it resets the stream and does not complete the body), so that the client sees a transport error and not a short log.
 
 3. **The exec request.**
-   - The body is JSON: `command`, a non-empty list of strings whose first element is non-empty; `env`, a list of `{name, value}` objects, default empty; `workingDir`, a string, default the guest's own. Any other field is `Invalid`. The environment is a list and not a map so that its order is the caller's.
+   - The body is JSON: `command`, a non-empty list of strings whose first element is non-empty; `env`, a list of `{name, value}` objects, default empty; `workingDir`, a string, default the guest's own. Any other field is `Invalid`. `env` has the shape of a MicroVM's `spec.env` without `valueFrom`, and its names obey that rule (letters, digits, `-`, `_` and `.`, not starting with a digit, so never empty and never containing `=`) and are unique; any other is `Invalid`, which covers the checks mvmd's Create makes for an environment. mvmd's `env` is a map, so the list's order does not reach the guest.
    - The response is a stream of JSON objects, one per line, each with a `type` in PascalCase as a Watch event's is:
      - `Output`: `stream` (`Stdout` or `Stderr`) and `data`, the bytes in base64;
      - `Exit`, the last object of a command that ran: `status` (`Exited`, `CutShort` or `NotStarted`), `exitCode`, `termSignal` and `reason`, those that the record has;
      - `Error`: an error object, as in a Watch, for a failure after the response began.
    - The agent makes the `exec_id` and the `request_id`, fresh for each request, and never repeats a call: a command that may have started is not run twice.
-   - A client that disconnects does not stop the command. mvmd has no call that ends one.
+   - A client that disconnects does not stop the command. mvmd has `SignalExec`, and the agent does not call it on a disconnect: a signal is not idempotent, a cut connection says nothing of whether the command should stop, and the client has no exec identifier with which to look the command up again. A way to end a command is not in this contract (Consequence 7).
    - Exec is refused with `NotRunning` when the Machine is not Running or the MicroVM has a `deletionTimestamp`.
    - Interactive exec (standard input, a terminal) is **deferred**: mvmd's `Exec` has neither, and its `Console` is the serial console, not a shell. It waits for mvmd.
 
@@ -61,7 +62,7 @@ Drafted for garamsh/gaon#275, part of goal #117, whose decision D5 is the PM's: 
 
 5. **Finding the agent.**
    - The API server reads the MicroVM's `spec.nodeName`, then the Node of that name, and dials the agent at an address of `status.addresses`, in order, on the Node's new `status.agentPort`, an integer from 1 to 65 535 the agent writes with `addresses`.
-   - The agent's paths mirror the public ones, under `/microvms/{name}/log` and `/microvms/{name}/exec`, and its query carries `bindingEpoch`, the epoch the API server read from the MicroVM. An agent that holds the Machine at another epoch refuses.
+   - The agent's paths mirror the public ones, under `/microvms/{name}/log` and `/microvms/{name}/exec`, and its query carries `bindingEpoch`, the MicroVM's `spec.bindingEpoch` (its `status.bindingEpoch` may differ, [resource-api.md](../resource-api.md) §MicroVM), and `uid`, its `metadata.uid`. The epoch alone does not tell a MicroVM from one deleted and created again under the same name, which starts again at epoch 1. An agent that does not hold the Machine at that epoch, or whose MicroVM has another uid, refuses with `NotRunning`.
    - The API server does not wait on a Node's conditions: it dials, and a failure to is the answer (Decision 8). It does not retry.
    - The port is a field of the Node and not an API server flag: the agent knows what it listens on, and a flag would couple the settings of two programs deployed apart.
 
@@ -71,7 +72,12 @@ Drafted for garamsh/gaon#275, part of goal #117, whose decision D5 is the PM's: 
    - The agent's serving certificate is its Node certificate (Decision 7). The API server verifies the chain to the cluster CA and that the CN is the name of the Node it meant to reach. It does not check the host name or an address, because the certificate has none.
    - The agent does not authenticate the end user and does not ask the API server who it is. The API server authorized the user, and the agent serves only a Machine it holds at the epoch.
 
-7. **The signer adds `serverAuth`.** The csr-signer issues Node certificates with the extended key usage `serverAuth` as well as `clientAuth`. A certificate issued before this change gains it at its next renewal; until then the agent of that Node cannot serve and the answer is `Unavailable`. This amends ADR 0007 and ADR 0022, which issue client authentication only. The change is in the signer and in [csr-signer.md](../csr-signer.md), and lands with the PR that serves the endpoint.
+7. **A Node asks for `serverAuth`, and the signer accepts it.**
+   - The agent's certificate request asks for the extended key usage `clientAuth` and `serverAuth`. The csr-signer's rule 3 accepts a request whose extended key usage is exactly `clientAuth` alone or exactly `clientAuth` and `serverAuth`, and signs exactly the usage the request states, so it adds nothing the request did not ask for (ADR 0022 §Rejected alternatives). A request for anything else stays `DisallowedExtension`.
+   - **Order.** The signer change lands before the agent change. An agent that asks for both before the signer accepts both is `Denied` and cannot renew.
+   - An existing certificate carries `clientAuth` alone. The agent asks for both at its next renewal, at two thirds of the validity; until then its Node cannot serve and the answer is `Unavailable`.
+   - **An operator-supplied Node certificate** (`--tls-cert` and `--tls-key`, [deployment.md](../deployment.md) §Certificates) serves only if it chains to the cluster CA, has the Node's name as its CN, and carries `serverAuth` as well as `clientAuth`. One without `serverAuth` leaves its Node's logs and exec `Unavailable`.
+   - This amends ADR 0007 and ADR 0022, which issue client authentication only. [csr-signer.md](../csr-signer.md) states it as decided; the signer and the agent do not do it yet.
 
 8. **What is answered when there is no machine.** Two reasons are added to [resource-api.md](../resource-api.md) §Watch's list:
 
@@ -84,15 +90,17 @@ Drafted for garamsh/gaon#275, part of goal #117, whose decision D5 is the PM's: 
 
 ## Consequences
 
-1. **The promise that output is readable after the process ends is not yet kept by mvmd.** At the commit above, mvmd answers a Stopped Machine's entrypoint from the console log and not from output, and a `Once` MicroVM's Machine stops within 5 s of the entrypoint's exit. Output "readable until the MicroVM is deleted" needs mvmd to retain it, or the Node Agent to copy it before the Machine stops. Which is the PM's, and the issue that serves the log cannot be filed until it is decided.
+1. **A finished MicroVM's output is kept by mvmd, not copied by the Node Agent (PM decision, pending garamsh/mvmd#632).** At the commit above, mvmd answers a Stopped Machine's entrypoint from the console log and not from output, and a `Once` MicroVM's Machine stops within 5 s of the entrypoint's exit, so the promise that output is readable until the MicroVM is deleted is not yet kept. The runtime sees every byte, where a copy in the agent would read every MicroVM's stream continuously and lose bytes while the agent is down; Kubernetes splits it the same way, the container runtime keeping an exited container's log and the kubelet serving it. garamsh/mvmd#632 is accepted and blocked by garamsh/mvmd#619. How much is kept and whether it survives a restart are mvmd's ADR's to decide, and this contract states neither.
 2. **A read that does not follow, of a Running Machine, cannot be ended by mvmd's stream,** which has no caught-up marker. It needs one from mvmd, or an idle interval chosen by the serving issue.
 3. **`gaon:controllers` can read every MicroVM's output,** because its `get` on `*` matches `microvms/log`. It is left as it is: narrowing a bootstrap role is its own decision.
-4. **`create` on `microvms/exec` is root in the guest.** A role that holds it holds the guest. The resource document says so.
+4. **`create` on `microvms/exec` holds the guest.** mvmd does not say which user an exec runs as, and a role that holds it is treated as holding the guest. The resource document says so.
 5. **The API server is a client of every Node's agent.** It needs a certificate of its own, and deployment gains one more file to deliver. The agent gains a listener, a port and a serving certificate; each is the serving issue's.
-6. **A Node certificate that does not carry `serverAuth` makes its Node's logs and exec `Unavailable`** until it renews.
-7. **An exec's output is held in the guest and no call discards it,** so each exec adds to a table that is not bounded. It is an open question for mvmd.
-8. **Output across a restart is not stitched.** A new binding is a new Machine; a log read after a restart answers that Machine's output only, and a request carrying an earlier epoch is refused.
+6. **A Node certificate that does not carry `serverAuth` makes its Node's logs and exec `Unavailable`** until it renews with the new request (Decision 7).
+7. **An exec's record and output are held in the guest and no call discards them,** so each exec adds to a table that is not bounded. A command that never ends and whose client has gone keeps running, and nothing in this contract ends it: the client is not given the exec identifier, and the agent does not call `SignalExec`. Both are open questions.
+8. **Output across a rebinding is not stitched.** A new binding is a new Machine; a log read after one answers that Machine's output only, and a request carrying an earlier epoch is refused.
 9. **`tailBytes` waits for garamsh/mvmd#619.** Until it merges, the agent would read from the start and discard, which is the serving issue's to weigh.
+10. **Under `--authorization-mode` `AlwaysAllow`, the default, every authenticated caller may read any MicroVM's output and run a command in any MicroVM** ([resource-api.md](../resource-api.md) §Authorization), a Node's certificate and a MicroVM's ServiceAccount token included. Only `RBAC` separates them.
+11. **A bootstrap token holder can obtain a certificate for any Node name** (ADR 0007 §Consequences). With this route that holder, once its certificate carries `serverAuth`, can serve as that Node's agent if it also puts its own address in the Node's `status.addresses`: it would then receive the commands and environments users send to that Node's MicroVMs, and serve forged log output. The route does not narrow what a token can obtain; the exposure is limited by the token's revocation (deployment.md §Certificates), not by a rule here.
 
 ## Signs the decision was wrong
 

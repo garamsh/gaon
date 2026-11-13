@@ -36,6 +36,7 @@ The rules are checked in order and the first failure is recorded as `Denied`, wi
 ### What it signs
 
 - **The subject and public key of the request**, with a random 128-bit serial, key usage digital signature and extended key usage client auth only. The certificate is not a CA and carries no name but the subject.
+- **Decided, not yet done ([ADR 0043](./adr/0043-a-microvms-log-and-exec-are-subresources-authorized-apart-from-get-and-the-api-server-proxies-them-to-its-nodes-agent-over-mutual-tls.md)).** A Node Agent is to serve a MicroVM's log and exec, so its request will ask for the extended key usage client auth and server auth. Rule 3 will accept an extended key usage of exactly client auth alone or exactly client auth and server auth, and the certificate will carry exactly the usage the request states; any other request stays `DisallowedExtension`. This signer change lands before the agent's, because an agent that asks for both first is `Denied` and cannot renew. Until then rule 3 and the usage above are what the signer does.
 - **`NotBefore` is the signing time minus 5 minutes**, for clock skew between Nodes, as the Kubernetes signer does. **`NotAfter` is the signing time plus `--signing-duration`**, never later than the CA certificate's `NotAfter`.
 
 ### Configuration

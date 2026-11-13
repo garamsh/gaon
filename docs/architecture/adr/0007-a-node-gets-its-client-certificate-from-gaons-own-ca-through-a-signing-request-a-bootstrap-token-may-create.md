@@ -1,6 +1,6 @@
 # ADR 0007: A Node gets its client certificate from gaon's own CA through a signing request that a bootstrap token may create
 
-> Status: accepted; the subject of a Node's certificate, in Decision 4 and Decision 5, is superseded by ADR-0022
+> Status: accepted; the subject of a Node's certificate, in Decision 4 and Decision 5, is superseded by ADR-0022; the extended key usage of a Node's certificate is amended by ADR-0043
 > Date: 2026-11-12
 
 Drafted for garamsh/gaon#64, under goal garamsh/gaon#63. The design is the PM's, taken under the project owner's decision 2 in garamsh/naru#34 and recorded in #63 §"CSR design (PM, under naru#34 decision 2)" and the PM's detail comment there. It follows the Kubernetes TLS-bootstrap pattern. It amends [ADR 0005](./0005-the-api-server-serves-beyond-loopback-only-with-mutual-tls.md), Decision 1, and answers the question [ADR 0006](./0006-a-gaon-deployment-is-one-control-plane-node-configured-by-argv-and-files.md) left open, its Decision 5.
