@@ -126,3 +126,17 @@ func TestEnforce_UnimplementedIsNotAFailureButAnyOtherErrorIsLogged(t *testing.T
 		})
 	}
 }
+
+func TestEnforce_AWarningNamesAPluginThatDoesNotEnforceOnlyWhileAPolicySelectsAMicroVMHere(t *testing.T) {
+	const warning = "level=WARN msg=\"NetworkPolicy selects MicroVMs on this node"
+	n := &enforcingNetwork{err: status.Error(codes.Unimplemented, "no")}
+	log := &syncBuffer{}
+	e := start(t, true, nil, func(e *env) { e.network, e.log = n, log })
+	e.gaon.SetMicroVM(labelled(microvm("web", 1, node, api.RunAlways), map[string]string{"app": "web"}))
+	eventually(t, "web runs", e.running("web-e1"))
+	eventually(t, "it was asked more than once", func() bool { n.mu.Lock(); defer n.mu.Unlock(); return n.n > 1 })
+	assert.NotContains(t, log.String(), warning, "control: no policy selects a MicroVM")
+
+	e.gaon.SetNetworkPolicy(policy("deny", api.NetworkPolicySpec{PodSelector: api.LabelSelector{MatchLabels: map[string]string{"app": "web"}}}))
+	eventually(t, "the warning is logged", func() bool { return strings.Contains(log.String(), warning) })
+}

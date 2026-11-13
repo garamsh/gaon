@@ -32,12 +32,28 @@ func (s *service) enforce(ctx context.Context) error {
 	}
 	if err := e.Enforce(ctx, limits); err != nil {
 		if status.Code(err) == codes.Unimplemented {
-			s.log.Debug("the network plugin does not enforce NetworkPolicy", "error", err)
+			// Without a policy that selects a MicroVM here there is nothing
+			// left unenforced, so only then is it not worth a warning.
+			if limited(limits) {
+				s.log.Warn("NetworkPolicy selects MicroVMs on this node and the network plugin does not enforce it", "error", err)
+			} else {
+				s.log.Debug("the network plugin does not enforce NetworkPolicy", "error", err)
+			}
 			return nil
 		}
 		return fmt.Errorf("network plugin enforce: %w", err)
 	}
 	return nil
+}
+
+// limited reports whether any of limits restricts a direction.
+func limited(limits []plugin.MicroVMLimits) bool {
+	for _, l := range limits {
+		if l.Ingress != nil || l.Egress != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // effectiveLimits returns, for each MicroVM to run here that has an address,
