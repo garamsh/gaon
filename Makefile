@@ -32,9 +32,13 @@ format:
 format-apply:
 	$(GO_FILES) | xargs -0 gofmt -w
 
+# go test prints only `ok <pkg>` for a package that passes, so the target reads
+# the event stream (-json) and reports the tests skipped per package and in
+# total through tooling/test-report.sh, which needs jq. The exit status is go
+# test's, kept by pipefail.
 test:
 	@$(call count_packages,test)
-	go test $(PATTERNS)
+	go test -json $(PATTERNS) | tooling/test-report.sh
 
 build:
 	@$(call count_packages,build)
