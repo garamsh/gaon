@@ -22,8 +22,8 @@ type lan struct {
 
 // converge makes the host addresses of the pool on the interface exactly want:
 // it removes those not in want and adds those missing. An address of want
-// outside the pool, or any address with no interface, is an error and nothing
-// is added.
+// outside the pool is left out and reported, and the rest still converges. With
+// no interface any address is an error.
 func (l lan) converge(want []netip.Addr) error {
 	if l.iface == "" {
 		if len(want) > 0 {
@@ -31,20 +31,24 @@ func (l lan) converge(want []netip.Addr) error {
 		}
 		return nil
 	}
+	var errs []error
+	var inside []netip.Addr
 	for _, a := range want {
 		if !l.inPool(a) {
-			return fmt.Errorf("announce %s: outside --lan-pool %v", a, l.pool)
+			errs = append(errs, fmt.Errorf("announce %s: outside --lan-pool %v", a, l.pool))
+			continue
 		}
+		inside = append(inside, a)
 	}
+	want = inside
 	link, err := netlink.LinkByName(l.iface)
 	if err != nil {
-		return fmt.Errorf("lan interface %s: %w", l.iface, err)
+		return errors.Join(append(errs, fmt.Errorf("lan interface %s: %w", l.iface, err))...)
 	}
 	have, err := netlink.AddrList(link, netlink.FAMILY_ALL)
 	if err != nil {
-		return fmt.Errorf("list addresses of %s: %w", l.iface, err)
+		return errors.Join(append(errs, fmt.Errorf("list addresses of %s: %w", l.iface, err))...)
 	}
-	var errs []error
 	held := map[netip.Addr]bool{}
 	for _, h := range have {
 		a, ok := netip.AddrFromSlice(h.IP)

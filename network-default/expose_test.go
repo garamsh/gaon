@@ -280,17 +280,37 @@ func TestExpose_ALANAddressIsAnsweredForWhileAnnouncedAndNotAfter(t *testing.T) 
 	assert.Nil(t, neighbour(t, top.peer, lanAddr), "no ARP answer")
 }
 
-func TestExpose_ALANAddressOutsideThePoolOrWithoutAnInterfaceIsAnErrorAndNothingIsAnnounced(t *testing.T) {
+func TestExpose_ALANAddressOutsideThePoolIsAnErrorAndTheRestStillConverges(t *testing.T) {
 	requireNamespaces(t)
-	top := newTopology(t, []string{"10.1.0.10/24"}, []string{"10.2.0.5/24"})
-	listen(t, top.vm, "10.1.0.10:8080")
+	newTopology(t, []string{"10.1.0.10/24"}, []string{"10.2.0.5/24"})
+	d := lanDefault(t)
+	const stale, fresh, outside = "10.2.0.201", "10.2.0.202", "10.2.0.10"
+	held := func() []string {
+		l, err := netlink.LinkByName("peer0")
+		require.NoError(t, err)
+		addrs, err := netlink.AddrList(l, netlink.FAMILY_V4)
+		require.NoError(t, err)
+		var got []string
+		for _, a := range addrs {
+			got = append(got, a.IPNet.String())
+		}
+		return got
+	}
+	expose(t, d, nil, stale)
+	require.Contains(t, held(), stale+"/32", "control: an address in the pool is announced")
 
-	err := lanDefault(t).Expose(context.Background(), nil, []string{"10.2.0.10"})
+	err := d.Expose(context.Background(), nil, []string{fresh, outside})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "outside")
-	assert.Error(t, dial(top.peer, "10.2.0.10:80"))
+	got := held()
+	assert.NotContains(t, got, outside+"/32", "the address outside the pool is not announced")
+	assert.Contains(t, got, fresh+"/32", "an address in the pool of the same call is announced")
+	assert.NotContains(t, got, stale+"/32", "a stale address is withdrawn in the same call")
+}
 
-	err = (&networkdefault.Default{}).Expose(context.Background(), nil, []string{lanAddr})
+func TestExpose_AnAnnouncedAddressWithoutAnInterfaceIsAnError(t *testing.T) {
+	requireNamespaces(t)
+	err := (&networkdefault.Default{}).Expose(context.Background(), nil, []string{lanAddr})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--lan-interface")
 
