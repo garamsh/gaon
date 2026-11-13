@@ -16,7 +16,8 @@ import (
 // Service registers the node and reports its status.
 type Service interface {
 	// Sync creates the Node when the API has none, then writes its status:
-	// state from spec.admitted, capacity and MicroVM prefixes from mvmd's
+	// the addresses and agent port the agent was given, state from
+	// spec.admitted, capacity and MicroVM prefixes from mvmd's
 	// runtime info, and the Ready condition. A prefix that is not a CIDR is
 	// logged and left out. When mvmd does not answer, Ready is written false
 	// with the error as its message, the stored capacity and prefixes are
@@ -31,17 +32,28 @@ type Service interface {
 	Run(ctx context.Context, period time.Duration)
 }
 
+// Reach is where the agent serves a MicroVM's log and exec, as the Node's
+// status states it. The zero value states none.
+type Reach struct {
+	// Addresses are the addresses the agent listens on.
+	Addresses []string
+	// Port is the port it listens on at them; zero when it serves none.
+	Port int
+}
+
 type service struct {
 	name    string
+	reach   Reach
 	nodes   Nodes
 	runtime Runtime
 	clock   clock.Clock
 	log     *slog.Logger
 }
 
-// NewService returns a Service for the Node named name.
-func NewService(name string, nodes Nodes, runtime Runtime, clk clock.Clock, log *slog.Logger) Service {
-	return &service{name: name, nodes: nodes, runtime: runtime, clock: clk, log: log}
+// NewService returns a Service for the Node named name, whose status states
+// reach.
+func NewService(name string, reach Reach, nodes Nodes, runtime Runtime, clk clock.Clock, log *slog.Logger) Service {
+	return &service{name: name, reach: reach, nodes: nodes, runtime: runtime, clock: clk, log: log}
 }
 
 func (s *service) Register(ctx context.Context, period time.Duration) error {
@@ -86,6 +98,8 @@ func (s *service) Sync(ctx context.Context) error {
 		return err
 	}
 	next := *current
+	next.Status.Addresses = s.reach.Addresses
+	next.Status.AgentPort = s.reach.Port
 	next.Status.State = api.NodeStateDiscovered
 	if current.Spec.Admitted {
 		next.Status.State = api.NodeStateAdmitted

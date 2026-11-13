@@ -2,14 +2,17 @@ package microvms
 
 import (
 	"sort"
+	"sync"
 
 	"github.com/garamsh/gaon/lib/api"
 )
 
 // cache is the agent's view of the MicroVMs, owned by the one goroutine that
-// reconciles. It never lets a MicroVM's epoch go back: a binding older than
-// the newest epoch seen is ignored, whatever delivered it.
+// reconciles, which alone writes it and reads it without the lock. Another
+// goroutine reads it through holds. It never lets a MicroVM's epoch go back: a
+// binding older than the newest epoch seen is ignored, whatever delivered it.
 type cache struct {
+	mu       sync.RWMutex
 	node     string
 	microvms map[string]api.MicroVM
 	newest   map[string]api.Epoch
@@ -22,6 +25,12 @@ func newCache(node string) *cache {
 // observe records m and reports whether it was taken: it is not when its
 // epoch is below the newest seen for its name.
 func (c *cache) observe(m api.MicroVM) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.take(m)
+}
+
+func (c *cache) take(m api.MicroVM) bool {
 	name := m.Metadata.Name
 	if m.Spec.BindingEpoch < c.newest[name] {
 		return false
@@ -34,6 +43,8 @@ func (c *cache) observe(m api.MicroVM) bool {
 // forget removes a deleted MicroVM, unless the event is older than the
 // newest binding seen.
 func (c *cache) forget(m api.MicroVM) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	name := m.Metadata.Name
 	if m.Spec.BindingEpoch < c.newest[name] {
 		return false
@@ -45,10 +56,12 @@ func (c *cache) forget(m api.MicroVM) bool {
 
 // replace rebuilds the cache from a list: a MicroVM the list lacks is gone.
 func (c *cache) replace(list []api.MicroVM) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	listed := map[string]bool{}
 	for _, m := range list {
 		listed[m.Metadata.Name] = true
-		c.observe(m)
+		c.take(m)
 	}
 	for name := range c.microvms {
 		if !listed[name] {
@@ -62,6 +75,18 @@ func (c *cache) replace(list []api.MicroVM) {
 // being deleted.
 func (c *cache) mine(m api.MicroVM) bool {
 	return m.Spec.NodeName == c.node && m.Metadata.DeletionTimestamp == nil
+}
+
+// holds returns the MicroVM named when it is bound to this node at epoch and
+// has uid. It is safe to call from any goroutine.
+func (c *cache) holds(name string, epoch api.Epoch, uid api.UID) (api.MicroVM, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	m, ok := c.microvms[name]
+	if !ok || m.Spec.NodeName != c.node || m.Spec.BindingEpoch != epoch || m.Metadata.UID != uid {
+		return api.MicroVM{}, false
+	}
+	return m, true
 }
 
 // wanted returns the mvmd identifiers of the MicroVMs to run here.

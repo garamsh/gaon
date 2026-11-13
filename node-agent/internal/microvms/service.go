@@ -40,6 +40,9 @@ type Service interface {
 	// Run lists the MicroVMs, watches them and reconciles on every change and
 	// every Params.Resync, until ctx ends.
 	Run(ctx context.Context)
+	// Holds returns the MicroVM name when the agent holds it: it is bound to
+	// this node at epoch and has uid. It may be called while Run runs.
+	Holds(name string, epoch api.Epoch, uid api.UID) (api.MicroVM, bool)
 }
 
 type service struct {
@@ -60,6 +63,10 @@ type service struct {
 // readies.
 func NewService(node string, params Params, api API, runtime Runtime, network Network, storage Storage, clk clock.Clock, log *slog.Logger) Service {
 	return &service{node: node, params: params, api: api, runtime: runtime, network: network, storage: storage, clock: clk, log: log, cache: newCache(node), runs: map[string]*run{}}
+}
+
+func (s *service) Holds(name string, epoch api.Epoch, uid api.UID) (api.MicroVM, bool) {
+	return s.cache.holds(name, epoch, uid)
 }
 
 func (s *service) Run(ctx context.Context) {

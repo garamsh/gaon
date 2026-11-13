@@ -48,6 +48,11 @@ func newFlakyService(t *testing.T) (node.Service, *fakegaon.Server, *clock.Fake,
 // newLoggingService is newFlakyService with the agent's log written to w, and
 // the fake mvmd returned.
 func newLoggingService(t *testing.T, w io.Writer) (node.Service, *fakegaon.Server, *fakemvmd.Server, *clock.Fake, *flaky) {
+	return newReachingService(t, w, node.Reach{})
+}
+
+// newReachingService is newLoggingService with a Node status that states reach.
+func newReachingService(t *testing.T, w io.Writer, reach node.Reach) (node.Service, *fakegaon.Server, *fakemvmd.Server, *clock.Fake, *flaky) {
 	t.Helper()
 	clk := clock.NewFake(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	gaon, mvmd := fakegaon.New(t), fakemvmd.New(t, clk)
@@ -55,7 +60,7 @@ func newLoggingService(t *testing.T, w io.Writer) (node.Service, *fakegaon.Serve
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 	rt := &flaky{Runtime: v1alpha2.NewRuntimeServiceClient(conn)}
-	svc := node.NewService("n1", api.NewClient(gaon.URL, nil), rt, clk, slog.New(slog.NewTextHandler(w, nil)))
+	svc := node.NewService("n1", reach, api.NewClient(gaon.URL, nil), rt, clk, slog.New(slog.NewTextHandler(w, nil)))
 	return svc, gaon, mvmd, clk, rt
 }
 
@@ -74,6 +79,20 @@ func TestSync_CreatesTheNodeWithAnEmptySpecAndCapacityFromRuntimeInfo(t *testing
 	require.Len(t, n.Status.Conditions, 1)
 	assert.Equal(t, api.NodeReady, n.Status.Conditions[0].Type)
 	assert.Equal(t, api.ConditionTrue, n.Status.Conditions[0].Status)
+}
+
+func TestSync_WritesTheAddressesAndAgentPortItWasGivenAndNoneWhenGivenNone(t *testing.T) {
+	svc, gaon, _, _, _ := newReachingService(t, io.Discard, node.Reach{Addresses: []string{"10.0.0.7", "fd00::7"}, Port: 10250})
+	require.NoError(t, svc.Sync(context.Background()))
+	n, _ := gaon.Node("n1")
+	assert.Equal(t, []string{"10.0.0.7", "fd00::7"}, n.Status.Addresses)
+	assert.Equal(t, 10250, n.Status.AgentPort)
+
+	none, gaonNone, _ := newService(t)
+	require.NoError(t, none.Sync(context.Background()))
+	n, _ = gaonNone.Node("n1")
+	assert.Empty(t, n.Status.Addresses, "control: an agent given none writes none")
+	assert.Zero(t, n.Status.AgentPort)
 }
 
 func TestSync_ReportsAdmittedOnceAUserAdmitsTheNodeAndKeepsTheirSpec(t *testing.T) {

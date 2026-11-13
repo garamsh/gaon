@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
 	"math/big"
 	"net"
@@ -46,19 +47,20 @@ type CSRCreate struct {
 }
 
 type tlsState struct {
-	clk      clock.Clock
-	caCert   *x509.Certificate
-	caKey    *ecdsa.PrivateKey
-	caFile   string
-	srv      *httptest.Server
-	tokens   map[string]bool
-	seen     []Seen
-	creates  []CSRCreate
-	gets     int
-	validity time.Duration
-	deny     string
-	hold     bool
-	pending  []string
+	clk        clock.Clock
+	caCert     *x509.Certificate
+	caKey      *ecdsa.PrivateKey
+	caFile     string
+	srv        *httptest.Server
+	tokens     map[string]bool
+	seen       []Seen
+	creates    []CSRCreate
+	gets       int
+	validity   time.Duration
+	deny       string
+	clientOnly bool
+	hold       bool
+	pending    []string
 }
 
 // NewTLS starts a fake that serves TLS 1.3 and acts as the API server and the
@@ -131,6 +133,14 @@ func (s *Server) SetSigning(validity time.Duration) {
 	s.tls.validity, s.tls.deny = validity, ""
 }
 
+// SignClientAuthOnly makes the signer ignore the extended key usage a request
+// asks for and sign client auth alone, as a signer from before ADR 0043 does.
+func (s *Server) SignClientAuthOnly() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tls.clientOnly = true
+}
+
 // DenyRequests makes the signer deny each request decided from now on, with
 // reason.
 func (s *Server) DenyRequests(reason string) {
@@ -183,9 +193,15 @@ func (s *Server) CSRReads() int {
 // by the server's CA, and its key, both PEM.
 func (s *Server) Issue(t testing.TB, cn string, notBefore, notAfter time.Time) (certPEM, keyPEM []byte) {
 	t.Helper()
+	return s.IssueFor(t, pkix.Name{CommonName: cn}, notBefore, notAfter, x509.ExtKeyUsageClientAuth)
+}
+
+// IssueFor is Issue for a subject and the extended key usages given.
+func (s *Server) IssueFor(t testing.TB, subject pkix.Name, notBefore, notAfter time.Time, usages ...x509.ExtKeyUsage) (certPEM, keyPEM []byte) {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
-	der, err := s.sign(pkix.Name{CommonName: cn}, &key.PublicKey, notBefore, notAfter)
+	der, err := s.sign(subject, &key.PublicKey, notBefore, notAfter, usages...)
 	require.NoError(t, err)
 	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
 	require.NoError(t, err)
@@ -193,14 +209,45 @@ func (s *Server) Issue(t testing.TB, cn string, notBefore, notAfter time.Time) (
 		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
 }
 
-func (s *Server) sign(subject pkix.Name, pub any, notBefore, notAfter time.Time) ([]byte, error) {
+func (s *Server) usages(csr *x509.CertificateRequest) []x509.ExtKeyUsage {
+	if s.tls.clientOnly {
+		return []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+	}
+	return requestedUsages(csr)
+}
+
+// requestedUsages returns the extended key usage csr asks for: client auth
+// alone when it asks for none, as the signer of ADR 0043 does.
+func requestedUsages(csr *x509.CertificateRequest) []x509.ExtKeyUsage {
+	for _, e := range csr.Extensions {
+		if !e.Id.Equal(asn1.ObjectIdentifier{2, 5, 29, 37}) {
+			continue
+		}
+		var oids []asn1.ObjectIdentifier
+		if _, err := asn1.Unmarshal(e.Value, &oids); err != nil {
+			panic(err)
+		}
+		var usages []x509.ExtKeyUsage
+		for _, oid := range oids {
+			if oid.Equal(asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 3, 1}) {
+				usages = append(usages, x509.ExtKeyUsageServerAuth)
+			} else {
+				usages = append(usages, x509.ExtKeyUsageClientAuth)
+			}
+		}
+		return usages
+	}
+	return []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+}
+
+func (s *Server) sign(subject pkix.Name, pub any, notBefore, notAfter time.Time, usages ...x509.ExtKeyUsage) ([]byte, error) {
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
 	if err != nil {
 		return nil, err
 	}
 	return x509.CreateCertificate(rand.Reader, &x509.Certificate{
 		SerialNumber: serial, Subject: subject, NotBefore: notBefore, NotAfter: notAfter,
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: usages,
 	}, s.tls.caCert, pub, s.tls.caKey)
 }
 
@@ -298,7 +345,7 @@ func (s *Server) decide(name string) {
 	} else {
 		block, _ := pem.Decode([]byte(r.Spec.Request))
 		csr, _ := x509.ParseCertificateRequest(block.Bytes)
-		der, err := s.sign(csr.Subject, csr.PublicKey, now, now.Add(s.tls.validity))
+		der, err := s.sign(csr.Subject, csr.PublicKey, now, now.Add(s.tls.validity), s.usages(csr)...)
 		if err != nil {
 			panic(err)
 		}

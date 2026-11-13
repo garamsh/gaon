@@ -71,13 +71,27 @@ func (s *service) Run(ctx context.Context) {
 			if s.clock.Sleep(ctx, retryAfter) != nil {
 				return
 			}
+			continue
+		}
+		if s.params.Serving && !hasUsage(s.holder.get().Leaf, x509.ExtKeyUsageServerAuth) {
+			// The signer issued no server auth: asking again at once would
+			// loop, so ask again after the retry period.
+			s.log.Warn("the renewed client certificate lacks server auth, so the agent cannot serve", "node", s.params.NodeName, "retry_after", retryAfter)
+			if s.clock.Sleep(ctx, retryAfter) != nil {
+				return
+			}
 		}
 	}
 }
 
-// due is the time the current pair is renewed: two thirds into its validity.
+// due is the time the current pair is renewed: two thirds into its validity,
+// and at once when the agent serves and the pair cannot serve, as one issued
+// before the agent asked for server auth.
 func (s *service) due() time.Time {
 	leaf := s.holder.get().Leaf
+	if s.params.Serving && !hasUsage(leaf, x509.ExtKeyUsageServerAuth) {
+		return time.Time{}
+	}
 	return leaf.NotBefore.Add(leaf.NotAfter.Sub(leaf.NotBefore) * 2 / 3)
 }
 
