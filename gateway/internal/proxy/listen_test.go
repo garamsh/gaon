@@ -170,3 +170,14 @@ func TestListen_APortWhoseListenerFailsIsOpenedAgainByTheNextApply(t *testing.T)
 		})
 	}
 }
+
+func TestListen_ThePortBelow1024IsBoundAboveIt(t *testing.T) {
+	p := proxy.New(proxy.Config{Gateway: gwName}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(p.Close)
+	backends := map[string][]string{"a": {serving(t, "a")}}
+	routes := []api.CustomObject{httpRoute(t, "app", nil, true, rule(t, ruleTo{prefixes: []string{"/"}, backend: "a"}))}
+	p.Apply(objects(t, gatewayOf(t, httpListener("web", 80, "")), routes, backends))
+
+	assert.True(t, accepts("127.0.0.1:10080"), "the proxy listens on 10080 for the listener of port 80")
+	assert.False(t, accepts("127.0.0.1:80"), "control: nothing listens on port 80 itself")
+}
