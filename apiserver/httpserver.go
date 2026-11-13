@@ -63,6 +63,11 @@ func newHandler(svc resourceapi.Service, az authorization.Authorizer, tokens tok
 	mux.HandleFunc("GET "+root+"/volumes/{name}", h.guard(api.Group, "volumes", fixed(api.VerbGet), get(h, svc.GetVolume)))
 	mux.HandleFunc("GET "+root+"/volumes", h.guard(api.Group, "volumes", readVerb, listOrWatch(h, svc.ListVolumes, svc.WatchVolumes)))
 	mux.HandleFunc("PUT "+root+"/volumes/{name}/status", h.guard(api.Group, "volumes/status", fixed(api.VerbUpdate), put(h, svc.PutVolumeStatus)))
+	mux.HandleFunc("PUT "+root+"/volumesnapshots/{name}", h.guard(api.Group, "volumesnapshots", putVerb, h.putVolumeSnapshot(svc)))
+	mux.HandleFunc("DELETE "+root+"/volumesnapshots/{name}", h.guard(api.Group, "volumesnapshots", fixed(api.VerbDelete), deleteObject(h, svc.DeleteVolumeSnapshot)))
+	mux.HandleFunc("GET "+root+"/volumesnapshots/{name}", h.guard(api.Group, "volumesnapshots", fixed(api.VerbGet), get(h, svc.GetVolumeSnapshot)))
+	mux.HandleFunc("GET "+root+"/volumesnapshots", h.guard(api.Group, "volumesnapshots", readVerb, listOrWatch(h, svc.ListVolumeSnapshots, svc.WatchVolumeSnapshots)))
+	mux.HandleFunc("PUT "+root+"/volumesnapshots/{name}/status", h.guard(api.Group, "volumesnapshots/status", fixed(api.VerbUpdate), put(h, svc.PutVolumeSnapshotStatus)))
 	mux.HandleFunc("PUT "+root+"/storageclasses/{name}", h.guard(api.Group, "storageclasses", putVerb, put(h, svc.PutStorageClass)))
 	mux.HandleFunc("DELETE "+root+"/storageclasses/{name}", h.guard(api.Group, "storageclasses", fixed(api.VerbDelete), deleteObject(h, svc.DeleteStorageClass)))
 	mux.HandleFunc("GET "+root+"/storageclasses/{name}", h.guard(api.Group, "storageclasses", fixed(api.VerbGet), get(h, svc.GetStorageClass)))
@@ -423,6 +428,26 @@ func (h *handler) putVolume(svc resourceapi.Service) http.HandlerFunc {
 			}
 		}
 		out, err := svc.PutVolume(r.Context(), name, &in)
+		h.respond(w, r, out, err)
+	}
+}
+
+// putVolumeSnapshot writes a VolumeSnapshot, and an update of one only as far
+// as the caller's grant reaches: a Node's grant is its finalizer.
+func (h *handler) putVolumeSnapshot(svc resourceapi.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var in api.VolumeSnapshot
+		if !h.decode(w, r, &in) {
+			return
+		}
+		name := r.PathValue("name")
+		if in.Metadata.ResourceVersion != "" {
+			if err := h.az.AuthorizeVolumeSnapshotUpdate(r.Context(), callerOf(r).caller(), name, &in); err != nil {
+				h.fail(w, r, err)
+				return
+			}
+		}
+		out, err := svc.PutVolumeSnapshot(r.Context(), name, &in)
 		h.respond(w, r, out, err)
 	}
 }

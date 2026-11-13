@@ -14,6 +14,7 @@ type Source interface {
 	GetMicroVM(ctx context.Context, name string) (*api.MicroVM, error)
 	ListMicroVMs(ctx context.Context, sel api.Selector) (*api.MicroVMList, error)
 	GetVolume(ctx context.Context, name string) (*api.Volume, error)
+	GetVolumeSnapshot(ctx context.Context, name string) (*api.VolumeSnapshot, error)
 	GetCertificateSigningRequest(ctx context.Context, name string) (*api.CertificateSigningRequest, error)
 	GetClusterRole(ctx context.Context, name string) (*api.ClusterRole, error)
 	ListClusterRoleBindings(ctx context.Context, sel api.Selector) (*api.ClusterRoleBindingList, error)

@@ -54,6 +54,12 @@ type Authorizer interface {
 	// the stored Volume in the Node Agent's finalizer alone. It returns
 	// Forbidden for any other change.
 	AuthorizeVolumeUpdate(ctx context.Context, c Caller, name string, next *api.Volume) error
+	// AuthorizeVolumeSnapshotUpdate allows c to replace the stored
+	// VolumeSnapshot name with next where a role grants it update on
+	// volumesnapshots, and otherwise, where the Node authorizer's grant is all
+	// it has, only where next differs from the stored VolumeSnapshot in the
+	// Node Agent's finalizer alone. It returns Forbidden for any other change.
+	AuthorizeVolumeSnapshotUpdate(ctx context.Context, c Caller, name string, next *api.VolumeSnapshot) error
 	// AuthorizeBinding allows c to write a ClusterRoleBinding of ref, or
 	// returns Forbidden where c does not hold every permission of the role,
 	// and Invalid where the role does not exist.
@@ -71,6 +77,9 @@ func (alwaysAllow) AuthorizeMicroVMUpdate(context.Context, Caller, string, *api.
 	return nil
 }
 func (alwaysAllow) AuthorizeVolumeUpdate(context.Context, Caller, string, *api.Volume) error {
+	return nil
+}
+func (alwaysAllow) AuthorizeVolumeSnapshotUpdate(context.Context, Caller, string, *api.VolumeSnapshot) error {
 	return nil
 }
 func (alwaysAllow) AuthorizeBinding(context.Context, Caller, api.RoleRef) error { return nil }

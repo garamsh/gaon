@@ -156,6 +156,40 @@ func writePaths() []writePath {
 				stored(t, func() (*api.Volume, error) { return e.api.GetVolume(ctx(t), "v1") })
 		}},
 
+		{"volume snapshot create", func(t *testing.T, e *env) (func() error, func() any) {
+			return func() error { return discard(e.api.PutVolumeSnapshot(ctx(t), volumeSnapshot("s1", "v1"))) },
+				stored(t, func() (*api.VolumeSnapshot, error) { return e.api.GetVolumeSnapshot(ctx(t), "s1") })
+		}},
+		{"volume snapshot update", func(t *testing.T, e *env) (func() error, func() any) {
+			s := e.createVolumeSnapshot(t, "s1", "v1")
+			s.Metadata.Finalizers = []string{holdFinalizer}
+			return func() error { return discard(e.api.PutVolumeSnapshot(ctx(t), s)) },
+				stored(t, func() (*api.VolumeSnapshot, error) { return e.api.GetVolumeSnapshot(ctx(t), "s1") })
+		}},
+		{"volume snapshot status", func(t *testing.T, e *env) (func() error, func() any) {
+			s := e.createVolumeSnapshot(t, "s1", "v1")
+			s.Status = readyStatus("n1")
+			return func() error { return discard(e.api.PutVolumeSnapshotStatus(ctx(t), s)) },
+				stored(t, func() (*api.VolumeSnapshot, error) { return e.api.GetVolumeSnapshot(ctx(t), "s1") })
+		}},
+		{"volume snapshot delete", func(t *testing.T, e *env) (func() error, func() any) {
+			s := e.createVolumeSnapshot(t, "s1", "v1")
+			return func() error { return discard(e.api.DeleteVolumeSnapshot(ctx(t), "s1", s.Metadata.ResourceVersion)) },
+				stored(t, func() (*api.VolumeSnapshot, error) { return e.api.GetVolumeSnapshot(ctx(t), "s1") })
+		}},
+		{"volume snapshot finalizer removal", func(t *testing.T, e *env) (func() error, func() any) {
+			held := volumeSnapshot("s1", "v1")
+			held.Metadata.Finalizers = []string{holdFinalizer}
+			s, err := e.api.PutVolumeSnapshot(ctx(t), held)
+			require.NoError(t, err)
+			deleting, err := e.api.DeleteVolumeSnapshot(ctx(t), "s1", s.Metadata.ResourceVersion)
+			require.NoError(t, err)
+			require.NotNil(t, deleting.Metadata.DeletionTimestamp)
+			deleting.Metadata.Finalizers = nil
+			return func() error { return discard(e.api.PutVolumeSnapshot(ctx(t), deleting)) },
+				stored(t, func() (*api.VolumeSnapshot, error) { return e.api.GetVolumeSnapshot(ctx(t), "s1") })
+		}},
+
 		{"certificate signing request create", func(t *testing.T, e *env) (func() error, func() any) {
 			r := csr(t, "c1")
 			return func() error { return discard(e.api.PutCertificateSigningRequest(ctx(t), r)) },

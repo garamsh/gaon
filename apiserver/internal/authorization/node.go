@@ -46,6 +46,17 @@ func (a *rbac) node(ctx context.Context, user string, r Request) (bool, error) {
 			}
 			return a.uses(ctx, user, r.Name)
 		}
+	case "volumesnapshots":
+		switch r.Verb {
+		case api.VerbGet, api.VerbList, api.VerbWatch:
+			return a.isNode(ctx, user)
+		case api.VerbUpdate:
+			return a.holds(ctx, user, r.Name)
+		}
+	case "volumesnapshots/status":
+		if r.Verb == api.VerbUpdate {
+			return a.holds(ctx, user, r.Name)
+		}
 	case "services", "endpoints", "networkpolicies":
 		switch r.Verb {
 		case api.VerbGet, api.VerbList, api.VerbWatch:
@@ -96,6 +107,22 @@ func (a *rbac) pinned(ctx context.Context, user, name string) (bool, error) {
 		return false, err
 	}
 	return v.Spec.NodeName == user, nil
+}
+
+// holds reports whether the VolumeSnapshot name is held by user, a Node: its
+// status.nodeName is user, or its source Volume is pinned to user.
+func (a *rbac) holds(ctx context.Context, user, name string) (bool, error) {
+	if ok, err := a.isNode(ctx, user); !ok || err != nil {
+		return false, err
+	}
+	s, err := a.src.GetVolumeSnapshot(ctx, name)
+	if ok, err := found(err); !ok || err != nil {
+		return false, err
+	}
+	if s.Status.NodeName == user {
+		return true, nil
+	}
+	return a.pinned(ctx, user, s.Spec.VolumeName)
 }
 
 // uses reports whether a MicroVM bound to the Node user mounts the Volume
