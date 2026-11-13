@@ -36,10 +36,21 @@ func (c *etcdCluster) stop(i int) { c.closed[i].Do(c.members[i].Close) }
 // starts again on new ports where an address was taken meanwhile.
 func startEtcdCluster(t *testing.T, n int) *etcdCluster {
 	t.Helper()
+	return startEtcdClusterWith(t, n, nil)
+}
+
+// startEtcdClusterWith is startEtcdCluster that calls chosen with the attempt
+// number and the client URLs of that attempt once they are chosen and before
+// any member starts, so a test can take one of them.
+func startEtcdClusterWith(t *testing.T, n int, chosen func(attempt int, clients []url.URL)) *etcdCluster {
+	t.Helper()
 	const attempts = 10
 	for attempt := 1; ; attempt++ {
 		urls := freeURLs(t, 2*n)
 		clients, peers := urls[:n], urls[n:]
+		if chosen != nil {
+			chosen(attempt, clients)
+		}
 		initial := ""
 		for i := range n {
 			if i > 0 {
@@ -70,6 +81,9 @@ func startEtcdCluster(t *testing.T, n int) *etcdCluster {
 		}
 		if startErr != nil {
 			for _, e := range c.members {
+				// A member that has not reached quorum never finishes serving, so
+				// Close alone waits on it; stopping the server first lets it return.
+				e.Server.HardStop()
 				e.Close()
 			}
 			if attempt < attempts && errors.Is(startErr, syscall.EADDRINUSE) {
@@ -88,6 +102,43 @@ func startEtcdCluster(t *testing.T, n int) *etcdCluster {
 			}
 		}
 		return c
+	}
+}
+
+func TestStartEtcdCluster_RetriesWhenAMemberAfterTheFirstFindsItsAddressTaken(t *testing.T) {
+	tests := []struct {
+		name         string
+		taken        int // index of the member whose client address attempt 1 takes; -1 for none
+		wantAttempts int
+	}{
+		{"control, no address is taken", -1, 1},
+		{"the first member's address is taken", 0, 2},
+		{"the second member's address is taken", 1, 2},
+		{"the last member's address is taken", 2, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attempts := 0
+			c := startEtcdClusterWith(t, 3, func(attempt int, clients []url.URL) {
+				attempts = attempt
+				if attempt != 1 || tt.taken < 0 {
+					return
+				}
+				ln, err := net.Listen("tcp", clients[tt.taken].Host)
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = ln.Close() })
+			})
+			assert.Equal(t, tt.wantAttempts, attempts, "the start was not tried as many times as the taken address requires")
+			require.Len(t, c.endpoints, 3)
+
+			cli, err := clientv3.New(clientv3.Config{Endpoints: c.endpoints, DialTimeout: 5 * time.Second})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = cli.Close() })
+			putCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, err = cli.Put(putCtx, "k", "v")
+			require.NoError(t, err, "the cluster that started does not take a write")
+		})
 	}
 }
 
