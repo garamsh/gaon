@@ -15,6 +15,7 @@ import (
 	"github.com/garamsh/gaon/apiserver/internal/resourceapi"
 	"github.com/garamsh/gaon/apiserver/internal/resourceapi/etcdstore"
 	"github.com/garamsh/gaon/apiserver/internal/token"
+	"github.com/garamsh/gaon/lib/api"
 )
 
 const shutdownTimeout = 5 * time.Second
@@ -74,6 +75,9 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 	}
 	defer st.Close()
 	svc := resourceapi.NewService(st, time.Now, signer, ranges)
+	if err := resourceapi.EnsureLocalStorageClass(ctx, svc); err != nil {
+		return fmt.Errorf("create storageclass %s: %w", api.StorageClassLocal, err)
+	}
 	az := authorization.AlwaysAllow()
 	if cfg.AuthorizationMode == ModeRBAC {
 		if err := authorization.Bootstrap(ctx, svc); err != nil {
