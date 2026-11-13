@@ -64,6 +64,19 @@ func TestNodeValidateStatusRefusesAMicroVMPrefixThatIsNotACIDR(t *testing.T) {
 	}
 }
 
+func TestNodeValidateStatusRefusesAnAgentPortThatIsNotAPort(t *testing.T) {
+	n := newNode("node-a")
+	n.Status.State = api.NodeStateAdmitted
+	for _, ok := range []int{0, 1, 8443, 65535} {
+		n.Status.AgentPort = ok
+		assert.NoError(t, n.ValidateStatus(), "control: %d is accepted", ok)
+	}
+	for _, bad := range []int{-1, 65536} {
+		n.Status.AgentPort = bad
+		assert.ErrorIs(t, n.ValidateStatus(), api.ErrInvalid, "%d", bad)
+	}
+}
+
 func TestNodeSpecWritesAdmittedWhenFalse(t *testing.T) {
 	raw, err := json.Marshal(newNode("node-a"))
 	require.NoError(t, err)

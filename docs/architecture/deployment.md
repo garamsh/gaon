@@ -53,9 +53,11 @@ Basis: garamsh/gaon at commit `819ccd4af66fcb805e1602ff6d2caef17aa17ad9`. The No
   - the scheduler: Organization `gaon:schedulers`;
   - the controllers: Organization `gaon:controllers`;
   - an administrator, including the CLI's: Organization `gaon:admins`; with none, no one can bind another role.
+  - **Decided, not yet served ([ADR 0043](./adr/0043-a-microvms-log-and-exec-are-subresources-authorized-apart-from-get-and-the-api-server-proxies-them-to-its-nodes-agent-over-mutual-tls.md)):** the API server's client certificate to the Node Agents, Organization `gaon:apiservers`, a certificate other than its serving one, signed by the same CA and bound to no role. It is needed in every mode, `AlwaysAllow` included, once the agents serve a MicroVM's log and exec, and each of the three API servers is given one.
 
   Each CN is a name that is not a Node's name.
 - **A Node Agent's certificate has the subject `CN=<node name>`, `O=gaon:nodes`.** The Organization lets a verifier outside gaon tell a Node from the other identities the CA signs. The signer refuses a request whose Organization is another, missing or repeated, and `gaon:nodes` is bound to no role ([ADR 0022](./adr/0022-a-nodes-certificate-carries-the-organization-gaon-nodes-and-the-signer-signs-no-other-organization.md)). A certificate issued before that decision has no Organization until the agent renews it. A Node Agent and a signer from before it cannot be mixed: the signer denies the old agent's request.
+- **Decided, not yet served ([ADR 0043](./adr/0043-a-microvms-log-and-exec-are-subresources-authorized-apart-from-get-and-the-api-server-proxies-them-to-its-nodes-agent-over-mutual-tls.md)):** a Node Agent serves a MicroVM's log and exec with its Node certificate, so an operator-supplied one (`--tls-cert`, `--tls-key`) must carry the extended key usage server auth as well as client auth, or its Node's logs and exec are `Unavailable`. A bootstrapped one gains it when the agent asks for both at renewal.
 - **Renewal of an operator-supplied certificate is the operator's.** Each service reads its files at start, so a replaced file takes effect at the next start of that service.
 
 ### Config shape

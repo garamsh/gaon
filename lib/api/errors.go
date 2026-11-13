@@ -15,6 +15,12 @@ const (
 	ReasonUnauthorized  Reason = "Unauthorized"
 	ReasonForbidden     Reason = "Forbidden"
 	ReasonInternalError Reason = "InternalError"
+	// ReasonNotRunning says a MicroVM has no running machine to serve a
+	// log or an exec (ADR 0043).
+	ReasonNotRunning Reason = "NotRunning"
+	// ReasonUnavailable says the agent of a MicroVM's Node cannot be
+	// reached (ADR 0043).
+	ReasonUnavailable Reason = "Unavailable"
 )
 
 // APIError is the error object of the API: the body of a failed response and
@@ -36,6 +42,8 @@ var (
 	ErrUnauthorized  = NewAPIError(ReasonUnauthorized, "unauthorized")
 	ErrForbidden     = NewAPIError(ReasonForbidden, "forbidden")
 	ErrInternalError = NewAPIError(ReasonInternalError, "internal error")
+	ErrNotRunning    = NewAPIError(ReasonNotRunning, "not running")
+	ErrUnavailable   = NewAPIError(ReasonUnavailable, "unavailable")
 )
 
 // NewAPIError returns the APIError for reason with its HTTP status code.
@@ -59,7 +67,7 @@ func (r Reason) httpStatus() int {
 		return 401
 	case ReasonForbidden:
 		return 403
-	case ReasonConflict, ReasonAlreadyExists:
+	case ReasonConflict, ReasonAlreadyExists, ReasonNotRunning:
 		return 409
 	case ReasonNotFound:
 		return 404
@@ -69,6 +77,8 @@ func (r Reason) httpStatus() int {
 		return 410
 	case ReasonInternalError:
 		return 500
+	case ReasonUnavailable:
+		return 503
 	default:
 		return 500
 	}

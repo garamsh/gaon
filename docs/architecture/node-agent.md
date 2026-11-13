@@ -147,7 +147,8 @@ The files given as `--tls-cert` and `--tls-key` are still read once at start and
 
 - `OnDemand` MicroVMs, wake and suspend.
 - Mounting a Volume at its `mountPath`: mvmd's `DiskAttachment` carries a disk identifier and a read-only flag and no path, so the agent attaches the disk and does not pass the path. Volume classes other than `local` are refused by the `local` plugin or left to a storage plugin that serves them.
-- The Node's `addresses`.
+- The Node's `addresses` and `agentPort` (the port it is to serve on).
+- Serving a MicroVM's log and exec. Decided in [ADR 0043](./adr/0043-a-microvms-log-and-exec-are-subresources-authorized-apart-from-get-and-the-api-server-proxies-them-to-its-nodes-agent-over-mutual-tls.md): a TLS 1.3 listener that accepts only a client certificate of the Organization `gaon:apiservers`, presents its Node certificate, and serves a Machine it holds at the `bindingEpoch` and `uid` the request carries. Its certificate request is then to ask for the extended key usage client auth and server auth, after the signer accepts both ([csr-signer.md](./csr-signer.md)).
 - Calling naru.
 
 ## Rationale
