@@ -81,6 +81,8 @@ func TestStart_ServesAndCreatesTheBootstrapObjectsWhereAFailWebhookIsUnreachable
 	require.NoError(t, err)
 	_, err = compute.DeleteStorageClass(ctx(t), api.StorageClassLocal, local.Metadata.ResourceVersion)
 	require.NoError(t, err)
+	_, err = compute.GetStorageClass(ctx(t), api.StorageClassLocal)
+	require.ErrorIs(t, err, api.ErrNotFound, "setup: the class local is gone before the webhooks are registered")
 
 	dead := newWebhookServer(t)
 	dead.srv.Close()
