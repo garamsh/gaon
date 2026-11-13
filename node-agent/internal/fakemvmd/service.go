@@ -71,6 +71,7 @@ func (s *Server) CreateMachine(_ context.Context, r *v1alpha2.CreateMachineReque
 
 		Disks:         r.GetDisks(),
 		NetworkPolicy: r.GetNetworkPolicy(),
+		WorkingDir:    r.GetWorkingDir(),
 	}
 	s.machines[m.Id] = m
 	s.requests[m.Id] = proto.Clone(r).(*v1alpha2.CreateMachineRequest)
@@ -88,6 +89,14 @@ func (s *Server) StartMachine(_ context.Context, r *v1alpha2.StartMachineRequest
 	}
 	if !s.armed() {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_PRECONDITION_FAILED, "fencing deadline is not armed")
+	}
+	if u := r.GetRunUpdate(); u != nil {
+		if err := checkEnvFiles(u.GetEnv(), u.GetFiles()); err != nil {
+			return nil, err
+		}
+		record := s.requests[m.Id]
+		clone := proto.Clone(u).(*v1alpha2.RunUpdate)
+		record.Env, record.Files = clone.Env, clone.Files
 	}
 	m.State = v1alpha2.MachineState_MACHINE_STATE_RUNNING
 	s.resend(m.Id)

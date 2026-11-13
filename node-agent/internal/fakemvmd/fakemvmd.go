@@ -106,8 +106,10 @@ func (s *Server) Calls() []string {
 	return append([]string(nil), s.calls...)
 }
 
-// CreateRequest returns a copy of the request that created the Machine id, and
-// whether mvmd holds it.
+// CreateRequest returns a copy of the request that created the Machine id, as
+// the Machine's record holds it now: the env and files of the latest start's
+// run update replace the ones it was created with. It reports whether mvmd
+// holds the Machine.
 func (s *Server) CreateRequest(id string) (*v1alpha2.CreateMachineRequest, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
