@@ -1,11 +1,11 @@
 module github.com/garamsh/gaon/etcd-snapshot
 
-go 1.26.0
+go 1.27.3
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.48.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.10
-	github.com/aws/rolesanywhere-credential-helper v1.8.2
+	github.com/aws/rolesanywhere-credential-helper v1.8.6
 	github.com/stretchr/testify v1.12.1
 	go.etcd.io/etcd/client/pkg/v3 v3.6.16
 	go.etcd.io/etcd/client/v3 v3.6.16

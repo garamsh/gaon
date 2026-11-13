@@ -40,8 +40,8 @@ github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.8 h1:MvlNs/f+9eM0mOjD9JzBUbf5
 github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.8/go.mod h1:/j67Z5XBVDx8nZVp9EuFM9/BS5dvBznbqILGuu73hug=
 github.com/aws/aws-sdk-go-v2/service/sts v1.41.1 h1:GdGmKtG+/Krag7VfyOXV17xjTCz0i9NT+JnqLTOI5nA=
 github.com/aws/aws-sdk-go-v2/service/sts v1.41.1/go.mod h1:6TxbXoDSgBQ225Qd8Q+MbxUxUh6TtNKwbRt/EPS9xso=
-github.com/aws/rolesanywhere-credential-helper v1.8.2 h1:fDw6pInXLLRwXDJ2Ixm4XOH/QfM5MRGmXM6RygadN+g=
-github.com/aws/rolesanywhere-credential-helper v1.8.2/go.mod h1:nJuPQu+aMAMnwPaP0CSHMPul3jUfdOt4nlcMhk2XpAk=
+github.com/aws/rolesanywhere-credential-helper v1.8.6 h1:5S0C+7uXjWBgq8CaASuBEnTCbcH5txPNlkLiOsu2s0M=
+github.com/aws/rolesanywhere-credential-helper v1.8.6/go.mod h1:N0FGgczI5ZZC+mzNqvLy4rVuE2GAOK4OAv2muAiBxPQ=
 github.com/aws/smithy-go v1.28.9 h1:zkZ058OpNX0iGTK24b+ZUEQSMc11CBA6oO7xtKZfzkY=
 github.com/aws/smithy-go v1.28.9/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqxX9i1Fc=
 github.com/beorn7/perks v0.0.0-20180321164747-3a771d992973/go.mod h1:Dwedo/Wpr24TaqPxmxbtue+5NUziq4I4S80YR8gNf3Q=
