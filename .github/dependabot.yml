@@ -40,3 +40,11 @@ updates:
     directory: /storage-local
     schedule:
       interval: weekly
+  - package-ecosystem: gomod
+    directory: /etcd-snapshot
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /etcd-snapshot
+    schedule:
+      interval: weekly

@@ -1,0 +1,84 @@
+name: etcd-snapshot-image
+
+# Action pins take the form ci.yml states.
+
+# A tag `etcd-snapshot/vX.Y.Z` publishes the image; a merge to main publishes
+# nothing. The tag is the release and the image tag is the version without the
+# prefix and the `v`.
+on:
+  push:
+    tags: ["etcd-snapshot/v*"]
+
+permissions: read-all
+
+jobs:
+  image:
+    # ubuntu-24.04 is a hosted runner label and cannot be pinned by digest;
+    # the "Record the runner" step records what it resolved to on each run.
+    # Its mover is a manual bump by the owner of .github/ when GitHub
+    # announces the label's deprecation.
+    runs-on: ubuntu-24.04
+    permissions:
+      # A job's block replaces the workflow's, so the read the checkout needs
+      # is written here beside the federated push credential.
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Record the runner
+        run: cat /etc/os-release
+
+      # The trigger admits every `etcd-snapshot/v*`, so a tag that is not
+      # `etcd-snapshot/vX.Y.Z` is refused here before anything is pushed. The
+      # tag name reaches the shell through the environment.
+      - id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if ! printf '%s' "$REF_NAME" | grep -Eq '^etcd-snapshot/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "tag $REF_NAME is not etcd-snapshot/vX.Y.Z: nothing published" >&2
+            exit 1
+          fi
+          version="${REF_NAME#etcd-snapshot/v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::486152169996:role/github-actions-gaon
+          aws-region: ap-northeast-2
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # provenance and sbom are off so the pushed digest names one image
+      # manifest and not an index holding attestations beside it.
+      - id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: etcd-snapshot
+          file: etcd-snapshot/Dockerfile
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          push: true
+          build-args: |
+            IMAGE_REVISION=${{ github.sha }}
+            IMAGE_VERSION=${{ steps.version.outputs.version }}
+          tags: ${{ steps.ecr.outputs.registry }}/gaon/etcd-snapshot:${{ steps.version.outputs.version }}
+
+      - name: Report the pushed digest
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo "Pushed \`${REGISTRY}/gaon/etcd-snapshot:${VERSION}\`"
+            echo
+            echo "Digest: \`${DIGEST}\`"
+            echo
+            echo "Reference: \`${REGISTRY}/gaon/etcd-snapshot@${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

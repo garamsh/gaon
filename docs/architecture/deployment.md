@@ -85,7 +85,7 @@ spec:
     completions: 1
     backoffLimit: 2
     template:
-      image: <registry>/gaon-etcd-snapshot:<tag>
+      image: <registry>/gaon/etcd-snapshot@<digest>
       args:
         - -etcd-endpoints=https://<node 1 address>:2379,https://<node 2 address>:2379,https://<node 3 address>:2379
         - -etcd-ca-file=/etc/gaon/etcd/ca.crt

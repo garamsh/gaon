@@ -35,6 +35,13 @@ Basis: [ADR 0028](./adr/0028-a-cronjob-runs-gaon-etcd-snapshot-which-uploads-a-c
 - **The key is ECDSA or RSA;** another type is refused.
 - **The helper reads the AWS environment variables and shared files** when it loads its configuration, so a MicroVM that sets `AWS_*` variables changes what it uses. The CronJob in [deployment.md](./deployment.md) sets none.
 
+### The image
+
+- **The image is built from `etcd-snapshot/Dockerfile`:** a static binary in a distroless static base that carries the CA bundle and runs as uid 65532. It has no shell and no init, and it writes only to `-snapshot-dir`, which the CronJob points at a writable path.
+- **A release is a git tag `etcd-snapshot/vX.Y.Z`.** The workflow `.github/workflows/etcd-snapshot-image.yml` builds the image from the tagged commit and pushes it to the ECR repository `gaon/etcd-snapshot` in account 486152169996, region ap-northeast-2, tagged `X.Y.Z`. It assumes the IAM role `github-actions-gaon` by GitHub OIDC and stores no AWS key. The digest is in the run's job summary.
+- **The CronJob names the image by digest,** `<registry>/gaon/etcd-snapshot@<digest>`, which is what mvmd converts ([deployment.md](./deployment.md) §Backup and restore).
+- **The base images are pinned by digest** in the Dockerfile and moved by hand by its owner.
+
 ### Files
 
 - **Certificates and keys arrive as `files` from Secrets,** read at start. A replaced file takes effect at the next run.
@@ -45,6 +52,5 @@ Basis: [ADR 0028](./adr/0028-a-cronjob-runs-gaon-etcd-snapshot-which-uploads-a-c
 
 ## Open questions
 
-- **The image.** No Dockerfile builds `gaon-etcd-snapshot` and no image is published; the CronJob's `image` is the operator's.
 - **Multipart upload.** A Store whose snapshot passes 5 GiB needs it.
 - **Encryption of the snapshot.** It holds Secrets in clear; the bucket's server-side encryption and access policy are the operator's.
