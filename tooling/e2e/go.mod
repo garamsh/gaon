@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/garamsh/gaon/lib/api v0.0.0-00010101000000-000000000000
 	github.com/garamsh/gaon/lib/plugin v0.0.0-00010101000000-000000000000
-	github.com/garamsh/mvmd/lib/runtimeapi v0.0.0-20261112204733-223e3eca764c
+	github.com/garamsh/mvmd/lib/runtimeapi v0.0.0-20261113045958-29ce9e35b190
 	github.com/stretchr/testify v1.12.1
 	go.etcd.io/etcd/server/v3 v3.6.16
 	google.golang.org/grpc v1.85.0

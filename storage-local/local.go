@@ -442,13 +442,17 @@ func compareQuantity(a, b api.Quantity) (int, error) {
 }
 
 // finish deletes the disk of the deleting v and removes the agent's finalizer,
-// changing no other entry, once mvmd holds the disk for no MicroVM and no
-// VolumeSnapshot of v is waiting to be taken. A disk still held keeps both.
+// changing no other entry, once mvmd holds the disk for no MicroVM, no
+// VolumeSnapshot of v is waiting to be taken, and none carries the agent's
+// finalizer without a status.nodeName: no other Node may delete that one, and
+// v's pin is how this Node still does. A disk still held keeps both.
 func (l *Local) finish(ctx context.Context, v *api.Volume, disks map[string]*v1alpha2.Disk, snapshots []api.VolumeSnapshot) error {
 	if !slices.Contains(v.Metadata.Finalizers, api.NodeAgentFinalizer) {
 		return nil
 	}
-	if slices.ContainsFunc(snapshots, func(s api.VolumeSnapshot) bool { return s.Spec.VolumeName == v.Metadata.Name && snapshotWaiting(&s) }) {
+	if slices.ContainsFunc(snapshots, func(s api.VolumeSnapshot) bool {
+		return s.Spec.VolumeName == v.Metadata.Name && (snapshotWaiting(&s) || unplaced(&s))
+	}) {
 		return nil
 	}
 	id := diskID(v.Metadata.Name)

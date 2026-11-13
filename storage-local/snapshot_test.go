@@ -72,6 +72,7 @@ func TestLocal_RunTakesTheSnapshotUnderItsFinalizerAndWritesItReadyWithTheSizeIn
 	r := newRig(t)
 	diskedVolume(r, "data")
 	s := snapshotOf("backup", "data", uid)
+	s.Metadata.Finalizers = []string{"example.com/other"}
 	s.Status.Conditions = []api.Condition{{Type: "Other", Status: api.ConditionTrue, Reason: "Kept"}}
 	r.gaon.SetSnapshot(s)
 	var mu sync.Mutex
@@ -88,7 +89,7 @@ func TestLocal_RunTakesTheSnapshotUnderItsFinalizerAndWritesItReadyWithTheSizeIn
 
 	mu.Lock()
 	require.NotNil(t, atCall)
-	assert.Equal(t, []string{api.NodeAgentFinalizer}, atCall.Metadata.Finalizers, "the finalizer is there before the first call")
+	assert.Equal(t, []string{"example.com/other", api.NodeAgentFinalizer}, atCall.Metadata.Finalizers, "the finalizer is there before the first call and the other one is kept")
 	require.NotNil(t, snapshottingOf(*atCall))
 	assert.Equal(t, "InProgress", snapshottingOf(*atCall).Reason, "InProgress is written before the call")
 	mu.Unlock()
@@ -110,9 +111,10 @@ func TestLocal_RunTakesTheSnapshotUnderItsFinalizerAndWritesItReadyWithTheSizeIn
 
 func TestLocal_RunHoldsASnapshotWhoseSourceHasNoDiskAndTakesItOnceItHas(t *testing.T) {
 	r := newRig(t)
-	v := volume("data", node)
-	r.gaon.SetVolume(v)
+	r.gaon.SetVolume(volume("data", node))
 	r.gaon.SetSnapshot(snapshotOf("backup", "data", uid))
+	// No disk can be made, so the Volume has no capacity for as long as this holds.
+	r.mvmd.FailDiskCreates(true)
 	r.run(t)
 
 	eventually(t, "SourceNotReady", func() bool {
@@ -126,9 +128,9 @@ func TestLocal_RunHoldsASnapshotWhoseSourceHasNoDiskAndTakesItOnceItHas(t *testi
 	assert.Empty(t, held.Metadata.Finalizers, "no snapshot file can exist, so no finalizer yet")
 	assert.Empty(t, callsWith(r, "SnapshotDisk"))
 
-	// The control: the Volume's disk now exists, and the same snapshot is taken.
-	// The sync of the Volume writes its capacity at the next round.
-	r.mvmd.AddDisk("volume-data", 10<<20)
+	// The control: the disk can be made, the Volume gets its capacity, and the
+	// same snapshot is taken.
+	r.mvmd.FailDiskCreates(false)
 	eventually(t, "the snapshot is ready once its source has a disk", r.ready("backup"))
 	assert.Nil(t, snapshottingOf(r.snapshot(t, "backup")))
 }
@@ -251,11 +253,18 @@ func TestLocal_RunDeletesTheDiskSnapshotAndRemovesTheFinalizerOnDelete(t *testin
 	r := newRig(t)
 	readySnapshot(r, "backup", uid, "data")
 	readySnapshot(r, "other", "cccccccccccccccccccccccccccccccc", "data")
+	mine := r.snapshot(t, "backup")
+	mine.Metadata.Finalizers = []string{"example.com/first", api.NodeAgentFinalizer, "example.com/last"}
+	r.gaon.SetSnapshot(mine)
 	r.gaon.MarkSnapshotDeleting("backup")
 	r.run(t)
 
-	eventually(t, "the snapshot is removed", r.gone("backup"))
+	eventually(t, "the agent's finalizer is removed", func() bool {
+		s, _ := r.gaon.Snapshot("backup")
+		return !slices.Contains(s.Metadata.Finalizers, api.NodeAgentFinalizer)
+	})
 
+	assert.Equal(t, []string{"example.com/first", "example.com/last"}, r.snapshot(t, "backup").Metadata.Finalizers, "no other entry is changed")
 	_, ok := r.mvmd.DiskSnapshot("snapshot-" + uid)
 	assert.False(t, ok, "mvmd's snapshot is deleted")
 	assert.Equal(t, []string{"DeleteDiskSnapshot snapshot-" + uid}, callsWith(r, "DeleteDiskSnapshot"))
@@ -416,4 +425,37 @@ func TestLocal_RunKeepsTheDiskOfADeletingVolumeWhileASnapshotOfItIsUnfinished(t 
 			assert.True(t, r.snapshot(t, "backup").Status.ReadyToUse)
 		})
 	}
+}
+
+func TestLocal_RunKeepsTheDiskOfADeletingVolumeWhileASnapshotOfItHoldsTheAgentsFinalizerWithNoNode(t *testing.T) {
+	r := newRig(t)
+	// "a-" sorts before "z-", so the round that frees the control has already
+	// passed the Volume under test.
+	diskedVolume(r, "a-data")
+	diskedVolume(r, "z-free")
+	s := snapshotOf("backup", "a-data", uid)
+	s.Metadata.Finalizers = []string{api.NodeAgentFinalizer}
+	r.gaon.SetSnapshot(s)
+	r.mvmd.AddSnapshot("snapshot-"+uid, "volume-a-data", 10<<20)
+	r.gaon.MarkSnapshotDeleting("backup")
+	// mvmd refuses to delete the disk snapshot, so the finalizer stays.
+	r.mvmd.FailSnapshotDeletesWith(v1alpha2.OutcomeKind_OUTCOME_KIND_PRECONDITION_FAILED)
+	r.gaon.MarkVolumeDeleting("a-data")
+	r.gaon.MarkVolumeDeleting("z-free")
+	r.run(t)
+
+	eventually(t, "the control is deleted", func() bool { _, ok := r.gaon.Volume("z-free"); return !ok })
+	eventually(t, "the delete is retried", func() bool { return len(callsWith(r, "DeleteDiskSnapshot")) >= 2 })
+
+	v := r.volume(t, "a-data")
+	assert.Equal(t, []string{api.NodeAgentFinalizer}, v.Metadata.Finalizers)
+	_, ok := r.mvmd.Disk("volume-a-data")
+	assert.True(t, ok, "the disk is kept")
+
+	// The control: the same snapshot once its finalizer is gone.
+	r.mvmd.FailSnapshotDeletesWith(v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED)
+	eventually(t, "the Volume is deleted once the snapshot is", func() bool { _, ok := r.gaon.Volume("a-data"); return !ok })
+	assert.True(t, r.gone("backup")())
+	_, ok = r.mvmd.Disk("volume-a-data")
+	assert.False(t, ok)
 }

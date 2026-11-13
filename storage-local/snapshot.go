@@ -53,6 +53,12 @@ func snapshotWaiting(s *api.VolumeSnapshot) bool {
 	return !s.Status.ReadyToUse && s.Metadata.DeletionTimestamp == nil
 }
 
+// unplaced reports whether s carries the agent's finalizer and has no
+// status.nodeName, so only its source Volume's pin lets a Node write it.
+func unplaced(s *api.VolumeSnapshot) bool {
+	return s.Status.NodeName == "" && slices.Contains(s.Metadata.Finalizers, api.NodeAgentFinalizer)
+}
+
 // reconcileSnapshots takes each snapshot of a local Volume pinned to this Node
 // that is not ready and not being deleted, and deletes each snapshot of this Node
 // that is being deleted. A snapshot's failure does not stop the others.
