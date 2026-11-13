@@ -2,7 +2,7 @@
 
 What a MicroVM resolves for a Service: the name form, what the DNS server answers, how that server is delivered and how its address reaches every MicroVM.
 
-Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-at-service-default-svc-zone-and-its-service-address-is-the-resolver-mvmd-gives-every-microvm.md). Kubernetes' statements hold for `kubernetes/dns` at commit `4f2becc8aeb54116398e6a33e34af756db5b9fe7`, `docs/specification.md`, schema version 1.1.0. The mvmd statements hold for garamsh/mvmd at commit `223e3eca764caf60b8dd72c7399b83ff6b437d49`, runtime API `v1alpha2`. The gaon statements hold for garamsh/gaon at commit `34d75c3170c239a1b2b96f2efd41ef3eb6b7318b`. This is a contract: no code serves it yet.
+Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-at-service-default-svc-zone-and-its-service-address-is-the-resolver-mvmd-gives-every-microvm.md). Kubernetes' statements hold for `kubernetes/dns` at commit `4f2becc8aeb54116398e6a33e34af756db5b9fe7`, `docs/specification.md`, schema version 1.1.0. The mvmd statements hold for garamsh/mvmd at commit `223e3eca764caf60b8dd72c7399b83ff6b437d49`, runtime API `v1alpha2`. The gaon statements hold for garamsh/gaon at commit `34d75c3170c239a1b2b96f2efd41ef3eb6b7318b`.
 
 ## Current decisions
 
@@ -11,7 +11,7 @@ Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-
 - **Form:** `<service>.default.svc.<zone>`, Kubernetes' form with the namespace label fixed to `default`. `<zone>` is the cluster domain, `cluster.local` by default and set in the unit's configuration. `<service>.svc.<zone>` is not answered. A Service has no namespace ([resource-api.md](./resource-api.md) §Service, Endpoints and NetworkPolicy), so the label is a constant.
 - **Comparison** of a query with a name is case-insensitive.
 - **Short names do not resolve.** mvmd's Guest Agent writes `nameserver` lines to `/etc/resolv.conf` and no `search` line, so a MicroVM resolves the full name only. A caller names `<service>.default.svc.<zone>`.
-- **A name under `<zone>` that is not a Service,** or a per-host name below, is `NXDOMAIN`.
+- **A name under `<zone>` that is not a Service,** or a per-host name below, is `NXDOMAIN`, as is `<zone>` itself.
 
 ### Answers
 
@@ -28,7 +28,7 @@ Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-
 - **An Endpoints address is ready:** `subsets[].addresses` lists only ready MicroVMs for a Service with a selector ([resource-api.md](./resource-api.md) §Service, Endpoints and NetworkPolicy), and a user's Endpoints is served as written.
 - **Not served:** `SRV` records for named ports, `PTR` records, the `dns-version` `TXT` record and `ExternalName`'s `CNAME`. A query for them under `<zone>` is `NOERROR` with no data where the name exists and `NXDOMAIN` where it does not.
 - **TTL:** 5 seconds on every answer, and on the start of authority of a negative answer.
-- **Transport:** UDP and TCP on port 53.
+- **Transport:** UDP and TCP on port 53. A negative answer carries a start of authority for `<zone>`. A UDP answer larger than the size the question's EDNS0 option allows, at most 1232 bytes, or 512 without the option, is cut and has the truncated bit set, and the caller asks again over TCP.
 
 ### Forwarding
 
@@ -37,14 +37,16 @@ Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-
 - With no upstream configured, a name outside `<zone>` is `REFUSED`.
 - The unit's own `/etc/resolv.conf` names the Service address like every MicroVM's, so the upstreams are always given explicitly and never read from there.
 - A reverse query is a name outside `<zone>`, and is forwarded.
+- The upstreams are asked in the order given, over the transport of the question, and the first that answers is returned. When none answers, the answer is `SERVFAIL`.
 
 ### The unit and its delivery
 
 - **`dns/`, binary `gaon-dns`,** is a client of the public API: it lists and watches `Service` and `Endpoints` and holds the answers in memory. It authenticates with the ServiceAccount token the Node Agent writes into its MicroVM ([ADR 0029](./adr/0029-a-microvms-serviceaccount-token-is-a-file-at-a-fixed-path-and-the-node-agent-replaces-it-and-the-files-that-reference-a-secret-or-configmap-in-place-while-the-microvm-runs.md)), and reads nothing else.
 - **State:** until its first list of both kinds completes it answers `SERVFAIL` for a name under `<zone>`. After that it serves the last state it read while the API server is unreachable, and watches again.
-- **It is delivered as a workload,** not as a Node service: a `ServiceAccount`, a `Deployment` of MicroVMs of its image that name it, and a `Service` of type `ClusterIP` that selects them, with a UDP port and a TCP port of 53. The manifest is the operator's, like the one in [deployment.md](./deployment.md) §Backup and restore, and the serving issue provides an example.
+- **It is delivered as a workload,** not as a Node service: a `ServiceAccount`, a `Deployment` of MicroVMs of its image that name it, and a `Service` of type `ClusterIP` that selects them, with a UDP port and a TCP port of 53. The manifest is the operator's, like the one in [deployment.md](./deployment.md) §Backup and restore, and `dns/deploy/dns.yaml` is the example.
 - **Its Service requests its `clusterIP`.** An address of the service prefix ([ADR 0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md)) that the operator chooses, which is the resolver address below.
-- **Its identity** may read Services and Endpoints and nothing else.
+- **Its identity** may read Services and Endpoints and nothing else: the ServiceAccount `gaon-dns`, the user `gaon:serviceaccount:gaon-dns`, and a `ClusterRole` `gaon:dns` that allows `list` and `watch` of `services` and `endpoints`. The operator applies the role and its binding with the rest of the manifest; the API server does not create them at start.
+- **Its configuration** is flags: the API server's address and CA file, the token file (ADR 0029's path by default), the zone, the listen address and the upstreams.
 
 ### How the resolver reaches a MicroVM
 
@@ -72,9 +74,7 @@ Each is a choice of ADR 0033.
 
 ## Open questions
 
-- **Serving:** the unit `dns/` is not written, nor is its image, its example manifest or its entry in [structure.md](./structure.md).
 - **Who builds and publishes the image,** which the Node Agent pulls by digest ([node-agent.md](./node-agent.md) §MicroVMs).
-- **The identity's rules:** whether `gaon:dns` is a bootstrap role or a role the operator applies ([resource-api.md](./resource-api.md) §RBAC), and the name of its ServiceAccount and Service.
 - **The resolver address:** whether the operator chooses it, as stated, or the API server reserves one in the service prefix. A Node whose `network.resolvers` differs is not detected.
 - **mvmd, garamsh/mvmd:** whether the Guest Agent can also write a `search` line, which would let short names resolve; whether a change of `network.resolvers` reaches running MicroVMs or only those created after an mvmd restart; and whether mvmd's policy at the tap sees a Service address before or after the network plugin translates it.
 - **A second resolver,** for a Service address that a failed network plugin does not translate. mvmd takes a list; gaon names one.

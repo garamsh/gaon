@@ -1,0 +1,83 @@
+# The DNS unit as a workload, applied by an administrator with
+# `gaon apply -f dns/deploy/dns.yaml` (docs/architecture/dns.md §The unit and
+# its delivery). The values in angle brackets are the operator's.
+#
+# The unit reads Services and Endpoints under the token of its ServiceAccount,
+# which the Node Agent writes into each MicroVM, so the ClusterRole below is
+# everything it is allowed. The Service requests the address naru writes to
+# every Node's mvmd as `network.resolvers`.
+apiVersion: compute.gaon.garam.sh/v1alpha1
+kind: ServiceAccount
+metadata:
+  name: gaon-dns
+---
+apiVersion: rbac.gaon.garam.sh/v1alpha1
+kind: ClusterRole
+metadata:
+  name: gaon:dns
+rules:
+  - apiGroups: [compute.gaon.garam.sh]
+    resources: [services, endpoints]
+    verbs: [list, watch]
+---
+apiVersion: rbac.gaon.garam.sh/v1alpha1
+kind: ClusterRoleBinding
+metadata:
+  name: gaon:dns
+roleRef:
+  kind: ClusterRole
+  name: gaon:dns
+subjects:
+  - kind: User
+    name: gaon:serviceaccount:gaon-dns
+---
+# The CA that signed the API server's certificate, which the unit trusts.
+apiVersion: compute.gaon.garam.sh/v1alpha1
+kind: ConfigMap
+metadata:
+  name: gaon-dns-ca
+data:
+  ca.crt: |
+    <PEM of the CA that signed the API server's certificate>
+---
+apiVersion: workloads.gaon.garam.sh/v1alpha1
+kind: Deployment
+metadata:
+  name: gaon-dns
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      gaon.garam.sh/app: gaon-dns
+  template:
+    image: <registry>/gaon/dns@<digest>
+    args:
+      - -server=https://<API server address>:<port>
+      - -tls-ca=/etc/gaon/dns/ca.crt
+      - -zone=cluster.local
+      - -upstream=<upstream resolver address>
+    ports:
+      - {name: dns-udp, port: 53, protocol: UDP}
+      - {name: dns-tcp, port: 53, protocol: TCP}
+    files:
+      - {path: /etc/gaon/dns/ca.crt, mode: 0444, valueFrom: {configMapKeyRef: {name: gaon-dns-ca, key: ca.crt}}}
+    serviceAccountName: gaon-dns
+    readinessProbe:
+      tcpSocket:
+        port: 53
+    resources:
+      requests: {cpu: 100m, memory: 64Mi}
+      limits: {memory: 128Mi}
+---
+apiVersion: compute.gaon.garam.sh/v1alpha1
+kind: Service
+metadata:
+  name: gaon-dns
+spec:
+  type: ClusterIP
+  clusterIP: <address of the service prefix, the resolver address>
+  selector:
+    gaon.garam.sh/app: gaon-dns
+  ports:
+    - {name: dns-udp, protocol: UDP, port: 53}
+    - {name: dns-tcp, protocol: TCP, port: 53}
