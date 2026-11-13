@@ -91,14 +91,31 @@ Every transition below is decided and written by the Node Agent except the rebin
 A Volume is a disk a MicroVM names in its `spec.volumes`. Its semantics follow Kubernetes' PersistentVolume and StorageClass, without a claim, and the rules below are gaon's own ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)).
 
 - **`spec`, written by users at creation:** storage class (required), access modes, requested storage, data source, and `nodeName` (node-local classes only, set by `/binding`).
-- **`spec` is immutable after creation.** A `PUT` that changes any field of it, `nodeName` included, is `Invalid`, and so is a create that carries a `nodeName`. Resizing is not designed.
+- **`spec` is immutable after creation, except `storage`, which may grow** ([ADR 0040](./adr/0040-a-volumes-storage-may-grow-when-its-class-allows-it-the-plugin-on-its-node-grows-the-disk-and-a-growth-still-open-shows-as-a-resizing-condition.md)). A `PUT` that changes any other field of it, `nodeName` included, is `Invalid`, and so is a create that carries a `nodeName`.
+- **Growth.** The rules of a change of `spec.storage`, which `lib/api` holds in `Volume.ValidateResize` and which the API server serves once its issue of #117 lands:
+  - a size above the stored one needs a StorageClass of `spec.storageClass` that has `allowVolumeExpansion` true; with no such class, or one that forbids it, the write is `Invalid`;
+  - a size below `status.capacity` is `Invalid`, so a Volume does not shrink; a request above the disk that has not been met may be lowered down to `status.capacity`;
+  - a change on a Volume with `deletionTimestamp` set is `Conflict`;
+  - only users change it, since a Node's write to a Volume is its finalizer entry only.
+  - The plugin of the Volume's class, on the Volume's Node, grows the disk and sets `status.capacity`. For `local` that is `storage-local` through mvmd's `ResizeDisk`, offline for a disk no Machine holds or a Created or Stopped holder, and live for a Running holder on a Driver that reports `CAPABILITY_DISK_RESIZE`. A Paused or Faulted holder, or a Running holder on a Driver without it, makes the growth wait. The mvmd statements of this item hold for garamsh/mvmd at commit `20150e3ba4dcc7bd860c3d80cb94ee44fd2227ed` (its ADR 0055).
+- **Resizing condition.** While `spec.storage` is above `status.capacity`, the plugin keeps a `Resizing` condition in `status.conditions` with status `True` and a reason and message, and removes it in the write that raises `status.capacity` to `spec.storage`. The reasons of `local` are `InProgress`, `HolderNotResizable` and `Failed`. `status.phase` does not change for a growth.
 - **`status`, written by the Node Agent of the Volume's Node:** `phase` (`Pending`, `Available`, `Bound`, `Released`, `Failed`), `attachment` (microvm name and binding epoch), capacity. The API server starts a Volume `Pending`.
   - `Available` with `capacity` once the disk exists; `Bound`, with the attachment, while a MicroVM has it attached; `Released` once no MicroVM holds it, keeping the last attachment; `Failed` when the disk cannot be made.
 - **Attachment is a compare-and-swap by the Node Agent** on `status.attachment`. It succeeds only if the Volume is not being deleted and `attachment` is empty or its epoch is lower than the MicroVM's current epoch.
-- **Class `local`** is a disk of `spec.storage` bytes on one Node, which that Node's agent creates through mvmd and formats ext4. Its `accessModes` is exactly `ReadWriteOnce`, `storage` is positive and `dataSource` is empty; any other value is `Invalid`. A Volume of another class waits `Pending` for a plugin that serves it.
+- **Class.** `spec.storageClass` names a StorageClass (§StorageClass). A Volume whose class does not exist is accepted and waits `Pending`.
+- **Class `local`** is a disk of `spec.storage` bytes on one Node, which that Node's agent creates through mvmd and formats ext4. Its `accessModes` is exactly `ReadWriteOnce`, `storage` is positive and `dataSource` is empty; any other value is `Invalid`. A Volume of another class waits `Pending` for a plugin that serves it, which is the plugin named by its class's `provisioner` on the Node whose MicroVM uses the Volume first ([ADR 0041](./adr/0041-a-storageclass-names-the-plugin-that-serves-its-volumes-says-whether-they-may-grow-and-the-local-class-is-one-the-api-server-creates.md)).
 - **Pinning.** `/binding` reads each Volume the MicroVM uses and, in the same write, sets `spec.nodeName` of a `local` Volume that has none to the MicroVM's Node and adds the finalizer `compute.gaon.garam.sh/node-agent` to it. A binding to a Node other than a used Volume's `nodeName`, or of a MicroVM that uses a Volume that is being deleted, is `Conflict`, and of a MicroVM that names a Volume that does not exist `Invalid`; nothing is written. A MicroVM whose `local` Volume is pinned to an expired Node is not rebound elsewhere; moving between nodes is out of the first scope.
 - **Deletion.** `DELETE` sets `deletionTimestamp`. The Node Agent of the Volume's Node removes its finalizer through `PUT /volumes/{name}`, changing only its own entry, once no MicroVM has the Volume attached and the disk is deleted. A Volume with no `nodeName` has no finalizer, and `DELETE` removes it at once.
 - The types are in `lib/api/`: `Volume`, `VolumeList`, `VolumeSpec` and `VolumeStatus`.
+
+### StorageClass
+
+A StorageClass is a cluster-scoped object that says which plugin serves the Volumes of a class and whether they may grow. Its semantics follow Kubernetes' StorageClass, with the fields below only ([ADR 0041](./adr/0041-a-storageclass-names-the-plugin-that-serves-its-volumes-says-whether-they-may-grow-and-the-local-class-is-one-the-api-server-creates.md)).
+
+- **Fields:** `provisioner` (required, the name of a storage plugin of ADR 0019's form, immutable) and `allowVolumeExpansion` (false when omitted, may change). It has no `spec` and no `status`.
+- **Class `local`** has `provisioner` `local` and `allowVolumeExpansion` true, and the API server creates it at its start when it is missing. The name `local` and the provisioner `local` belong to each other: a class with one and not the other is `Invalid`.
+- **A plugin** reads StorageClasses and Volumes as its Node; a Volume of a class whose provisioner is the plugin's name is the plugin's when a MicroVM on its Node uses it. A class has one provisioner and an agent runs one storage plugin.
+- The types are in `lib/api/`: `StorageClass` and `StorageClassList`.
 
 ### Node
 
@@ -224,12 +241,17 @@ Relative to the root `/apis/compute.gaon.garam.sh/v1alpha1` (§Transport); where
 | `GET /microvms` | all | list, with the `resourceVersion` to watch from |
 | `GET /microvms/{name}` | all | read one MicroVM |
 | `GET /microvms?watch=true` | all | subscribe to changes |
-| `PUT /volumes/{name}` | users; the Node Agent for its finalizer only | create a Volume; add or remove a finalizer; `spec` is immutable after creation |
+| `PUT /volumes/{name}` | users; the Node Agent for its finalizer only | create a Volume; add or remove a finalizer; raise `spec.storage`; the rest of `spec` is immutable after creation |
 | `PUT /volumes/{name}/status` | Node Agent, controllers | attachment and volume status |
 | `DELETE /volumes/{name}` | users | set `deletionTimestamp`; the Node Agent removes its finalizer after the disk is deleted |
 | `GET /volumes` | all | list, with the `resourceVersion` to watch from |
 | `GET /volumes/{name}` | all | read one Volume |
 | `GET /volumes?watch=true` | all | subscribe to changes |
+| `PUT /storageclasses/{name}` | users | create a StorageClass; change `allowVolumeExpansion`; the provisioner is immutable |
+| `DELETE /storageclasses/{name}` | users | delete a StorageClass |
+| `GET /storageclasses` | all | list, with the `resourceVersion` to watch from |
+| `GET /storageclasses/{name}` | all | read one StorageClass |
+| `GET /storageclasses?watch=true` | all | subscribe to changes |
 | `PUT /nodes/{name}` | users, Node Agent | users create a Node and admit it; the Node Agent only creates it |
 | `PUT /nodes/{name}/status` | Node Agent, controllers | report state, capacity, addresses, MicroVM prefixes and conditions |
 | `GET /nodes` | all | list, with the `resourceVersion` to watch from |
@@ -337,6 +359,7 @@ The API server's `--authorization-mode` is `AlwaysAllow`, the default, which all
   - create CertificateSigningRequests and read one it created;
   - `get` one Secret or ConfigMap that a MicroVM whose `spec.nodeName` is that Node references in `env` or `files`, and no `list` or `watch` of either;
   - `create` on `serviceaccounts/token` for a MicroVM whose `spec.nodeName` is that Node, whose `serviceAccountName` is the account in the path, and whose name and uid are the request's `boundMicroVM`;
+  - `get`, `list` and `watch` on `storageclasses`, and no write of them. A storage plugin reads the class of each Volume it serves ([ADR 0041](./adr/0041-a-storageclass-names-the-plugin-that-serves-its-volumes-says-whether-they-may-grow-and-the-local-class-is-one-the-api-server-creates.md)).
   - `get`, `list` and `watch` on `services`, `endpoints` and `networkpolicies`, and no write of them. The network plugin on a Node needs every Service's Endpoints and every policy, and a list cannot be filtered by Node.
 
   Reads of MicroVMs and Volumes are open to a Node because a list cannot be filtered by Node.
@@ -363,7 +386,7 @@ The group `rbac.gaon.garam.sh/v1alpha1` has the root `/apis/rbac.gaon.garam.sh/v
   | `gaon:admin` (`gaon:admins`) | `*` on `*` for every API group |
 
 - **The coordination Lease and the controllers' read and delete** are [ADR 0021](./adr/0021-the-bootstrap-roles-give-the-scheduler-and-the-controllers-the-coordination-lease-and-the-controllers-read-and-delete-every-resource.md)'s: the scheduler and the controllers take and renew their own Lease, and the controllers read and delete any object, a custom one included, which the garbage collector needs.
-- **An existing cluster** keeps the roles it has, so its `gaon:scheduler` lacks `volumes` and the scheduler's list of Volumes is `Forbidden` until an administrator adds the rule to the role, or deletes the role so the next API server start creates it ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)). The same holds for the Lease rules and the controllers' read and delete of ADR 0021, and for the controllers' `create` and `update` of `endpoints`, without which the endpoints controller is `Forbidden`. Services and NetworkPolicies are written by users only, so no bootstrap role other than `gaon:admin` writes them; a Node's read of the three kinds is the Node authorizer's and needs no role.
+- **An existing cluster** keeps the roles it has, so its `gaon:scheduler` lacks `volumes` and the scheduler's list of Volumes is `Forbidden` until an administrator adds the rule to the role, or deletes the role so the next API server start creates it ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)). The same holds for the Lease rules and the controllers' read and delete of ADR 0021, and for the controllers' `create` and `update` of `endpoints`, without which the endpoints controller is `Forbidden`. Services and NetworkPolicies are written by users only, so no bootstrap role other than `gaon:admin` writes them; a Node's read of the three kinds is the Node authorizer's and needs no role. StorageClasses are written by users only, so no bootstrap role other than `gaon:admin` writes them, and `gaon:scheduler` has no rule for them; the controllers' read covers them.
 - The types are in `lib/api/`: `ClusterRole`, `PolicyRule` (with `AllowsLabels` and `AllowsSelector`), `ClusterRoleBinding`, `RoleRef` and `Subject`.
 
 ### CustomResourceDefinition
@@ -427,6 +450,8 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - Resource definitions, custom resources, their schema, the deletion order and the client: [ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md), which uses ADR 0008's rules for authorization, and [ADR 0031](./adr/0031-a-schema-node-may-hold-an-integer-or-a-string-with-x-kubernetes-int-or-string-and-no-type.md), which adds the integer-or-string node to its keywords.
 - Metadata, label selectors, owner references, the coordination Lease, the Event and the label-selector rule: [ADR 0018](./adr/0018-metadata-gains-uid-labels-and-owner-references-lists-take-a-label-selector-lease-and-event-are-new-kinds-and-a-role-rule-may-carry-a-label-selector.md), which adds a field to ADR 0008's rules and a group to ADR 0009's reserved ones.
 - Webhook configurations, `AdmissionReview`, the order of a write and the failure of a call: [ADR 0010](./adr/0010-a-user-registers-admission-webhooks-with-webhook-configurations-the-api-server-calls-them-on-every-accepted-write.md), which places the webhooks after ADR 0008's authorization and around ADR 0009's schema.
+- A Volume's storage growing, its `Resizing` condition and what refuses a change: [ADR 0040](./adr/0040-a-volumes-storage-may-grow-when-its-class-allows-it-the-plugin-on-its-node-grows-the-disk-and-a-growth-still-open-shows-as-a-resizing-condition.md), which changes ADR 0013's immutable `spec` for `storage`.
+- The StorageClass kind, the `local` class the API server creates and how a plugin learns of a Volume of its class: [ADR 0041](./adr/0041-a-storageclass-names-the-plugin-that-serves-its-volumes-says-whether-they-may-grow-and-the-local-class-is-one-the-api-server-creates.md), which amends ADR 0013's `local` and adds to ADR 0008's Node authorizer.
 - Volume creation, the `local` class, pinning at the binding, deletion and the Volume's writers: [ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md), which adds `volumes` to ADR 0008's `gaon:scheduler` role and widens its Node authorizer.
 - Bearer-token access and the CertificateSigningRequest: [ADR 0007](./adr/0007-a-node-gets-its-client-certificate-from-gaons-own-ca-through-a-signing-request-a-bootstrap-token-may-create.md), which amends ADR 0005.
 - How `resourceVersion`, compare-and-swap and watch map onto the Store: [ADR 0004](./adr/0004-the-store-is-etcd-in-one-cell-of-one-member.md).
@@ -450,6 +475,12 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
   - More than one LAN pool or service prefix: open; each flag takes one CIDR, and no need for more has been met.
   - What an API server does when started with a different `--service-cluster-ip-range` or `--load-balancer-pool` than another's: open; the server does not compare, and an allocation checks only the ranges of the server that serves it, so one that holds an address outside another's range is neither moved nor refused.
   - Whether a NetworkPolicy exempts traffic between a MicroVM and its own Node, as Kubernetes' plugins do for the kubelet's probes: decided: no. The `default` network plugin exempts nothing, so a policy that selects a MicroVM for ingress and does not allow its Node's address blocks the Node's probes; a policy that wants them names the Node's address in an `ipBlock` ([node-agent.md](./node-agent.md) §Plugins).
+- **Volume growth and StorageClass:**
+  - Serving them: the API server still refuses every change of a Volume's `spec`, creates no `local` class and serves no StorageClass path, and `storage-local` grows no disk; each is a later issue of #117, and `Volume.ValidateUpdate` is replaced by `ValidateResize` then.
+  - A snapshot taken before a growth is not restorable after it (mvmd's ADR 0055 at `20150e3ba4dcc7bd860c3d80cb94ee44fd2227ed`): how a VolumeSnapshot, which does not exist yet, and a growth interact is open.
+  - A size that is not a multiple of 512: accepted by the API and failed by the plugin on a Driver that refuses it; whether `local` should refuse it at creation and growth is open.
+  - A Volume of a third party's class is provisioned when a MicroVM on a Node first uses it, and a growth of one with no MicroVM attached waits for a Node's plugin to be given it: whether a plugin may claim a Volume without an attach is open.
+  - A StorageClass's `parameters`, `reclaimPolicy`, `mountOptions`, `volumeBindingMode` and `allowedTopologies`: none, until a plugin needs one.
 - **More than one version of a custom resource,** which needs conversion, and the `scale` subresource and the schema keywords outside §CustomResourceDefinition's list.
 - **Webhook selection and calling:** selectors by label or namespace, a reinvocation policy, a service reference for `clientConfig` and a status code from the webhook wait for a need and, for the service reference, for the serving of Service (§Service, Endpoints and NetworkPolicy); the API server's calling of webhooks is the next issue.
 - **Namespaced roles:** `Role` and `RoleBinding` wait for the namespace decision above; only the cluster-scoped kinds exist.

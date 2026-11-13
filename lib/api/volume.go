@@ -12,9 +12,10 @@ const (
 	VolumeFailed    VolumePhase = "Failed"
 )
 
-// The storage class a Node Agent serves itself, and the one access mode it
-// offers. A Volume of any other class waits Pending for a plugin that serves
-// it.
+// The storage class a Node Agent serves itself, which is also the name and the
+// provisioner of the StorageClass the API server creates for it, and the one
+// access mode it offers. A Volume of any other class waits Pending for a plugin
+// that serves it.
 const (
 	StorageClassLocal   = "local"
 	AccessReadWriteOnce = "ReadWriteOnce"
