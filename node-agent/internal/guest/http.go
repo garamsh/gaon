@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strconv"
 
 	"github.com/garamsh/gaon/lib/api"
@@ -19,8 +18,6 @@ const (
 	contentLog  = "application/octet-stream"
 	contentExec = "application/x-ndjson"
 )
-
-var envName = regexp.MustCompile(`^[-._a-zA-Z][-._a-zA-Z0-9]*$`)
 
 // Handler returns the routes of the agent's listener: the log and the exec of
 // a MicroVM. A failure that can be told before the response begins is its
@@ -136,7 +133,7 @@ func readExec(r *http.Request, w http.ResponseWriter) (ExecRequest, error) {
 	}
 	env := make(map[string]string, len(b.Env))
 	for _, e := range b.Env {
-		if !envName.MatchString(e.Name) {
+		if !api.ValidEnvName(e.Name) {
 			return ExecRequest{}, api.NewAPIError(api.ReasonInvalid, "env name %q is not valid", e.Name)
 		}
 		if _, dup := env[e.Name]; dup {
