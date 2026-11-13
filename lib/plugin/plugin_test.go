@@ -275,7 +275,7 @@ func TestNetwork_APluginStartedAfterTheClientWasMadeAnswersTheNextCall(t *testin
 
 func TestStorage_DisksArriveAndReleaseCarriesTheMachineID(t *testing.T) {
 	dir := plugintest.SocketDir(t)
-	s := &storage{disks: []plugin.DiskAttachment{{DiskID: "volume-a"}, {DiskID: "volume-b", ReadOnly: true}}}
+	s := &storage{disks: []plugin.DiskAttachment{{DiskID: "volume-a", MountPath: "/data"}, {DiskID: "volume-b", ReadOnly: true}}}
 	start(t, func(ctx context.Context) error { return plugin.ServeStorage(ctx, dir, "test", s) })
 	waitSocket(t, dir, plugin.KindStorage, "test")
 	c, err := plugin.DialStorage(dir, "test")

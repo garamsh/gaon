@@ -53,6 +53,9 @@ message NetworkPolicy {
 message DiskAttachment {
   string disk_id = 1;
   bool read_only = 2;
+  // Where the guest mounts the disk's file system before the entrypoint
+  // runs. Empty mounts nothing.
+  string mount_path = 3;
 }
 
 // NetworkService is served by a network plugin.

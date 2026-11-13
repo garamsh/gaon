@@ -330,6 +330,7 @@ func TestPlugins_TheLocalStorageBinaryServesAVolumeThroughTheAgentFromCreateToDe
 		return ok && m.GetState() == v1alpha2.MachineState_MACHINE_STATE_RUNNING && len(m.GetDisks()) == 1
 	})
 	assert.Equal(t, "volume-data", mustMicroVM(t, w.mvmd, "db-e1").GetDisks()[0].GetDiskId())
+	assert.Equal(t, "/mnt/data", mustMicroVM(t, w.mvmd, "db-e1").GetDisks()[0].GetMountPath(), "mvmd is told where to mount the Volume")
 	eventually(t, "data is Bound to db", func() bool {
 		v, _ := w.gaon.Volume("data")
 		return v.Status.Phase == api.VolumeBound && v.Status.Attachment != nil && v.Status.Attachment.MicroVMName == "db"

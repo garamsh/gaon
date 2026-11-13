@@ -114,6 +114,7 @@ func TestLocal_AttachMakesTheDiskAndBindsTheVolumeToTheMicroVM(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, disks, 1)
 	assert.Equal(t, "volume-data", disks[0].DiskID)
+	assert.Equal(t, "/mnt/data", disks[0].MountPath, "the disk carries the path the MicroVM mounts its Volume at")
 	disk, ok := r.mvmd.Disk("volume-data")
 	require.True(t, ok)
 	assert.EqualValues(t, 10<<20, disk.GetSizeBytes())
@@ -123,6 +124,45 @@ func TestLocal_AttachMakesTheDiskAndBindsTheVolumeToTheMicroVM(t *testing.T) {
 	assert.Equal(t, api.Quantity("10485760"), v.Status.Capacity)
 	_, ok = r.mvmd.Disk("volume-other")
 	assert.False(t, ok, "control: a Volume the MicroVM does not name gets no disk")
+	assert.Equal(t, api.VolumePending, r.volume(t, "other").Status.Phase)
+}
+
+func TestLocal_AttachGivesEachDiskItsVolumesMountPath(t *testing.T) {
+	r := newRig(t)
+	r.gaon.SetVolume(volume("data", node))
+	r.gaon.SetVolume(volume("logs", node))
+	m := microvmUsing("db", 1, "data", "logs")
+	m.Spec.Volumes[1].MountPath = "/var/log/db"
+	m.Spec.Volumes = append(m.Spec.Volumes, api.MicroVMVolume{Name: "data", MountPath: "/mnt/data"})
+	r.gaon.SetMicroVM(m)
+
+	disks, err := r.local.Attach(context.Background(), &m)
+
+	require.NoError(t, err)
+	assert.Equal(t, []plugin.DiskAttachment{
+		{DiskID: "volume-data", MountPath: "/mnt/data"},
+		{DiskID: "volume-logs", MountPath: "/var/log/db"},
+	}, disks, "one disk for a Volume named twice at the same path")
+}
+
+func TestLocal_AttachRefusesAVolumeAtTwoPathsAndTouchesNothing(t *testing.T) {
+	r := newRig(t)
+	r.gaon.SetVolume(volume("data", node))
+	ok := microvmUsing("ok", 1, "data")
+	r.gaon.SetMicroVM(ok)
+	_, err := r.local.Attach(context.Background(), &ok)
+	require.NoError(t, err, "control: the same Volume at one path is attached")
+
+	r.gaon.SetVolume(volume("other", node))
+	m := microvmUsing("db", 1, "other")
+	m.Spec.Volumes = append(m.Spec.Volumes, api.MicroVMVolume{Name: "other", MountPath: "/elsewhere"})
+	r.gaon.SetMicroVM(m)
+
+	_, err = r.local.Attach(context.Background(), &m)
+
+	assert.Equal(t, storagelocal.ReasonVolumeMountConflict, refusal(t, err).Reason)
+	_, made := r.mvmd.Disk("volume-other")
+	assert.False(t, made, "no disk is made for a refused MicroVM")
 	assert.Equal(t, api.VolumePending, r.volume(t, "other").Status.Phase)
 }
 

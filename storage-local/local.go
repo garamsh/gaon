@@ -41,6 +41,10 @@ const (
 	// ReasonVolumeFailed is the reason of a MicroVM that names a Volume
 	// whose disk mvmd cannot make.
 	ReasonVolumeFailed = "VolumeFailed"
+	// ReasonVolumeMountConflict is the reason of a MicroVM that names one
+	// Volume at two different mount paths, which one disk attachment cannot
+	// carry.
+	ReasonVolumeMountConflict = "VolumeMountConflict"
 )
 
 // The reasons of the Resizing condition of a Volume whose growth is open.
@@ -128,14 +132,22 @@ func diskID(volume string) string { return "volume-" + volume }
 // Attach checks each Volume m names, then makes its disk if it is missing,
 // writes it Bound to m at its epoch, and returns the disks. It refuses m for a
 // Volume that is missing, of another class, being deleted, pinned elsewhere,
-// attached to another MicroVM or whose disk cannot be made. It writes nothing
-// of the Volumes before every one has passed the checks.
+// attached to another MicroVM or whose disk cannot be made, and for one named
+// at two different mount paths. It writes nothing of the Volumes before every
+// one has passed the checks. Each disk carries the mount path m gives its
+// Volume.
 func (l *Local) Attach(ctx context.Context, m *api.MicroVM) ([]plugin.DiskAttachment, error) {
 	var names []string
+	paths := map[string]string{}
 	for _, mv := range m.Spec.Volumes {
-		if !slices.Contains(names, mv.Name) {
-			names = append(names, mv.Name)
+		if path, seen := paths[mv.Name]; seen {
+			if path != mv.MountPath {
+				return nil, &plugin.Refusal{Reason: ReasonVolumeMountConflict, Message: fmt.Sprintf("volume %q is mounted at both %q and %q", mv.Name, path, mv.MountPath)}
+			}
+			continue
 		}
+		paths[mv.Name] = mv.MountPath
+		names = append(names, mv.Name)
 	}
 	for _, name := range names {
 		if _, err := l.inspect(ctx, m, name); err != nil {
@@ -147,7 +159,7 @@ func (l *Local) Attach(ctx context.Context, m *api.MicroVM) ([]plugin.DiskAttach
 		if err := l.bind(ctx, m, name); err != nil {
 			return nil, err
 		}
-		disks = append(disks, plugin.DiskAttachment{DiskID: diskID(name)})
+		disks = append(disks, plugin.DiskAttachment{DiskID: diskID(name), MountPath: paths[name]})
 	}
 	return disks, nil
 }

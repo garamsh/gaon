@@ -161,7 +161,7 @@ func (s storageServer) Attach(ctx context.Context, req *pb.AttachRequest) (*pb.A
 	}
 	out := &pb.AttachResponse{}
 	for _, d := range disks {
-		out.Disks = append(out.Disks, &pb.DiskAttachment{DiskId: d.DiskID, ReadOnly: d.ReadOnly})
+		out.Disks = append(out.Disks, &pb.DiskAttachment{DiskId: d.DiskID, ReadOnly: d.ReadOnly, MountPath: d.MountPath})
 	}
 	return out, nil
 }
