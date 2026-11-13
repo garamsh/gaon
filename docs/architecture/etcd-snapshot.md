@@ -40,7 +40,7 @@ Basis: [ADR 0028](./adr/0028-a-cronjob-runs-gaon-etcd-snapshot-which-uploads-a-c
 - **The image is built from `etcd-snapshot/Dockerfile`:** a static binary in a distroless static base that carries the CA bundle and runs as uid 65532. It has no shell and no init, and it writes only to `-snapshot-dir`, which the CronJob points at a writable path.
 - **A release is a git tag `etcd-snapshot/vX.Y.Z`.** The workflow `.github/workflows/etcd-snapshot-image.yml` builds the image from the tagged commit and pushes it to the ECR repository `gaon/etcd-snapshot` in account 486152169996, region ap-northeast-2, tagged `X.Y.Z`. It assumes the IAM role `github-actions-gaon` by GitHub OIDC and stores no AWS key. The digest is in the run's job summary.
 - **The CronJob names the image by digest,** `<registry>/gaon/etcd-snapshot@<digest>`, which is what mvmd converts ([deployment.md](./deployment.md) §Backup and restore).
-- **The base images are pinned by digest** in the Dockerfile and moved by hand by its owner.
+- **The base images are pinned by digest** in the Dockerfile and moved by Dependabot: the distroless digest within its `nonroot` tag, the golang digest within the tag's minor. The owner moves the golang minor with the toolchain directive in `go.work`.
 
 ### Files
 
