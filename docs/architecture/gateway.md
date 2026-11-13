@@ -60,8 +60,9 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
 ### LAN address
 
 - **A Gateway holds its address through its Service** (D18). The Service is a `LoadBalancer` whose `loadBalancerIP` names the address; [resource-api.md](./resource-api.md) §Service, Endpoints and NetworkPolicy states that the pool refuses a second holder and releases the address when the Service is deleted. The network plugin announces the address and forwards its ports to the Service's endpoints.
-- **The address is chosen once.** A Service's `loadBalancerIP` never changes, so a change of `spec.addresses` after create is not applied: the Gateway's `Programmed` condition is False with reason `AddressNotAssigned`, and the user deletes the Gateway and creates it again.
-- **An address that cannot be held** (outside the pool, or held by another Service) is `Invalid` or `Conflict` from the API server; the controller reports it as `Accepted` False and `Programmed` False with reason `AddressNotAssigned`, and creates no Deployment.
+- **The address is chosen once.** A Service's `loadBalancerIP` never changes, so a change of `spec.addresses` after create, including removing it, is not applied: the Gateway's `Programmed` condition is False with reason `AddressNotAssigned`, and the user deletes the Gateway and creates it again. Only the address is held: a change to the listeners in the same edit is applied to the Service and the Deployment.
+- **An address that cannot be held** (outside the pool, or held by another Service) is `Invalid` or `Conflict` from the API server when the Gateway asked for one in `spec.addresses`; the controller reports it as `Accepted` False and `Programmed` False with reason `AddressNotAssigned`, and creates no Deployment. A Service refused where no address was asked for is not an address fault: `Programmed` is False with reason `Invalid` for `Invalid`, and `Pending` for any other error, and `Accepted` stays True.
+- **`attachedRoutes`** counts each route once on a listener, however many of its parent references reach that listener.
 - **`status.addresses`** is the Service's `status.loadBalancer.ingress[0].ip`.
 
 ### Listeners

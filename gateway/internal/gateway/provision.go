@@ -163,11 +163,15 @@ func (s *service) provision(ctx context.Context, gw *api.CustomObject, spec Gate
 	want := desiredService(gw, spec, ports)
 
 	have, exists := services[name]
+	var moved string
 	switch {
 	case !exists:
 		created, err := s.services.PutService(ctx, want)
-		if errors.Is(err, api.ErrInvalid) || errors.Is(err, api.ErrConflict) {
+		if want.Spec.LoadBalancerIP != "" && (errors.Is(err, api.ErrInvalid) || errors.Is(err, api.ErrConflict)) {
 			return provisioned{refused: true, reason: ReasonAddressNotAssigned, message: err.Error()}, nil
+		}
+		if errors.Is(err, api.ErrInvalid) {
+			return provisioned{reason: ReasonInvalid, message: err.Error()}, nil
 		}
 		if err != nil {
 			return provisioned{reason: ReasonPending, message: "the Service is not written yet"}, fmt.Errorf("create service %s: %w", name, err)
@@ -176,22 +180,19 @@ func (s *service) provision(ctx context.Context, gw *api.CustomObject, spec Gate
 	case !ownedBy(have.Metadata, gw):
 		return provisioned{reason: ReasonInvalid, message: fmt.Sprintf("Service %s exists and another object owns it", name)}, nil
 	default:
-		held := ingressIP(have)
-		if held == "" {
-			held = have.Spec.LoadBalancerIP
-		}
-		if want.Spec.LoadBalancerIP != "" && want.Spec.LoadBalancerIP != held {
-			return provisioned{reason: ReasonAddressNotAssigned, address: ingressIP(have),
-				message: fmt.Sprintf("the Gateway holds %s and a change of spec.addresses is not applied: delete the Gateway and create it again", held)}, nil
-		}
+		// asked is what the Service was created with: the pool's grant leaves it empty.
+		asked, held := have.Spec.LoadBalancerIP, ingressIP(have)
 		if !reflect.DeepEqual(have.Spec.Ports, want.Spec.Ports) || !reflect.DeepEqual(have.Spec.Selector, want.Spec.Selector) {
 			next := have
 			next.Spec.Ports, next.Spec.Selector = want.Spec.Ports, want.Spec.Selector
 			updated, err := s.services.PutService(ctx, &next)
 			if err != nil {
-				return provisioned{reason: ReasonPending, message: "the Service is not updated yet", address: ingressIP(have)}, fmt.Errorf("update service %s: %w", name, err)
+				return provisioned{reason: ReasonPending, message: "the Service is not updated yet", address: held}, fmt.Errorf("update service %s: %w", name, err)
 			}
 			have = *updated
+		}
+		if wanted := want.Spec.LoadBalancerIP; wanted != asked && wanted != held {
+			moved = fmt.Sprintf("the Gateway holds %s and a change of spec.addresses is not applied: delete the Gateway and create it again", held)
 		}
 	}
 	services[name] = have
@@ -202,6 +203,9 @@ func (s *service) provision(ctx context.Context, gw *api.CustomObject, spec Gate
 	}
 	if err := s.provisionDeployment(ctx, gw, name, ports, deployments); err != nil {
 		return provisioned{reason: ReasonPending, message: "the Deployment is not written yet", address: address}, err
+	}
+	if moved != "" {
+		return provisioned{reason: ReasonAddressNotAssigned, message: moved, address: address}, nil
 	}
 	return provisioned{programmed: true, reason: ReasonProgrammed, address: address}, nil
 }

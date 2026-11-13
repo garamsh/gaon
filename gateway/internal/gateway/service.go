@@ -137,8 +137,14 @@ func (s *service) sweep(ctx context.Context) {
 	routes = append(routes, s.decideRoutes(tlss.Items, s.tlsroutes, KindTLSRoute, checks, services)...)
 	attached := map[string]map[string]int32{}
 	for _, r := range routes {
+		counted := map[[2]string]bool{}
 		for _, a := range r.parents {
 			for _, l := range a.listeners {
+				key := [2]string{a.ref.Name, l}
+				if counted[key] {
+					continue
+				}
+				counted[key] = true
 				if attached[a.ref.Name] == nil {
 					attached[a.ref.Name] = map[string]int32{}
 				}
