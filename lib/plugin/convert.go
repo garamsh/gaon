@@ -110,3 +110,27 @@ func refusalToWire(r *Refusal) *pb.Refusal {
 func refusalFromWire(w *pb.Refusal) *Refusal {
 	return &Refusal{Reason: w.GetReason(), Message: w.GetMessage()}
 }
+
+func routesToWire(in []Route) []*pb.Route {
+	var out []*pb.Route
+	for _, r := range in {
+		w := &pb.Route{Service: r.Service, Address: r.Address, Protocol: protocolToWire[r.Protocol], Port: r.Port, Lan: r.LAN}
+		for _, b := range r.Backends {
+			w.Backends = append(w.Backends, &pb.Backend{Address: b.Address, Port: b.Port})
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+func routesFromWire(in []*pb.Route) []Route {
+	var out []Route
+	for _, w := range in {
+		r := Route{Service: w.GetService(), Address: w.GetAddress(), Protocol: protocolFromWire(w.GetProtocol()), Port: w.GetPort(), LAN: w.GetLan()}
+		for _, b := range w.GetBackends() {
+			r.Backends = append(r.Backends, Backend{Address: b.GetAddress(), Port: b.GetPort()})
+		}
+		out = append(out, r)
+	}
+	return out
+}

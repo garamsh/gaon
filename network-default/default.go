@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"sync"
 
 	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/lib/plugin"
@@ -27,9 +28,13 @@ const (
 )
 
 // Default serves the network "default". With no prefixes its policy is empty,
-// which mvmd reads as blocking all outside traffic.
+// which mvmd reads as blocking all outside traffic. It also implements
+// plugin.Enforcer and plugin.Exposer.
 type Default struct {
 	egress, ingress []netip.Prefix
+	// mu serializes Expose, which changes the node's addresses.
+	mu  sync.Mutex
+	lan lan
 }
 
 // NewDefault returns a Default that allows egress to the prefixes in egress
@@ -44,6 +49,21 @@ func NewDefault(egress, ingress []string) (*Default, error) {
 		return nil, err
 	}
 	return &Default{egress: e, ingress: i}, nil
+}
+
+// WithLAN makes d answer for the LAN addresses of Services on the interface
+// iface, which it holds as host addresses taken from pool, each an IPv4 or
+// IPv6 CIDR. Without it d answers for none. It returns d.
+func (d *Default) WithLAN(iface string, pool []string) (*Default, error) {
+	p, err := parsePrefixes("lan pool", pool)
+	if err != nil {
+		return nil, err
+	}
+	if (iface == "") != (len(p) == 0) {
+		return nil, fmt.Errorf("the LAN interface and the LAN pool are given together or not at all")
+	}
+	d.lan = lan{iface: iface, pool: p}
+	return d, nil
 }
 
 func parsePrefixes(direction string, in []string) ([]netip.Prefix, error) {

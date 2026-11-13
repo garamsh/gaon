@@ -62,6 +62,10 @@ service NetworkService {
   // Enforce makes the node enforce exactly the limits in the request,
   // replacing those of an earlier call. It is repeatable.
   rpc Enforce(EnforceRequest) returns (EnforceResponse);
+  // Expose makes the node translate the addresses in the request to their
+  // backends and answer for the LAN addresses in it, replacing an earlier
+  // call. It is repeatable.
+  rpc Expose(ExposeRequest) returns (ExposeResponse);
 }
 
 message PolicyRequest {
@@ -116,6 +120,36 @@ message EnforceRequest {
 }
 
 message EnforceResponse {}
+
+message ExposeRequest {
+  // Every address the node translates. A packet to an address and port that
+  // no route names is not translated.
+  repeated Route routes = 1;
+  // The LAN addresses the node answers for, as ARP for IPv4 and NDP for
+  // IPv6. One absent from it is not answered for.
+  repeated string announce = 2;
+}
+
+// Route sends the connections to one port of an address to its backends.
+message Route {
+  // The name of the Service the route is for, for messages.
+  string service = 1;
+  string address = 2;
+  Protocol protocol = 3;
+  uint32 port = 4;
+  // The backends that are ready. A route with none refuses connections.
+  repeated Backend backends = 5;
+  // Set when the address is a LAN address, so connections from outside the
+  // cluster come back through this node.
+  bool lan = 6;
+}
+
+message Backend {
+  string address = 1;
+  uint32 port = 2;
+}
+
+message ExposeResponse {}
 
 // StorageService is served by a storage plugin.
 service StorageService {

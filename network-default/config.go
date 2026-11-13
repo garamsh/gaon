@@ -15,6 +15,8 @@ const (
 	EnvPluginDir     = "GAON_PLUGIN_DIR"
 	EnvEgressPrefix  = "GAON_EGRESS_PREFIX"
 	EnvIngressPrefix = "GAON_INGRESS_PREFIX"
+	EnvLANInterface  = "GAON_LAN_INTERFACE"
+	EnvLANPool       = "GAON_LAN_POOL"
 )
 
 // Config is what the plugin is started with.
@@ -24,6 +26,12 @@ type Config struct {
 	// Egress and Ingress are the CIDRs of --egress-prefix and
 	// --ingress-prefix.
 	Egress, Ingress []string
+	// LANInterface is --lan-interface, the interface the node answers ARP and
+	// NDP on for a LoadBalancer Service's LAN address, and LANPool the CIDRs
+	// of --lan-pool, the range of LAN addresses the plugin owns on it. Both
+	// are empty when the node answers for none.
+	LANInterface string
+	LANPool      []string
 }
 
 // ParseConfig reads the flags in args. A flag not given falls back to its
@@ -53,6 +61,8 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 			return nil
 		})
 	}
+	fs.StringVar(&c.LANInterface, "lan-interface", getenv(EnvLANInterface), "interface the node answers ARP and NDP on for LAN addresses (env "+EnvLANInterface+")")
+	prefixes(&c.LANPool, "lan-pool", EnvLANPool, "CIDR of the LAN addresses the plugin owns on the LAN interface")
 	prefixes(&c.Egress, "egress-prefix", EnvEgressPrefix, "CIDR a MicroVM may send to over any protocol")
 	prefixes(&c.Ingress, "ingress-prefix", EnvIngressPrefix, "CIDR a MicroVM's ports accept TCP from")
 	if err := fs.Parse(args); err != nil {
@@ -62,7 +72,7 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 		return Config{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
 	// A prefix that is not a CIDR stops the start.
-	if _, err := NewDefault(c.Egress, c.Ingress); err != nil {
+	if _, err := newDefault(c); err != nil {
 		return Config{}, err
 	}
 	return c, nil
@@ -70,9 +80,17 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 
 // Run serves the plugin named Name in cfg.PluginDir until ctx ends.
 func Run(ctx context.Context, cfg Config) error {
-	d, err := NewDefault(cfg.Egress, cfg.Ingress)
+	d, err := newDefault(cfg)
 	if err != nil {
 		return err
 	}
 	return plugin.ServeNetwork(ctx, cfg.PluginDir, Name, d)
+}
+
+func newDefault(c Config) (*Default, error) {
+	d, err := NewDefault(c.Egress, c.Ingress)
+	if err != nil {
+		return nil, err
+	}
+	return d.WithLAN(c.LANInterface, c.LANPool)
 }

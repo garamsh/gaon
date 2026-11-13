@@ -162,6 +162,60 @@ func TestNetwork_ANetworkThatDoesNotEnforceAnswersUnimplemented(t *testing.T) {
 	assert.Equal(t, codes.Unimplemented, status.Code(err))
 }
 
+// exposingNetwork is a network that also implements plugin.Exposer.
+type exposingNetwork struct {
+	network
+	routes   []plugin.Route
+	announce []string
+	err      error
+}
+
+func (n *exposingNetwork) Expose(_ context.Context, routes []plugin.Route, announce []string) error {
+	n.routes, n.announce = routes, announce
+	return n.err
+}
+
+func TestNetwork_RoutesArriveWithEveryFieldAndARouteWithoutBackendsStaysWithout(t *testing.T) {
+	dir := plugintest.SocketDir(t)
+	want := []plugin.Route{
+		{
+			Service: "default/web", Address: "10.96.0.10", Protocol: plugin.TCP, Port: 80,
+			Backends: []plugin.Backend{{Address: "10.1.0.2", Port: 8080}, {Address: "10.1.0.3", Port: 8080}},
+		},
+		{Service: "default/dns", Address: "192.168.1.200", Protocol: plugin.UDP, Port: 53, LAN: true},
+	}
+	n := &exposingNetwork{}
+	start(t, func(ctx context.Context) error { return plugin.ServeNetwork(ctx, dir, "test", n) })
+	waitSocket(t, dir, plugin.KindNetwork, "test")
+	c, err := plugin.DialNetwork(dir, "test")
+	require.NoError(t, err)
+	defer c.Close()
+
+	require.NoError(t, c.Expose(t.Context(), want, []string{"192.168.1.200", "fd00::200"}))
+
+	assert.Equal(t, want, n.routes)
+	assert.Equal(t, []string{"192.168.1.200", "fd00::200"}, n.announce)
+	assert.Empty(t, n.routes[1].Backends)
+
+	n.err = errors.New("the table could not be written")
+	err = c.Expose(t.Context(), want, nil)
+	assert.Equal(t, codes.Unknown, status.Code(err))
+	assert.Contains(t, err.Error(), "the table could not be written")
+}
+
+func TestNetwork_ANetworkThatDoesNotExposeAnswersUnimplemented(t *testing.T) {
+	dir := plugintest.SocketDir(t)
+	start(t, func(ctx context.Context) error { return plugin.ServeNetwork(ctx, dir, "test", &network{}) })
+	waitSocket(t, dir, plugin.KindNetwork, "test")
+	c, err := plugin.DialNetwork(dir, "test")
+	require.NoError(t, err)
+	defer c.Close()
+
+	err = c.Expose(t.Context(), nil, nil)
+
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
 func TestNetwork_ARefusalArrivesAsARefusalAndAnyOtherErrorDoesNot(t *testing.T) {
 	dir := plugintest.SocketDir(t)
 	n := &network{err: &plugin.Refusal{Reason: "UnknownNetwork", Message: "no such network"}}

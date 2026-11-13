@@ -53,6 +53,7 @@ func TestDialPlugins_ACallToAPluginThatNeverAnswersReturnsWithinTheTimeout(t *te
 	for name, call := range map[string]func() error{
 		"Policy":  func() error { _, err := p.network.Policy(ctx, m); return err },
 		"Enforce": func() error { return p.network.(plugin.Enforcer).Enforce(ctx, nil) },
+		"Expose":  func() error { return p.network.(plugin.Exposer).Expose(ctx, nil, nil) },
 		"Attach":  func() error { _, err := p.storage.Attach(ctx, m); return err },
 		"Release": func() error { return p.storage.Release(ctx, "id") },
 	} {

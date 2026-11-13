@@ -130,6 +130,17 @@ func (s networkServer) Enforce(ctx context.Context, req *pb.EnforceRequest) (*pb
 	return &pb.EnforceResponse{}, nil
 }
 
+func (s networkServer) Expose(ctx context.Context, req *pb.ExposeRequest) (*pb.ExposeResponse, error) {
+	e, ok := s.n.(Exposer)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this network plugin does not serve Services")
+	}
+	if err := e.Expose(ctx, routesFromWire(req.GetRoutes()), req.GetAnnounce()); err != nil {
+		return nil, status.Error(codes.Unknown, err.Error())
+	}
+	return &pb.ExposeResponse{}, nil
+}
+
 type storageServer struct {
 	pb.UnimplementedStorageServiceServer
 	s Storage

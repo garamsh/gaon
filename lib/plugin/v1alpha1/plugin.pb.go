@@ -780,6 +780,239 @@ func (*EnforceResponse) Descriptor() ([]byte, []int) {
 	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{12}
 }
 
+type ExposeRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Every address the node translates. A packet to an address and port that
+	// no route names is not translated.
+	Routes []*Route `protobuf:"bytes,1,rep,name=routes,proto3" json:"routes,omitempty"`
+	// The LAN addresses the node answers for, as ARP for IPv4 and NDP for
+	// IPv6. One absent from it is not answered for.
+	Announce      []string `protobuf:"bytes,2,rep,name=announce,proto3" json:"announce,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExposeRequest) Reset() {
+	*x = ExposeRequest{}
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExposeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExposeRequest) ProtoMessage() {}
+
+func (x *ExposeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExposeRequest.ProtoReflect.Descriptor instead.
+func (*ExposeRequest) Descriptor() ([]byte, []int) {
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ExposeRequest) GetRoutes() []*Route {
+	if x != nil {
+		return x.Routes
+	}
+	return nil
+}
+
+func (x *ExposeRequest) GetAnnounce() []string {
+	if x != nil {
+		return x.Announce
+	}
+	return nil
+}
+
+// Route sends the connections to one port of an address to its backends.
+type Route struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The name of the Service the route is for, for messages.
+	Service  string   `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"`
+	Address  string   `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
+	Protocol Protocol `protobuf:"varint,3,opt,name=protocol,proto3,enum=gaon.plugin.v1alpha1.Protocol" json:"protocol,omitempty"`
+	Port     uint32   `protobuf:"varint,4,opt,name=port,proto3" json:"port,omitempty"`
+	// The backends that are ready. A route with none refuses connections.
+	Backends []*Backend `protobuf:"bytes,5,rep,name=backends,proto3" json:"backends,omitempty"`
+	// Set when the address is a LAN address, so connections from outside the
+	// cluster come back through this node.
+	Lan           bool `protobuf:"varint,6,opt,name=lan,proto3" json:"lan,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Route) Reset() {
+	*x = Route{}
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Route) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Route) ProtoMessage() {}
+
+func (x *Route) ProtoReflect() protoreflect.Message {
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Route.ProtoReflect.Descriptor instead.
+func (*Route) Descriptor() ([]byte, []int) {
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *Route) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *Route) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *Route) GetProtocol() Protocol {
+	if x != nil {
+		return x.Protocol
+	}
+	return Protocol_PROTOCOL_UNSPECIFIED
+}
+
+func (x *Route) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *Route) GetBackends() []*Backend {
+	if x != nil {
+		return x.Backends
+	}
+	return nil
+}
+
+func (x *Route) GetLan() bool {
+	if x != nil {
+		return x.Lan
+	}
+	return false
+}
+
+type Backend struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Port          uint32                 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Backend) Reset() {
+	*x = Backend{}
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Backend) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Backend) ProtoMessage() {}
+
+func (x *Backend) ProtoReflect() protoreflect.Message {
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Backend.ProtoReflect.Descriptor instead.
+func (*Backend) Descriptor() ([]byte, []int) {
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *Backend) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *Backend) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+type ExposeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExposeResponse) Reset() {
+	*x = ExposeResponse{}
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExposeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExposeResponse) ProtoMessage() {}
+
+func (x *ExposeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExposeResponse.ProtoReflect.Descriptor instead.
+func (*ExposeResponse) Descriptor() ([]byte, []int) {
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{16}
+}
+
 type AttachRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The MicroVM, as the JSON of the resource API's v1alpha1 MicroVM.
@@ -790,7 +1023,7 @@ type AttachRequest struct {
 
 func (x *AttachRequest) Reset() {
 	*x = AttachRequest{}
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[13]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -802,7 +1035,7 @@ func (x *AttachRequest) String() string {
 func (*AttachRequest) ProtoMessage() {}
 
 func (x *AttachRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[13]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -815,7 +1048,7 @@ func (x *AttachRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachRequest.ProtoReflect.Descriptor instead.
 func (*AttachRequest) Descriptor() ([]byte, []int) {
-	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{13}
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *AttachRequest) GetMicrovm() []byte {
@@ -836,7 +1069,7 @@ type AttachResponse struct {
 
 func (x *AttachResponse) Reset() {
 	*x = AttachResponse{}
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[14]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -848,7 +1081,7 @@ func (x *AttachResponse) String() string {
 func (*AttachResponse) ProtoMessage() {}
 
 func (x *AttachResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[14]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -861,7 +1094,7 @@ func (x *AttachResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachResponse.ProtoReflect.Descriptor instead.
 func (*AttachResponse) Descriptor() ([]byte, []int) {
-	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{14}
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *AttachResponse) GetRefusal() *Refusal {
@@ -887,7 +1120,7 @@ type ReleaseRequest struct {
 
 func (x *ReleaseRequest) Reset() {
 	*x = ReleaseRequest{}
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[15]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -899,7 +1132,7 @@ func (x *ReleaseRequest) String() string {
 func (*ReleaseRequest) ProtoMessage() {}
 
 func (x *ReleaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[15]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -912,7 +1145,7 @@ func (x *ReleaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseRequest.ProtoReflect.Descriptor instead.
 func (*ReleaseRequest) Descriptor() ([]byte, []int) {
-	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{15}
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ReleaseRequest) GetMachineId() string {
@@ -930,7 +1163,7 @@ type ReleaseResponse struct {
 
 func (x *ReleaseResponse) Reset() {
 	*x = ReleaseResponse{}
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[16]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -942,7 +1175,7 @@ func (x *ReleaseResponse) String() string {
 func (*ReleaseResponse) ProtoMessage() {}
 
 func (x *ReleaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[16]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -955,7 +1188,7 @@ func (x *ReleaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseResponse.ProtoReflect.Descriptor instead.
 func (*ReleaseResponse) Descriptor() ([]byte, []int) {
-	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{16}
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{20}
 }
 
 var File_gaon_plugin_v1alpha1_plugin_proto protoreflect.FileDescriptor
@@ -1001,7 +1234,21 @@ const file_gaon_plugin_v1alpha1_plugin_proto_rawDesc = "" +
 	"\x06egress\x18\x04 \x01(\v2\x1b.gaon.plugin.v1alpha1.LimitR\x06egress\"Q\n" +
 	"\x0eEnforceRequest\x12?\n" +
 	"\bmicrovms\x18\x01 \x03(\v2#.gaon.plugin.v1alpha1.MicroVMLimitsR\bmicrovms\"\x11\n" +
-	"\x0fEnforceResponse\")\n" +
+	"\x0fEnforceResponse\"`\n" +
+	"\rExposeRequest\x123\n" +
+	"\x06routes\x18\x01 \x03(\v2\x1b.gaon.plugin.v1alpha1.RouteR\x06routes\x12\x1a\n" +
+	"\bannounce\x18\x02 \x03(\tR\bannounce\"\xd8\x01\n" +
+	"\x05Route\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\x12\x18\n" +
+	"\aaddress\x18\x02 \x01(\tR\aaddress\x12:\n" +
+	"\bprotocol\x18\x03 \x01(\x0e2\x1e.gaon.plugin.v1alpha1.ProtocolR\bprotocol\x12\x12\n" +
+	"\x04port\x18\x04 \x01(\rR\x04port\x129\n" +
+	"\bbackends\x18\x05 \x03(\v2\x1d.gaon.plugin.v1alpha1.BackendR\bbackends\x12\x10\n" +
+	"\x03lan\x18\x06 \x01(\bR\x03lan\"7\n" +
+	"\aBackend\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\rR\x04port\"\x10\n" +
+	"\x0eExposeResponse\")\n" +
 	"\rAttachRequest\x12\x18\n" +
 	"\amicrovm\x18\x01 \x01(\fR\amicrovm\"\x85\x01\n" +
 	"\x0eAttachResponse\x127\n" +
@@ -1017,10 +1264,11 @@ const file_gaon_plugin_v1alpha1_plugin_proto_rawDesc = "" +
 	"\fPROTOCOL_UDP\x10\x02\x12\x11\n" +
 	"\rPROTOCOL_ICMP\x10\x03\x12\x13\n" +
 	"\x0fPROTOCOL_ICMPV6\x10\x04\x12\x10\n" +
-	"\fPROTOCOL_ANY\x10\x052\xbd\x01\n" +
+	"\fPROTOCOL_ANY\x10\x052\x92\x02\n" +
 	"\x0eNetworkService\x12S\n" +
 	"\x06Policy\x12#.gaon.plugin.v1alpha1.PolicyRequest\x1a$.gaon.plugin.v1alpha1.PolicyResponse\x12V\n" +
-	"\aEnforce\x12$.gaon.plugin.v1alpha1.EnforceRequest\x1a%.gaon.plugin.v1alpha1.EnforceResponse2\xbd\x01\n" +
+	"\aEnforce\x12$.gaon.plugin.v1alpha1.EnforceRequest\x1a%.gaon.plugin.v1alpha1.EnforceResponse\x12S\n" +
+	"\x06Expose\x12#.gaon.plugin.v1alpha1.ExposeRequest\x1a$.gaon.plugin.v1alpha1.ExposeResponse2\xbd\x01\n" +
 	"\x0eStorageService\x12S\n" +
 	"\x06Attach\x12#.gaon.plugin.v1alpha1.AttachRequest\x1a$.gaon.plugin.v1alpha1.AttachResponse\x12V\n" +
 	"\aRelease\x12$.gaon.plugin.v1alpha1.ReleaseRequest\x1a%.gaon.plugin.v1alpha1.ReleaseResponseB<Z:github.com/garamsh/gaon/lib/plugin/v1alpha1;pluginv1alpha1b\x06proto3"
@@ -1038,7 +1286,7 @@ func file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP() []byte {
 }
 
 var file_gaon_plugin_v1alpha1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_gaon_plugin_v1alpha1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_gaon_plugin_v1alpha1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_gaon_plugin_v1alpha1_plugin_proto_goTypes = []any{
 	(Protocol)(0),           // 0: gaon.plugin.v1alpha1.Protocol
 	(*Refusal)(nil),         // 1: gaon.plugin.v1alpha1.Refusal
@@ -1054,10 +1302,14 @@ var file_gaon_plugin_v1alpha1_plugin_proto_goTypes = []any{
 	(*MicroVMLimits)(nil),   // 11: gaon.plugin.v1alpha1.MicroVMLimits
 	(*EnforceRequest)(nil),  // 12: gaon.plugin.v1alpha1.EnforceRequest
 	(*EnforceResponse)(nil), // 13: gaon.plugin.v1alpha1.EnforceResponse
-	(*AttachRequest)(nil),   // 14: gaon.plugin.v1alpha1.AttachRequest
-	(*AttachResponse)(nil),  // 15: gaon.plugin.v1alpha1.AttachResponse
-	(*ReleaseRequest)(nil),  // 16: gaon.plugin.v1alpha1.ReleaseRequest
-	(*ReleaseResponse)(nil), // 17: gaon.plugin.v1alpha1.ReleaseResponse
+	(*ExposeRequest)(nil),   // 14: gaon.plugin.v1alpha1.ExposeRequest
+	(*Route)(nil),           // 15: gaon.plugin.v1alpha1.Route
+	(*Backend)(nil),         // 16: gaon.plugin.v1alpha1.Backend
+	(*ExposeResponse)(nil),  // 17: gaon.plugin.v1alpha1.ExposeResponse
+	(*AttachRequest)(nil),   // 18: gaon.plugin.v1alpha1.AttachRequest
+	(*AttachResponse)(nil),  // 19: gaon.plugin.v1alpha1.AttachResponse
+	(*ReleaseRequest)(nil),  // 20: gaon.plugin.v1alpha1.ReleaseRequest
+	(*ReleaseResponse)(nil), // 21: gaon.plugin.v1alpha1.ReleaseResponse
 }
 var file_gaon_plugin_v1alpha1_plugin_proto_depIdxs = []int32{
 	0,  // 0: gaon.plugin.v1alpha1.NetworkRule.protocol:type_name -> gaon.plugin.v1alpha1.Protocol
@@ -1072,21 +1324,26 @@ var file_gaon_plugin_v1alpha1_plugin_proto_depIdxs = []int32{
 	10, // 9: gaon.plugin.v1alpha1.MicroVMLimits.ingress:type_name -> gaon.plugin.v1alpha1.Limit
 	10, // 10: gaon.plugin.v1alpha1.MicroVMLimits.egress:type_name -> gaon.plugin.v1alpha1.Limit
 	11, // 11: gaon.plugin.v1alpha1.EnforceRequest.microvms:type_name -> gaon.plugin.v1alpha1.MicroVMLimits
-	1,  // 12: gaon.plugin.v1alpha1.AttachResponse.refusal:type_name -> gaon.plugin.v1alpha1.Refusal
-	5,  // 13: gaon.plugin.v1alpha1.AttachResponse.disks:type_name -> gaon.plugin.v1alpha1.DiskAttachment
-	6,  // 14: gaon.plugin.v1alpha1.NetworkService.Policy:input_type -> gaon.plugin.v1alpha1.PolicyRequest
-	12, // 15: gaon.plugin.v1alpha1.NetworkService.Enforce:input_type -> gaon.plugin.v1alpha1.EnforceRequest
-	14, // 16: gaon.plugin.v1alpha1.StorageService.Attach:input_type -> gaon.plugin.v1alpha1.AttachRequest
-	16, // 17: gaon.plugin.v1alpha1.StorageService.Release:input_type -> gaon.plugin.v1alpha1.ReleaseRequest
-	7,  // 18: gaon.plugin.v1alpha1.NetworkService.Policy:output_type -> gaon.plugin.v1alpha1.PolicyResponse
-	13, // 19: gaon.plugin.v1alpha1.NetworkService.Enforce:output_type -> gaon.plugin.v1alpha1.EnforceResponse
-	15, // 20: gaon.plugin.v1alpha1.StorageService.Attach:output_type -> gaon.plugin.v1alpha1.AttachResponse
-	17, // 21: gaon.plugin.v1alpha1.StorageService.Release:output_type -> gaon.plugin.v1alpha1.ReleaseResponse
-	18, // [18:22] is the sub-list for method output_type
-	14, // [14:18] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	15, // 12: gaon.plugin.v1alpha1.ExposeRequest.routes:type_name -> gaon.plugin.v1alpha1.Route
+	0,  // 13: gaon.plugin.v1alpha1.Route.protocol:type_name -> gaon.plugin.v1alpha1.Protocol
+	16, // 14: gaon.plugin.v1alpha1.Route.backends:type_name -> gaon.plugin.v1alpha1.Backend
+	1,  // 15: gaon.plugin.v1alpha1.AttachResponse.refusal:type_name -> gaon.plugin.v1alpha1.Refusal
+	5,  // 16: gaon.plugin.v1alpha1.AttachResponse.disks:type_name -> gaon.plugin.v1alpha1.DiskAttachment
+	6,  // 17: gaon.plugin.v1alpha1.NetworkService.Policy:input_type -> gaon.plugin.v1alpha1.PolicyRequest
+	12, // 18: gaon.plugin.v1alpha1.NetworkService.Enforce:input_type -> gaon.plugin.v1alpha1.EnforceRequest
+	14, // 19: gaon.plugin.v1alpha1.NetworkService.Expose:input_type -> gaon.plugin.v1alpha1.ExposeRequest
+	18, // 20: gaon.plugin.v1alpha1.StorageService.Attach:input_type -> gaon.plugin.v1alpha1.AttachRequest
+	20, // 21: gaon.plugin.v1alpha1.StorageService.Release:input_type -> gaon.plugin.v1alpha1.ReleaseRequest
+	7,  // 22: gaon.plugin.v1alpha1.NetworkService.Policy:output_type -> gaon.plugin.v1alpha1.PolicyResponse
+	13, // 23: gaon.plugin.v1alpha1.NetworkService.Enforce:output_type -> gaon.plugin.v1alpha1.EnforceResponse
+	17, // 24: gaon.plugin.v1alpha1.NetworkService.Expose:output_type -> gaon.plugin.v1alpha1.ExposeResponse
+	19, // 25: gaon.plugin.v1alpha1.StorageService.Attach:output_type -> gaon.plugin.v1alpha1.AttachResponse
+	21, // 26: gaon.plugin.v1alpha1.StorageService.Release:output_type -> gaon.plugin.v1alpha1.ReleaseResponse
+	22, // [22:27] is the sub-list for method output_type
+	17, // [17:22] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_gaon_plugin_v1alpha1_plugin_proto_init() }
@@ -1100,7 +1357,7 @@ func file_gaon_plugin_v1alpha1_plugin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gaon_plugin_v1alpha1_plugin_proto_rawDesc), len(file_gaon_plugin_v1alpha1_plugin_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   17,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

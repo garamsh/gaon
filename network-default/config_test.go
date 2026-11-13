@@ -56,3 +56,34 @@ func TestParseConfig_StopsOnAPrefixThatIsNotACIDRAndOnAStrayArgument(t *testing.
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "10.1.2.3")
 }
+
+func TestParseConfig_ReadsTheLANInterfaceAndPoolFromFlagsAndEnvironment(t *testing.T) {
+	c, err := networkdefault.ParseConfig(nil, env(map[string]string{
+		networkdefault.EnvLANInterface: "eth0",
+		networkdefault.EnvLANPool:      "192.168.1.128/25,fd00::/112",
+	}), io.Discard)
+	require.NoError(t, err)
+	assert.Equal(t, "eth0", c.LANInterface)
+	assert.Equal(t, []string{"192.168.1.128/25", "fd00::/112"}, c.LANPool)
+
+	c, err = networkdefault.ParseConfig(
+		[]string{"--lan-interface=eth1", "--lan-pool=10.0.0.0/24"},
+		env(map[string]string{networkdefault.EnvLANInterface: "eth0", networkdefault.EnvLANPool: "bad"}),
+		io.Discard)
+	require.NoError(t, err, "a flag replaces its variable")
+	assert.Equal(t, "eth1", c.LANInterface)
+	assert.Equal(t, []string{"10.0.0.0/24"}, c.LANPool)
+}
+
+func TestParseConfig_StopsOnALANInterfaceWithoutAPoolAndOnAPoolThatIsNotACIDR(t *testing.T) {
+	for _, args := range [][]string{
+		{"--lan-interface=eth0"},
+		{"--lan-pool=10.0.0.0/24"},
+		{"--lan-interface=eth0", "--lan-pool=nonsense"},
+	} {
+		_, err := networkdefault.ParseConfig(args, env(nil), io.Discard)
+		assert.Error(t, err, "%v", args)
+	}
+	_, err := networkdefault.ParseConfig([]string{"--lan-interface=eth0", "--lan-pool=10.0.0.0/24"}, env(nil), io.Discard)
+	assert.NoError(t, err, "control: both together")
+}
