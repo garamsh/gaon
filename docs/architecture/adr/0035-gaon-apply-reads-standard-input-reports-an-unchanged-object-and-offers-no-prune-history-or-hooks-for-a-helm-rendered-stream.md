@@ -7,7 +7,7 @@ Append-only: once merged, the body below is not rewritten. A fact later found wr
 
 ## Context
 
-Issue #201. A user who keeps manifests as a Helm chart runs `helm template RELEASE CHART | gaon apply -f -`. Before this decision `apply` read only a file, and applying the same documents again printed `configured` for each, because a server write always bumps `resourceVersion` ([resource-api.md](./resource-api.md) §Common rules), so a rerun could not be told from a change.
+Issue #201. A user who keeps manifests as a Helm chart runs `helm template RELEASE CHART | gaon apply -f -`. Before this decision `apply` read only a file, and applying the same documents again printed `configured` for each, because a server write always bumps `resourceVersion` ([resource-api.md](../resource-api.md) §Common rules), so a rerun could not be told from a change.
 
 Helm's own release management gives three things `helm template` does not: pruning an object a later render no longer holds, a history to roll back through, and hooks.
 
