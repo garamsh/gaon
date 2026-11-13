@@ -20,6 +20,19 @@ func TestParseConfig_Defaults(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:8080", cfg.Listen)
 	assert.Equal(t, []string{"http://127.0.0.1:2379"}, cfg.Endpoints)
 	assert.Equal(t, 5*time.Second, cfg.DialTimeout)
+	assert.Equal(t, 10*time.Second, cfg.EtcdKeepAliveTime)
+	assert.Equal(t, 5*time.Second, cfg.EtcdKeepAliveTimeout)
+}
+
+func TestParseConfig_KeepAliveFlags(t *testing.T) {
+	cfg, err := apiserver.ParseConfig([]string{"-etcd-keepalive-time", "6s", "-etcd-keepalive-timeout", "2s"})
+	require.NoError(t, err)
+	assert.Equal(t, 6*time.Second, cfg.EtcdKeepAliveTime)
+	assert.Equal(t, 2*time.Second, cfg.EtcdKeepAliveTimeout)
+
+	cfg, err = apiserver.ParseConfig([]string{"-etcd-keepalive-time", "0", "-etcd-keepalive-timeout", "0"})
+	require.NoError(t, err, "zero turns the ping off")
+	assert.Zero(t, cfg.EtcdKeepAliveTime)
 }
 
 func TestParseConfig_Flags(t *testing.T) {
@@ -67,6 +80,9 @@ func TestParseConfig_Refuses(t *testing.T) {
 		"no endpoint":      {"-etcd-endpoints", " , "},
 		"zero timeout":     {"-etcd-dial-timeout", "0s"},
 		"negative timeout": {"-etcd-dial-timeout", "-1s"},
+		"negative ping":    {"-etcd-keepalive-time", "-1s"},
+		"negative wait":    {"-etcd-keepalive-timeout", "-1s"},
+		"ping, no wait":    {"-etcd-keepalive-timeout", "0s"},
 		"unknown flag":     {"-colour"},
 		"only the CA":      {"-tls-client-ca", "ca.pem"},
 		"no key":           {"-tls-client-ca", "ca.pem", "-tls-cert", "cert.pem"},

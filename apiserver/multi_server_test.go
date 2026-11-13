@@ -55,6 +55,7 @@ func startEtcdCluster(t *testing.T, n int) *etcdCluster {
 			cfg.Dir = t.TempDir()
 			cfg.LogLevel = "panic"
 			cfg.TickMs, cfg.ElectionMs = 10, 100
+			cfg.GRPCKeepAliveMinTime = time.Second
 			cfg.ListenClientUrls, cfg.AdvertiseClientUrls = []url.URL{clients[i]}, []url.URL{clients[i]}
 			cfg.ListenPeerUrls, cfg.AdvertisePeerUrls = []url.URL{peers[i]}, []url.URL{peers[i]}
 			cfg.InitialCluster, cfg.InitialClusterToken = initial, fmt.Sprintf("g123-%d", attempt)

@@ -26,6 +26,10 @@ type Config struct {
 	EtcdCA, EtcdCert, EtcdKey string
 	// DialTimeout bounds the connection to etcd at start.
 	DialTimeout time.Duration
+	// EtcdKeepAliveTime and EtcdKeepAliveTimeout bound how long a request to an
+	// etcd member that stopped answering waits before it fails and the client
+	// moves to another member. Zero EtcdKeepAliveTime turns the ping off.
+	EtcdKeepAliveTime, EtcdKeepAliveTimeout time.Duration
 	// TLSClientCA, TLSCert and TLSKey are the paths of the CA that signs the
 	// callers' certificates and of the server's certificate and key. All three
 	// are set or none is.
@@ -105,6 +109,8 @@ func ParseConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.ServiceClusterIPRange, "service-cluster-ip-range", "", "CIDR Service cluster IPs are allocated from, a virtual prefix; the same on every API server")
 	fs.StringVar(&cfg.LoadBalancerPool, "load-balancer-pool", "", "CIDR of LAN addresses LoadBalancer Services are allocated from; the same on every API server, and not overlapping service-cluster-ip-range")
 	fs.DurationVar(&cfg.DialTimeout, "etcd-dial-timeout", 5*time.Second, "time allowed to reach etcd at start")
+	fs.DurationVar(&cfg.EtcdKeepAliveTime, "etcd-keepalive-time", 10*time.Second, "silence on an etcd connection with a request in flight before the client pings it; 0 sends no ping. The members' --grpc-keepalive-min-time (default 5s) is its lower bound")
+	fs.DurationVar(&cfg.EtcdKeepAliveTimeout, "etcd-keepalive-timeout", 5*time.Second, "time to wait for the answer to a ping before the connection is dropped and another member is used")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -128,6 +134,9 @@ func ParseConfig(args []string) (Config, error) {
 	}
 	if cfg.DialTimeout <= 0 {
 		return Config{}, fmt.Errorf("etcd dial timeout %s is not positive", cfg.DialTimeout)
+	}
+	if cfg.EtcdKeepAliveTime < 0 || cfg.EtcdKeepAliveTimeout < 0 || (cfg.EtcdKeepAliveTime > 0 && cfg.EtcdKeepAliveTimeout == 0) {
+		return Config{}, fmt.Errorf("etcd keepalive time %s and timeout %s must not be negative, and a time needs a timeout", cfg.EtcdKeepAliveTime, cfg.EtcdKeepAliveTimeout)
 	}
 	if err := cfg.validateEtcdTLS(); err != nil {
 		return Config{}, err
