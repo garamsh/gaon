@@ -158,7 +158,8 @@ func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
 		return fmt.Errorf("dial mvmd at %s: %w", cfg.MvmdSocket, err)
 	}
 	defer func() { _ = conn.Close() }()
-	return serve(ctx, cfg, NewLocal(cfg.NodeName, cfg.ResyncPeriod, api.NewClient(cfg.APIServer, httpClient), v1alpha2.NewRuntimeServiceClient(conn), SystemSleeper{}, log))
+	client := api.NewClient(cfg.APIServer, httpClient)
+	return serve(ctx, cfg, NewLocal(cfg.NodeName, cfg.ResyncPeriod, client, client, v1alpha2.NewRuntimeServiceClient(conn), SystemSleeper{}, log))
 }
 
 // serve runs the loop of l beside its server.

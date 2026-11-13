@@ -31,7 +31,7 @@ type rig struct {
 func newRig(t *testing.T) *rig {
 	t.Helper()
 	r := &rig{gaon: newFakeVolumes(), mvmd: newFakeDisks()}
-	r.local = storagelocal.NewLocal(node, 10*time.Millisecond, r.gaon, r.mvmd, storagelocal.SystemSleeper{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.local = storagelocal.NewLocal(node, 10*time.Millisecond, r.gaon, r.gaon, r.mvmd, storagelocal.SystemSleeper{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return r
 }
 
