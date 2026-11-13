@@ -29,6 +29,8 @@ var usage = `usage:
   gaon [--server URL] get [-o table|yaml|json] KIND [NAME]
   gaon [--server URL] describe KIND NAME
   gaon [--server URL] delete KIND NAME
+  gaon [--server URL] logs [-f|--follow] [--tail-bytes N] NAME
+  gaon [--server URL] exec [-e NAME=VALUE]... [-w DIR] NAME -- COMMAND [ARG...]
   gaon config current-context
   gaon config use-context NAME
 
@@ -55,18 +57,22 @@ func usagef(format string, args ...any) error {
 // global flags, and returns the process exit code. stdin is what `apply -f -`
 // reads; it may be nil.
 func Run(ctx context.Context, server string, httpClient *http.Client, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	return exit(run(ctx, &cluster{server: server, http: httpClient}, args, stdin, stdout), stdout, stderr)
+	return exit(run(ctx, &cluster{server: server, http: httpClient}, args, stdin, stdout, stderr), stdout, stderr)
 }
 
 // exit prints what err says and returns the exit code it stands for.
 func exit(err error, stdout, stderr io.Writer) int {
 	var u *usageError
+	var c *commandExit
 	switch {
 	case err == nil:
 		return ExitOK
 	case errors.Is(err, flag.ErrHelp):
 		fmt.Fprintln(stdout, usage)
 		return ExitOK
+	case errors.As(err, &c):
+		fmt.Fprintf(stderr, "gaon: %v\n", err)
+		return c.code
 	case errors.As(err, &u):
 		fmt.Fprintf(stderr, "gaon: %v\n%s\n", err, usage)
 		return ExitUsage
@@ -76,7 +82,7 @@ func exit(err error, stdout, stderr io.Writer) int {
 	}
 }
 
-func run(ctx context.Context, cl *cluster, args []string, stdin io.Reader, out io.Writer) error {
+func run(ctx context.Context, cl *cluster, args []string, stdin io.Reader, out, errOut io.Writer) error {
 	if len(args) == 0 {
 		return usagef("no command")
 	}
@@ -90,6 +96,10 @@ func run(ctx context.Context, cl *cluster, args []string, stdin io.Reader, out i
 		return runDescribe(ctx, cl, rest, out)
 	case "delete":
 		return runDelete(ctx, cl, rest, out)
+	case "logs":
+		return runLogs(ctx, cl, rest, out)
+	case "exec":
+		return runExec(ctx, cl, rest, out, errOut)
 	case "-h", "-help", "--help", "help":
 		return flag.ErrHelp
 	default:
