@@ -2,15 +2,15 @@
 
 What a MicroVM resolves for a Service: the name form, what the DNS server answers, how that server is delivered and how its address reaches every MicroVM.
 
-Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-at-service-svc-zone-and-its-service-address-is-the-resolver-mvmd-gives-every-microvm.md). Kubernetes' statements hold for `kubernetes/dns` at commit `4f2becc8aeb54116398e6a33e34af756db5b9fe7`, `docs/specification.md`, schema version 1.1.0. The mvmd statements hold for garamsh/mvmd at commit `223e3eca764caf60b8dd72c7399b83ff6b437d49`, runtime API `v1alpha2`. The gaon statements hold for garamsh/gaon at commit `34d75c3170c239a1b2b96f2efd41ef3eb6b7318b`. This is a contract: no code serves it yet.
+Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-at-service-default-svc-zone-and-its-service-address-is-the-resolver-mvmd-gives-every-microvm.md). Kubernetes' statements hold for `kubernetes/dns` at commit `4f2becc8aeb54116398e6a33e34af756db5b9fe7`, `docs/specification.md`, schema version 1.1.0. The mvmd statements hold for garamsh/mvmd at commit `223e3eca764caf60b8dd72c7399b83ff6b437d49`, runtime API `v1alpha2`. The gaon statements hold for garamsh/gaon at commit `34d75c3170c239a1b2b96f2efd41ef3eb6b7318b`. This is a contract: no code serves it yet.
 
 ## Current decisions
 
 ### Names
 
-- **Form:** `<service>.svc.<zone>`. `<zone>` is the cluster domain, `cluster.local` by default and set in the unit's configuration. A Service has no namespace ([resource-api.md](./resource-api.md) §Service, Endpoints and NetworkPolicy), so a name has no namespace label.
+- **Form:** `<service>.default.svc.<zone>`, Kubernetes' form with the namespace label fixed to `default`. `<zone>` is the cluster domain, `cluster.local` by default and set in the unit's configuration. `<service>.svc.<zone>` is not answered. A Service has no namespace ([resource-api.md](./resource-api.md) §Service, Endpoints and NetworkPolicy), so the label is a constant.
 - **Comparison** of a query with a name is case-insensitive.
-- **Short names do not resolve.** mvmd's Guest Agent writes `nameserver` lines to `/etc/resolv.conf` and no `search` line, so a MicroVM resolves the full name only. A caller names `<service>.svc.<zone>`.
+- **Short names do not resolve.** mvmd's Guest Agent writes `nameserver` lines to `/etc/resolv.conf` and no `search` line, so a MicroVM resolves the full name only. A caller names `<service>.default.svc.<zone>`.
 - **A name under `<zone>` that is not a Service,** or a per-host name below, is `NXDOMAIN`.
 
 ### Answers
@@ -21,7 +21,7 @@ Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-
 | `ClusterIP` or `LoadBalancer`, `clusterIP` IPv6 | `AAAA` | the `clusterIP` |
 | Either of those | `AAAA` for an IPv4 `clusterIP`, `A` for an IPv6 one | no data (`NOERROR`, no records) |
 | Headless (`clusterIP: None`) | `A`, `AAAA` | one record for each address of the matching family in `subsets[].addresses` of its Endpoints; `NXDOMAIN` when its Endpoints has none or does not exist |
-| Headless | `A`, `AAAA` at `<microvm>.<service>.svc.<zone>` | the address of the Endpoints address whose `targetRef` names that MicroVM, for a MicroVM name that is a DNS label |
+| Headless | `A`, `AAAA` at `<microvm>.<service>.default.svc.<zone>` | the address of the Endpoints address whose `targetRef` names that MicroVM, for a MicroVM name that is a DNS label |
 
 - **A `LoadBalancer` Service answers its `clusterIP`,** which every Node's network plugin implements, not its LAN address, which only a caller outside the cluster uses. Such a Service always has a `clusterIP`.
 - **A ClusterIP Service with no ready MicroVM** still answers its `clusterIP`, as in Kubernetes.
@@ -57,7 +57,7 @@ Basis: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-
 
 Each is a choice of ADR 0033.
 
-- No `<ns>` label in a name (§2.3.1, §2.4.1): a Service has no namespace.
+- The `<ns>` label is the constant `default` (§2.3.1, §2.4.1): a Service has no namespace yet.
 - No `SRV` (§2.3.2, §2.4.2), no `PTR` (§2.3.3, §2.4.3) and no `dns-version` `TXT` (§2.2): no consumer needs them.
 - No `CNAME` for `ExternalName` (§2.5): the type is not offered.
 - A per-host name is the MicroVM's name from `targetRef`, not an endpoint `hostname` field, which Endpoints does not have.
@@ -66,7 +66,7 @@ Each is a choice of ADR 0033.
 
 ## Rationale
 
-- The unit, the name form, the answers, the resolver's path and the departures: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-at-service-svc-zone-and-its-service-address-is-the-resolver-mvmd-gives-every-microvm.md), which follows decision D6 of goal #117.
+- The unit, the name form, the answers, the resolver's path and the departures: [ADR 0033](./adr/0033-a-dns-server-run-as-a-deployment-answers-a-service-at-service-default-svc-zone-and-its-service-address-is-the-resolver-mvmd-gives-every-microvm.md), which follows decision D6 of goal #117.
 - The Service, its addresses and Endpoints: [ADR 0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md).
 - Stable names of a StatefulSet's replicas, which a headless Service names: [ADR 0030](./adr/0030-a-statefulset-is-a-kind-the-workloads-unit-keeps-named-replicas-of-a-microvm-template-for-each-with-a-volume-it-keeps-when-the-replica-goes.md).
 
@@ -79,5 +79,5 @@ Each is a choice of ADR 0033.
 - **mvmd, garamsh/mvmd:** whether the Guest Agent can also write a `search` line, which would let short names resolve; whether a change of `network.resolvers` reaches running MicroVMs or only those created after an mvmd restart; and whether mvmd's policy at the tap sees a Service address before or after the network plugin translates it.
 - **A second resolver,** for a Service address that a failed network plugin does not translate. mvmd takes a list; gaon names one.
 - **IPv6 upstreams and dual-stack Services:** one address per Service and one family of `clusterIP` ([resource-api.md](./resource-api.md) §Open questions); a name answers one family.
-- **Namespaces:** the name form once a Service has a namespace; a new ADR decides it.
+- **Namespaces:** how a Service of another namespace is named, and whether `default` stays the namespace of a Service created without one; a new ADR decides it. Existing names stay valid.
 - **Spread and replica count** of the Deployment, which the scheduler's topology spread decides (goal #117, D16).
