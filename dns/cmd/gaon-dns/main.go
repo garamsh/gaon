@@ -56,7 +56,7 @@ func parseFlags(args []string, out io.Writer) (config, error) {
 	caFile := fs.String("tls-ca", "", "file of the certificate authority that signed the API server's certificate")
 	tokenFile := fs.String("token-file", tokenPath, "file of the ServiceAccount token")
 	zone := fs.String("zone", "cluster.local", "cluster domain whose Services are answered")
-	listen := fs.String("listen", ":53", "address to answer on, over UDP and TCP")
+	listen := fs.String("listen", ":1053", "address to answer on, over UDP and TCP; above 1024 so that uid 65532 binds it where net.ipv4.ip_unprivileged_port_start is 1024")
 	var upstream upstreams
 	fs.Var(&upstream, "upstream", "resolver, as an address or an address and a port, that a name outside the zone is forwarded to; repeat for more; none refuses such names")
 	if err := fs.Parse(args); err != nil {

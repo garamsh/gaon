@@ -14,7 +14,7 @@ func TestParseFlagsDefaults(t *testing.T) {
 	cfg, err := parseFlags([]string{"-server", "https://127.0.0.1:8443", "-tls-ca", "/ca.pem"}, &bytes.Buffer{})
 	require.NoError(t, err)
 	assert.Equal(t, "cluster.local", cfg.server.Zone)
-	assert.Equal(t, ":53", cfg.listen)
+	assert.Equal(t, ":1053", cfg.listen)
 	assert.Equal(t, tokenPath, cfg.server.TokenFile)
 	assert.Empty(t, cfg.server.Upstreams, "the upstreams are never read from /etc/resolv.conf")
 }
