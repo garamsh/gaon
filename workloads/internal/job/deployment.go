@@ -35,10 +35,10 @@ const (
 
 // DefaultRollingBound is the maxSurge and the maxUnavailable of a rolling
 // update that names none.
-const DefaultRollingBound = "25%"
+const DefaultRollingBound Bound = "25%"
 
-// BoundPattern is the schema's pattern of maxSurge and maxUnavailable: a
-// whole number, or a whole number of percent.
+// BoundPattern is the schema's pattern of the string form of maxSurge and
+// maxUnavailable: a whole number, or a whole number of percent.
 const BoundPattern = `^(0|[1-9][0-9]{0,8})%?$`
 
 var boundExpr = regexp.MustCompile(BoundPattern)
@@ -51,12 +51,33 @@ type LabelSelector struct {
 	MatchLabels map[string]string `json:"matchLabels"`
 }
 
+// Bound is a whole number or a whole number of percent, in its string form.
+// It reads a JSON integer or a JSON string.
+type Bound string
+
+// UnmarshalJSON reads an integer as its digits and a string as itself, and
+// refuses any other JSON value.
+func (b *Bound) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
+	if data[0] == '"' {
+		return json.Unmarshal(data, (*string)(b))
+	}
+	var n json.Number
+	if err := json.Unmarshal(data, &n); err != nil {
+		return fmt.Errorf("want an integer or a string: %w", err)
+	}
+	*b = Bound(n)
+	return nil
+}
+
 // RollingUpdate bounds a rollout: MaxSurge replicas may exist above Replicas
 // and MaxUnavailable below it may be not Ready. Each is a number or a
-// percentage of Replicas, written as a string.
+// percentage of Replicas.
 type RollingUpdate struct {
-	MaxSurge       string `json:"maxSurge,omitempty"`
-	MaxUnavailable string `json:"maxUnavailable,omitempty"`
+	MaxSurge       Bound `json:"maxSurge,omitempty"`
+	MaxUnavailable Bound `json:"maxUnavailable,omitempty"`
 }
 
 // Strategy is how a changed template replaces the replicas made from the old
@@ -112,14 +133,14 @@ func (s Strategy) bounds(replicas int) (surge, unavailable int, err error) {
 	return surge, unavailable, nil
 }
 
-func resolveBound(name, value string, replicas int, roundUp bool) (int, error) {
+func resolveBound(name string, value Bound, replicas int, roundUp bool) (int, error) {
 	if value == "" {
 		value = DefaultRollingBound
 	}
-	if !boundExpr.MatchString(value) {
+	if !boundExpr.MatchString(string(value)) {
 		return 0, fmt.Errorf("spec.strategy.rollingUpdate.%s is %q, want a number or a percentage", name, value)
 	}
-	number, isPercent := strings.CutSuffix(value, "%")
+	number, isPercent := strings.CutSuffix(string(value), "%")
 	n, err := strconv.Atoi(number)
 	if err != nil {
 		return 0, err
@@ -159,7 +180,7 @@ func DeploymentDefinition() *api.CustomResourceDefinition {
 	zero := 0.0
 	count := func(desc string) api.JSONSchemaProps { return integerSchema(desc, &zero) }
 	bound := func(desc string) api.JSONSchemaProps {
-		return api.JSONSchemaProps{Type: api.SchemaString, Description: desc, Pattern: BoundPattern}
+		return api.JSONSchemaProps{IntOrString: true, Description: desc, Pattern: BoundPattern}
 	}
 	spec := api.JSONSchemaProps{
 		Type:     api.SchemaObject,
@@ -186,8 +207,8 @@ func DeploymentDefinition() *api.CustomResourceDefinition {
 					"rollingUpdate": {
 						Type: api.SchemaObject,
 						Properties: map[string]api.JSONSchemaProps{
-							"maxSurge":       bound("replicas above spec.replicas during a rollout, a number or a percentage; 25% when absent"),
-							"maxUnavailable": bound("replicas below spec.replicas that may be not Ready, a number or a percentage; 25% when absent"),
+							"maxSurge":       bound("replicas above spec.replicas during a rollout, an integer or a string of a number or a percentage; 25% when absent"),
+							"maxUnavailable": bound("replicas below spec.replicas that may be not Ready, an integer or a string of a number or a percentage; 25% when absent"),
 						},
 					},
 				},
