@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 
 	"go.yaml.in/yaml/v3"
 
@@ -67,4 +68,32 @@ func encodeYAML(v any) ([]byte, error) {
 		return nil, err
 	}
 	return yaml.Marshal(generic)
+}
+
+// holds reports whether have already holds what want says: the two are equal
+// in every field a write sets. The status and the metadata fields only the
+// server writes are left out.
+func holds(have, want any) bool {
+	h, w := writable(have), writable(want)
+	return h != nil && reflect.DeepEqual(h, w)
+}
+
+// writable is v's JSON form without the status and the server-set metadata.
+// A value that cannot be encoded has no form, so nothing holds it.
+func writable(v any) any {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	delete(m, "status")
+	if meta, ok := m["metadata"].(map[string]any); ok {
+		for _, f := range []string{"uid", "resourceVersion", "generation", "deletionTimestamp"} {
+			delete(meta, f)
+		}
+	}
+	return m
 }

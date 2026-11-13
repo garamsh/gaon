@@ -25,7 +25,7 @@ const (
 
 // usage is the help text. KIND is any name of a kind, so the text lists them.
 var usage = `usage:
-  gaon [--server URL] apply -f FILE
+  gaon [--server URL] apply -f FILE|-
   gaon [--server URL] get [-o table|yaml|json] KIND [NAME]
   gaon [--server URL] describe KIND NAME
   gaon [--server URL] delete KIND NAME
@@ -52,9 +52,10 @@ func usagef(format string, args ...any) error {
 }
 
 // Run executes one gaon command, args being the command line after the
-// global flags, and returns the process exit code.
-func Run(ctx context.Context, server string, httpClient *http.Client, args []string, stdout, stderr io.Writer) int {
-	return exit(run(ctx, &cluster{server: server, http: httpClient}, args, stdout), stdout, stderr)
+// global flags, and returns the process exit code. stdin is what `apply -f -`
+// reads; it may be nil.
+func Run(ctx context.Context, server string, httpClient *http.Client, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return exit(run(ctx, &cluster{server: server, http: httpClient}, args, stdin, stdout), stdout, stderr)
 }
 
 // exit prints what err says and returns the exit code it stands for.
@@ -75,14 +76,14 @@ func exit(err error, stdout, stderr io.Writer) int {
 	}
 }
 
-func run(ctx context.Context, cl *cluster, args []string, out io.Writer) error {
+func run(ctx context.Context, cl *cluster, args []string, stdin io.Reader, out io.Writer) error {
 	if len(args) == 0 {
 		return usagef("no command")
 	}
 	rest := args[1:]
 	switch args[0] {
 	case "apply":
-		return runApply(ctx, cl, rest, out)
+		return runApply(ctx, cl, rest, stdin, out)
 	case "get":
 		return runGet(ctx, cl, rest, out)
 	case "describe":
@@ -123,18 +124,21 @@ func parseFlags(name string, args []string, define func(*flag.FlagSet)) ([]strin
 	return operands, nil
 }
 
-func runApply(ctx context.Context, cl *cluster, args []string, out io.Writer) error {
+func runApply(ctx context.Context, cl *cluster, args []string, stdin io.Reader, out io.Writer) error {
 	var file string
-	operands, err := parseFlags("apply", args, func(fs *flag.FlagSet) { fs.StringVar(&file, "f", "", "YAML file") })
+	operands, err := parseFlags("apply", args, func(fs *flag.FlagSet) { fs.StringVar(&file, "f", "", "YAML file, or - for standard input") })
 	if err != nil {
 		return err
 	}
 	if file == "" || len(operands) != 0 {
 		return usagef("apply: want -f FILE and no other operand")
 	}
-	data, err := os.ReadFile(file)
+	data, err := readInput(file, stdin)
 	if err != nil {
 		return fmt.Errorf("apply: %w", err)
+	}
+	if file == "-" {
+		file = "standard input"
 	}
 	docs, err := parseDocuments(data)
 	if err != nil {
@@ -180,10 +184,22 @@ func runApply(ctx context.Context, cl *cluster, args []string, out io.Writer) er
 	return nil
 }
 
-// applyOne sends ch as a compare-and-swap and reports "created" or
-// "configured". The version it swaps against is the file's, or else the
-// current one, so a change made after that read fails the write. It is never
-// retried.
+// readInput reads the apply file, or stdin for "-".
+func readInput(file string, stdin io.Reader) ([]byte, error) {
+	if file != "-" {
+		return os.ReadFile(file)
+	}
+	if stdin == nil {
+		return nil, errors.New("no standard input")
+	}
+	return io.ReadAll(stdin)
+}
+
+// applyOne sends ch as a compare-and-swap and reports "created",
+// "configured" or "unchanged". The version it swaps against is the file's, or
+// else the current one, so a change made after that read fails the write. It
+// is never retried. A document without a version that the stored object
+// already matches is not sent.
 func applyOne(ctx context.Context, cl *cluster, ch change) (string, error) {
 	version, verb := ch.version, "configured"
 	if version == "" {
@@ -193,8 +209,10 @@ func applyOne(ctx context.Context, cl *cluster, ch change) (string, error) {
 			verb = "created"
 		case err != nil:
 			return "", err
+		case cur.same:
+			return "unchanged", nil
 		default:
-			version = cur
+			version = cur.version
 		}
 	}
 	err := ch.send(ctx, cl, version)

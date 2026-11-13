@@ -21,12 +21,13 @@ type environment struct {
 	server string // GAON_SERVER
 	config string // GAON_CONFIG
 	home   string // the home directory, "" when there is none
+	stdin  io.Reader
 }
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	home, _ := os.UserHomeDir()
-	env := environment{server: os.Getenv("GAON_SERVER"), config: os.Getenv("GAON_CONFIG"), home: home}
+	env := environment{server: os.Getenv("GAON_SERVER"), config: os.Getenv("GAON_CONFIG"), home: home, stdin: os.Stdin}
 	code := run(ctx, os.Args[1:], env, os.Stdout, os.Stderr)
 	stop()
 	os.Exit(code)
@@ -88,5 +89,5 @@ func run(ctx context.Context, args []string, env environment, stdout, stderr io.
 		fmt.Fprintf(stderr, "gaon: %v\n", err)
 		return command.ExitUsage
 	}
-	return command.Run(ctx, *server, httpClient, fs.Args(), stdout, stderr)
+	return command.Run(ctx, *server, httpClient, fs.Args(), env.stdin, stdout, stderr)
 }

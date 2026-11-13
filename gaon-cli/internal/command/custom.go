@@ -160,12 +160,12 @@ func customKind(cl *cluster, d api.CustomResourceDefinition) kind {
 			return change{
 				name:    obj.Metadata.Name,
 				version: obj.Metadata.ResourceVersion,
-				current: func(ctx context.Context, _ *cluster) (api.ResourceVersion, error) {
+				current: func(ctx context.Context, _ *cluster) (stored, error) {
 					cur, err := read(ctx, obj.Metadata.Name)
 					if err != nil {
-						return "", err
+						return stored{}, err
 					}
-					return cur.Metadata.ResourceVersion, nil
+					return stored{cur.Metadata.ResourceVersion, holds(cur, obj)}, nil
 				},
 				send: func(ctx context.Context, _ *cluster, version api.ResourceVersion) error {
 					c, err := client()
