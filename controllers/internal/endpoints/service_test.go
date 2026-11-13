@@ -137,6 +137,9 @@ func TestEndpoints_ListsAMicroVMThatMeetsAllFourConditionsAndOnlyThatOne(t *test
 		{"has no Ready condition", func(m *api.MicroVM) { m.Status.Conditions = nil }, []string{"10.0.0.1"}},
 		{"has no address", func(m *api.MicroVM) { m.Status.Addresses = nil }, []string{"10.0.0.1"}},
 		{"has only an address no Endpoints accepts", func(m *api.MicroVM) { m.Status.Addresses = []string{"not-an-ip"} }, []string{"10.0.0.1"}},
+		{"has only a loopback address", func(m *api.MicroVM) { m.Status.Addresses = []string{"127.0.0.1"} }, []string{"10.0.0.1"}},
+		{"has only a link-local address", func(m *api.MicroVM) { m.Status.Addresses = []string{"169.254.1.1"} }, []string{"10.0.0.1"}},
+		{"has a loopback address first and a global one second", func(m *api.MicroVM) { m.Status.Addresses = []string{"127.0.0.1", "10.0.0.2"} }, []string{"10.0.0.2", "10.0.0.1"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -156,6 +159,72 @@ func TestEndpoints_ListsAMicroVMThatMeetsAllFourConditionsAndOnlyThatOne(t *test
 			}
 		})
 	}
+}
+
+func TestEndpoints_ListsTheFirstAddressThatIsGlobalUnicastAndLeavesOutAMicroVMWithNone(t *testing.T) {
+	f := newFakeAPI(t)
+	both := newMicroVM("a", web, "169.254.1.1")
+	both.Status.Addresses = []string{"169.254.1.1", "fe80::1", "10.0.0.2"}
+	none := newMicroVM("b", web, "127.0.0.1")
+	f.seed([]api.Service{newService("web", web, tcp("", 80))}, []api.MicroVM{both, none, newMicroVM("c", web, "10.0.0.3")})
+	start(t, f)
+
+	got := f.waitStored("web", func(api.Endpoints) bool { return true })
+	assert.Equal(t, []string{"10.0.0.2", "10.0.0.3"}, ips(got), "the second address of a is listed and b, with only a loopback address, is not")
+}
+
+func TestEndpoints_ListsAddressesInTheOrderOfTheMicroVMNamesAndWritesNothingWhenNothingChanged(t *testing.T) {
+	f := newFakeAPI(t)
+	var microvms []api.MicroVM
+	var want []string
+	for i := 1; i <= 8; i++ {
+		// The addresses run against the names, so the name order is not the address order.
+		ip := fmt.Sprintf("10.0.0.%d", 10-i)
+		microvms = append(microvms, newMicroVM(fmt.Sprintf("m%d", i), web, ip))
+		want = append(want, ip)
+	}
+	f.seed([]api.Service{newService("web", web, tcp("", 80)), sentinelService()}, append(microvms, sentinelMicroVM()))
+	start(t, f)
+	got := f.waitStored("web", func(api.Endpoints) bool { return true })
+	assert.Equal(t, want, ips(got))
+	require.Equal(t, 1, putsOf(f, "web"))
+
+	// A second reconcile with nothing changed: the same Service again, and a
+	// MicroVM event that changes nothing it lists.
+	f.emitService(api.EventModified, newService("web", web, tcp("", 80)))
+	afterServiceEvents(f, 2)
+	f.emitMicroVM(api.EventModified, microvms[3])
+	afterMicroVMEvents(f, 1)
+	assert.Equal(t, 1, putsOf(f, "web"), "an Endpoints that already lists them in that order is not written again")
+
+	// Control: a change to one of them is written, so the silence is not a
+	// controller that has stopped writing.
+	changed := microvms[3]
+	changed.Status.Addresses = []string{"10.0.0.99"}
+	f.emitMicroVM(api.EventModified, changed)
+	f.waitStored("web", func(e api.Endpoints) bool { return len(ips(e)) == 8 && ips(e)[3] == "10.0.0.99" })
+	assert.Equal(t, 2, putsOf(f, "web"))
+}
+
+func TestEndpoints_KeepsRunningWhenAServiceWhoseWriteFailedIsDeleted(t *testing.T) {
+	f := newFakeAPI(t)
+	f.setFailPuts(1)
+	f.seed([]api.Service{newService("web", web, tcp("", 80))}, []api.MicroVM{newMicroVM("a", web, "10.0.0.1"), sentinelMicroVM()})
+	clock := start(t, f)
+	require.Eventually(t, func() bool { return putsOf(f, "web") == 1 }, 5*time.Second, time.Millisecond)
+	clock.waitTimersAbove(t, 0)
+
+	f.emitService(api.EventDeleted, newService("web", web, tcp("", 80)))
+	afterServiceEvents(f, 2)
+	clock.Advance(10 * endpoints.RetryDelay)
+	afterMicroVMEvents(f, 1)
+	assert.Equal(t, 1, putsOf(f, "web"), "nothing is written for the deleted Service")
+	_, stored := f.stored("web")
+	assert.False(t, stored)
+
+	// Control: the controller still follows a Service created under the name.
+	f.emitService(api.EventAdded, newService("web", web, tcp("", 80)))
+	f.waitStored("web", func(e api.Endpoints) bool { return fmt.Sprint(ips(e)) == "[10.0.0.1]" })
 }
 
 func TestEndpoints_ResolvesTargetPortsAndSplitsMicroVMsWhoseNumbersDiffer(t *testing.T) {

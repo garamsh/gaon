@@ -446,7 +446,7 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
   - The Node authorizer's and the bootstrap roles' rules for them are settled, in §Authorization and the RBAC table.
   - CLI short names: open; the CLI's naming of kinds is not part of this change.
   - Dual-stack Services and `SCTP`: open; one address per Service and `TCP` and `UDP` only, until a need is met.
-  - Whether an Endpoints lists a MicroVM that is not `Ready` (`publishNotReadyAddresses`): open; the endpoints controller that decides it is not written.
+  - Whether an Endpoints lists a MicroVM that is not `Ready` (`publishNotReadyAddresses`): open; the endpoints controller lists only `Ready` MicroVMs and the Endpoints has no field to list others, until a need is met.
   - More than one LAN pool or service prefix: open; each flag takes one CIDR, and no need for more has been met.
   - What an API server does when started with a different `--service-cluster-ip-range` or `--load-balancer-pool` than another's: open; the server does not compare, and an allocation checks only the ranges of the server that serves it, so one that holds an address outside another's range is neither moved nor refused.
   - Whether a NetworkPolicy exempts traffic between a MicroVM and its own Node, as Kubernetes' plugins do for the kubelet's probes: open; it is the network plugin's enforcement, which is a later issue.
