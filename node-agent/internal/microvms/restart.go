@@ -136,12 +136,18 @@ func (s *service) restart(ctx context.Context, m *api.MicroVM, id string, r *v1a
 }
 
 // judge decides whether the exit of the MicroVM r failed: one the agent caused
-// for a failing liveness probe did, and any other is classified.
+// for a failing liveness probe did, whatever its record says, and any other is
+// classified. Either way the record is read, so that the next exit is compared
+// with it; one that cannot be read leaves the earlier record in place.
 func (s *service) judge(ctx context.Context, id string, r *v1alpha2.Machine, st *run) (bool, *v1alpha2.ExecRecord, error) {
-	if st.liveness != "" {
-		return true, nil, nil
+	failed, rec, err := s.classify(ctx, id, r, st.last)
+	if st.liveness == "" || err != nil {
+		return failed, rec, err
 	}
-	return s.classify(ctx, id, r, st.last)
+	if rec == nil {
+		rec = st.last
+	}
+	return true, rec, nil
 }
 
 // classify judges how the entrypoint of the MicroVM r ended. A faulted

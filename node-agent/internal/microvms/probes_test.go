@@ -89,6 +89,16 @@ func TestProbes_AnUnnamedPortIsTheMicroVMsFailure(t *testing.T) {
 	assert.Equal(t, ReasonInvalidSpec, r.ready().Reason)
 	assert.Contains(t, r.ready().Message, "spec.readinessProbe.tcpSocket.port")
 	assert.Empty(t, r.mvmd.IDs(), "no machine is made for it")
+
+	declared := rigMicroVM(1, api.RunAlways)
+	declared.Spec.Ports = []api.MicroVMPort{{Name: "web", Port: 8080, Protocol: api.ProtocolTCP}}
+	declared.Spec.ReadinessProbe = &api.Probe{TCPSocket: &api.TCPSocketAction{Port: api.PortRef{Name: "web"}}}
+	control := newRig(t, nil)
+	control.beginMicroVM(declared)
+	req, ok := control.mvmd.CreateRequest(rigID)
+	require.True(t, ok)
+	require.Len(t, req.Probes, 1)
+	assert.EqualValues(t, 8080, req.Probes[0].GetTcp().GetPort(), "a declared name is accepted and sent as its number")
 }
 
 func TestProbes_AProbeMvmdRefusesIsTheMicroVMsRejection(t *testing.T) {
@@ -336,6 +346,44 @@ func TestLiveness_ACleanExitAfterTheRestartIsNotJudgedByTheEarlierProbeFailure(t
 
 	assert.Equal(t, api.MicroVMSucceeded, r.gaon.MicroVM("m1").Status.Phase)
 	assert.Equal(t, 2, r.starts(), "the clean exit is not restarted")
+}
+
+func TestLiveness_TheRecordOfALivenessStopIsComparedWithTheNextExit(t *testing.T) {
+	m := rigMicroVM(1, api.RunRerunOnFailure)
+	m.Spec.LivenessProbe = tcpProbe(80)
+	r := newRig(t, nil)
+	r.beginMicroVM(m)
+	// The entrypoint handles the stop's shutdown request and exits 0.
+	r.mvmd.SetEntrypointRecord(rigID, exited(0, 0))
+	r.mvmd.SetProbe(rigID, "liveness", probeFailing, "connection refused")
+	r.mustRound()
+	r.clk.Advance(10 * time.Second)
+	r.mustRound()
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
+
+	// The next run ends with no record of its own, so mvmd still holds the
+	// earlier one, which is not evidence of a clean exit.
+	r.mvmd.SetState(rigID, v1alpha2.MachineState_MACHINE_STATE_STOPPED, "the VMM ended with no call asking it to")
+	r.mustRound()
+	r.clk.Advance(20 * time.Second)
+	r.mustRound()
+
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
+	assert.Equal(t, 3, r.starts(), "the stale clean record is judged failed and the MicroVM restarted")
+}
+
+func TestGracePeriod_ARemovalOfAMicroVMTheAgentNoLongerHoldsIsTheDefault(t *testing.T) {
+	seven := int32(7)
+	m := rigMicroVM(1, api.RunAlways)
+	m.Spec.TerminationGracePeriodSeconds = &seven
+	r := newRig(t, nil)
+	r.beginMicroVM(m)
+
+	r.gaon.DeleteMicroVM("m1")
+	r.svc.cache.replace(nil)
+	r.mustRound()
+
+	r.requireGrace(30 * time.Second)
 }
 
 // requireGrace checks that the one stop mvmd received carried grace, set.
