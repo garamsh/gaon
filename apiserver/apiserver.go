@@ -56,6 +56,10 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 	if addr, ok := ln.Addr().(*net.TCPAddr); tlsCfg == nil && (!ok || !addr.IP.IsLoopback()) {
 		return fmt.Errorf("listener %s is not a loopback address and no TLS files are given", ln.Addr())
 	}
+	ranges, err := cfg.ranges()
+	if err != nil {
+		return err
+	}
 	etcdTLS, err := cfg.etcdTLS()
 	if err != nil {
 		return err
@@ -65,7 +69,7 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 		return err
 	}
 	defer st.Close()
-	svc := resourceapi.NewService(st, time.Now, signer)
+	svc := resourceapi.NewService(st, time.Now, signer, ranges)
 	az := authorization.AlwaysAllow()
 	if cfg.AuthorizationMode == ModeRBAC {
 		if err := authorization.Bootstrap(ctx, svc); err != nil {

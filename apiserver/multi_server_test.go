@@ -95,11 +95,16 @@ func startEtcdCluster(t *testing.T, n int) *etcdCluster {
 // the server does not start.
 func startServer(t *testing.T, endpoints []string) (*env, error) {
 	t.Helper()
+	return startServerWith(t, apiserver.Config{Endpoints: endpoints, DialTimeout: 2 * time.Second})
+}
+
+// startServerWith is startServer for the configuration cfg.
+func startServerWith(t *testing.T, cfg apiserver.Config) (*env, error) {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	runCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	cfg := apiserver.Config{Endpoints: endpoints, DialTimeout: 2 * time.Second}
 	go func() { done <- apiserver.Run(runCtx, cfg, ln, slog.New(slog.NewTextHandler(io.Discard, nil))) }()
 	stopped := false
 	stop := func() error {

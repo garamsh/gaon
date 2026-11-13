@@ -122,7 +122,10 @@ func (s *Store) Transact(ctx context.Context, writes []resourceapi.Write) (int64
 	var ops []clientv3.Op
 	for _, w := range writes {
 		conds = append(conds, clientv3.Compare(clientv3.ModRevision(w.Key), "=", w.Revision))
-		if w.Value != nil {
+		switch {
+		case w.Delete:
+			ops = append(ops, clientv3.OpDelete(w.Key))
+		case w.Value != nil:
 			ops = append(ops, clientv3.OpPut(w.Key, string(w.Value)))
 		}
 	}

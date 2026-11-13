@@ -35,11 +35,13 @@ type Event struct {
 }
 
 // Write is one write of a Transact: Value replaces what is under Key if it is
-// at Revision. A nil Value writes nothing and only holds the condition.
+// at Revision, or with Delete the key is removed if it is at Revision. A nil
+// Value without Delete writes nothing and only holds the condition.
 type Write struct {
 	Key      string
 	Value    []byte
 	Revision int64
+	Delete   bool
 }
 
 // Store holds the serialised objects, each at the revision it was last

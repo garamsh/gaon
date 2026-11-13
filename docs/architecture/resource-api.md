@@ -169,7 +169,7 @@ All three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, with `a
 
 ### Service, Endpoints and NetworkPolicy
 
-The three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, modelled on Kubernetes' Service, Endpoints and NetworkPolicy, and served by the core ([ADR 0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md)). The contract is in `lib/api/`; the API server's serving of them, the endpoints controller and enforcement in the network plugin are later issues.
+The three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, modelled on Kubernetes' Service, Endpoints and NetworkPolicy, and served by the core ([ADR 0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md)). The contract is in `lib/api/`. The API server serves them on the paths of the route table and allocates a Service's addresses ([apiserver.md](./apiserver.md) §Writes); the endpoints controller and enforcement in the network plugin are later issues.
 
 - **`Service`** has `spec` and `status`. A name is a DNS label of at most 63 characters that starts with a letter, because DNS names it. `spec`:
   - `selector`, a map of labels that selects MicroVMs by equality; empty, it selects none and the Service's Endpoints is written by its user.
@@ -336,7 +336,8 @@ The API server's `--authorization-mode` is `AlwaysAllow`, the default, which all
   - read Volumes, for the reason it reads MicroVMs; write the `status` of a Volume whose `spec.nodeName` is that Node, or that a MicroVM bound to it uses; and its own finalizer through `PUT /volumes/{name}` on a Volume whose `spec.nodeName` is that Node (the API server checks that only the finalizer entry changed, invariant 3);
   - create CertificateSigningRequests and read one it created;
   - `get` one Secret or ConfigMap that a MicroVM whose `spec.nodeName` is that Node references in `env` or `files`, and no `list` or `watch` of either;
-  - `create` on `serviceaccounts/token` for a MicroVM whose `spec.nodeName` is that Node, whose `serviceAccountName` is the account in the path, and whose name and uid are the request's `boundMicroVM`.
+  - `create` on `serviceaccounts/token` for a MicroVM whose `spec.nodeName` is that Node, whose `serviceAccountName` is the account in the path, and whose name and uid are the request's `boundMicroVM`;
+  - `get`, `list` and `watch` on `services`, `endpoints` and `networkpolicies`, and no write of them. The network plugin on a Node needs every Service's Endpoints and every policy, and a list cannot be filtered by Node.
 
   Reads of MicroVMs and Volumes are open to a Node because a list cannot be filtered by Node.
 - **Escalation.** A caller creates or updates a ClusterRole only if it holds every permission the role grants, and a ClusterRoleBinding only if it holds every permission of the role it names. The Node authorizer's permissions do not count.
@@ -358,11 +359,11 @@ The group `rbac.gaon.garam.sh/v1alpha1` has the root `/apis/rbac.gaon.garam.sh/v
   | Role (group bound) | Rules |
   |---|---|
   | `gaon:scheduler` (`gaon:schedulers`) | `microvms`, `nodes`, `volumes`: `get`, `list`, `watch`; `microvms/binding`: `create`; `microvms/status`: `update`; `leases` of `coordination.gaon.garam.sh`: `get`, `create`, `update` |
-  | `gaon:controllers` (`gaon:controllers`) | every resource of every group: `get`, `list`, `watch`, `delete`; `microvms`: `create`, `update`; `microvms/status`, `nodes/status`, `volumes/status`, `certificatesigningrequests/status`: `update`; `leases` of `coordination.gaon.garam.sh`: `get`, `create`, `update` |
+  | `gaon:controllers` (`gaon:controllers`) | every resource of every group: `get`, `list`, `watch`, `delete`; `microvms`: `create`, `update`; `endpoints`: `create`, `update`; `microvms/status`, `nodes/status`, `volumes/status`, `certificatesigningrequests/status`: `update`; `leases` of `coordination.gaon.garam.sh`: `get`, `create`, `update` |
   | `gaon:admin` (`gaon:admins`) | `*` on `*` for every API group |
 
 - **The coordination Lease and the controllers' read and delete** are [ADR 0021](./adr/0021-the-bootstrap-roles-give-the-scheduler-and-the-controllers-the-coordination-lease-and-the-controllers-read-and-delete-every-resource.md)'s: the scheduler and the controllers take and renew their own Lease, and the controllers read and delete any object, a custom one included, which the garbage collector needs.
-- **An existing cluster** keeps the roles it has, so its `gaon:scheduler` lacks `volumes` and the scheduler's list of Volumes is `Forbidden` until an administrator adds the rule to the role, or deletes the role so the next API server start creates it ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)). The same holds for the Lease rules and the controllers' read and delete of ADR 0021.
+- **An existing cluster** keeps the roles it has, so its `gaon:scheduler` lacks `volumes` and the scheduler's list of Volumes is `Forbidden` until an administrator adds the rule to the role, or deletes the role so the next API server start creates it ([ADR 0013](./adr/0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md)). The same holds for the Lease rules and the controllers' read and delete of ADR 0021, and for the controllers' `create` and `update` of `endpoints`, without which the endpoints controller is `Forbidden`. Services and NetworkPolicies are written by users only, so no bootstrap role other than `gaon:admin` writes them; a Node's read of the three kinds is the Node authorizer's and needs no role.
 - The types are in `lib/api/`: `ClusterRole`, `PolicyRule` (with `AllowsLabels` and `AllowsSelector`), `ClusterRoleBinding`, `RoleRef` and `Subject`.
 
 ### CustomResourceDefinition
@@ -442,13 +443,13 @@ A user registers webhooks the API server calls on a write with a `MutatingWebhoo
 - **Placement of Namespace** in an API group.
 - **The schemas of the default extensions** (MicroVMSet, MicroVMDeployment, Job, Gateway, Autoscaler) in `apps.gaon.garam.sh`: none is written yet.
 - **Serving Service, Endpoints and NetworkPolicy:**
-  - The Node authorizer's rule for them, and the bootstrap roles' rules: whether a Node reads Services, Endpoints and NetworkPolicies beyond the `GET` of §Authorization.
-  - CLI short names.
-  - Dual-stack Services and `SCTP`: one address per Service and `TCP` and `UDP` only.
-  - Whether an Endpoints lists a MicroVM that is not `Ready` (`publishNotReadyAddresses`).
-  - More than one LAN pool or service prefix.
-  - What an API server does when started with a different `--service-cluster-ip-range` or `--load-balancer-pool` than another's.
-  - Whether a NetworkPolicy exempts traffic between a MicroVM and its own Node, as Kubernetes' plugins do for the kubelet's probes.
+  - The Node authorizer's and the bootstrap roles' rules for them are settled, in §Authorization and the RBAC table.
+  - CLI short names: open; the CLI's naming of kinds is not part of this change.
+  - Dual-stack Services and `SCTP`: open; one address per Service and `TCP` and `UDP` only, until a need is met.
+  - Whether an Endpoints lists a MicroVM that is not `Ready` (`publishNotReadyAddresses`): open; the endpoints controller that decides it is not written.
+  - More than one LAN pool or service prefix: open; each flag takes one CIDR, and no need for more has been met.
+  - What an API server does when started with a different `--service-cluster-ip-range` or `--load-balancer-pool` than another's: open; the server does not compare, and an allocation checks only the ranges of the server that serves it, so one that holds an address outside another's range is neither moved nor refused.
+  - Whether a NetworkPolicy exempts traffic between a MicroVM and its own Node, as Kubernetes' plugins do for the kubelet's probes: open; it is the network plugin's enforcement, which is a later issue.
 - **More than one version of a custom resource,** which needs conversion, and the `scale` subresource and the schema keywords outside §CustomResourceDefinition's list.
 - **Webhook selection and calling:** selectors by label or namespace, a reinvocation policy, a service reference for `clientConfig` and a status code from the webhook wait for a need and, for the service reference, for the serving of Service (§Service, Endpoints and NetworkPolicy); the API server's calling of webhooks is the next issue.
 - **Namespaced roles:** `Role` and `RoleBinding` wait for the namespace decision above; only the cluster-scoped kinds exist.

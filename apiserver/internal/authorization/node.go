@@ -46,6 +46,11 @@ func (a *rbac) node(ctx context.Context, user string, r Request) (bool, error) {
 			}
 			return a.uses(ctx, user, r.Name)
 		}
+	case "services", "endpoints", "networkpolicies":
+		switch r.Verb {
+		case api.VerbGet, api.VerbList, api.VerbWatch:
+			return a.isNode(ctx, user)
+		}
 	case "secrets":
 		if r.Verb == api.VerbGet {
 			return a.references(ctx, user, func(m *api.MicroVM) bool { return m.ReferencesSecret(r.Name) })

@@ -52,6 +52,7 @@ var bootstrapRoles = []struct {
 	{RoleControllers, GroupControllers, []api.PolicyRule{
 		{APIGroups: []string{api.APIGroupAll}, Resources: []string{api.ResourceAll}, Verbs: []api.Verb{api.VerbGet, api.VerbList, api.VerbWatch, api.VerbDelete}},
 		{APIGroups: compute, Resources: []string{"microvms"}, Verbs: []api.Verb{api.VerbCreate, api.VerbUpdate}},
+		{APIGroups: compute, Resources: []string{"endpoints"}, Verbs: []api.Verb{api.VerbCreate, api.VerbUpdate}},
 		{APIGroups: compute, Resources: []string{"microvms/status", "nodes/status", "volumes/status", "certificatesigningrequests/status"}, Verbs: updateVerb},
 		{APIGroups: coordination, Resources: []string{"leases"}, Verbs: leaseVerbs},
 	}},
