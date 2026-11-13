@@ -14,8 +14,8 @@ import (
 const (
 	// proxyPrefix begins the name of a Gateway's Service and Deployment.
 	proxyPrefix = "gateway-"
-	// caPath is where the proxy finds the CA of the API server.
-	caPath = "/etc/gaon/gateway/ca.crt"
+	// ProxyCAPath is where the proxy finds the CA of the API server.
+	ProxyCAPath = "/etc/gaon/gateway/ca.crt"
 	// caKey is the key of the CA's ConfigMap.
 	caKey = "ca.crt"
 )
@@ -102,8 +102,8 @@ func desiredDeployment(gw *api.CustomObject, cfg ProxyConfig, ports []int32) (*a
 			Limits:   api.ResourceList{Memory: "256Mi"},
 		},
 		RunStrategy:        api.RunAlways,
-		Args:               []string{"-gateway=" + name, "-server=" + cfg.Server, "-tls-ca=" + caPath},
-		Files:              []api.MicroVMFile{{Path: caPath, Mode: &mode, ValueFrom: &api.ValueSource{ConfigMapKeyRef: &api.KeyReference{Name: cfg.CAConfigMap, Key: caKey}}}},
+		Args:               ProxyArgs(name, cfg.Server),
+		Files:              []api.MicroVMFile{{Path: ProxyCAPath, Mode: &mode, ValueFrom: &api.ValueSource{ConfigMapKeyRef: &api.KeyReference{Name: cfg.CAConfigMap, Key: caKey}}}},
 		ServiceAccountName: cfg.ServiceAccount,
 		ReadinessProbe:     &api.Probe{TCPSocket: &api.TCPSocketAction{Port: api.PortRef{Number: ports[0]}}},
 	}
