@@ -288,6 +288,140 @@ var kinds = []kind{
 		put:        (*api.Client).PutCustomResourceDefinition,
 		del:        (*api.Client).DeleteCustomResourceDefinition,
 	}.kind(),
+	spec[api.Secret, api.SecretList]{
+		name:       "secret",
+		plural:     "secrets",
+		group:      api.Group,
+		apiKind:    api.KindSecret,
+		collection: "/secrets",
+		header:     []string{"NAME", "KEYS"},
+		row: func(o *api.Secret) []string {
+			return []string{o.Metadata.Name, strconv.Itoa(len(o.Data))}
+		},
+		details:  func(o *api.Secret) []detail { return []detail{{"Keys", secretKeys(o.Data)}} },
+		items:    func(l *api.SecretList) []api.Secret { return l.Items },
+		meta:     func(o *api.Secret) *api.ObjectMeta { return &o.Metadata },
+		validate: (*api.Secret).Validate,
+		get:      (*api.Client).GetSecret,
+		list:     (*api.Client).ListSecrets,
+		put:      (*api.Client).PutSecret,
+		del:      (*api.Client).DeleteSecret,
+	}.kind(),
+	spec[api.ConfigMap, api.ConfigMapList]{
+		name:       "configmap",
+		plural:     "configmaps",
+		short:      "cm",
+		group:      api.Group,
+		apiKind:    api.KindConfigMap,
+		collection: "/configmaps",
+		header:     []string{"NAME", "KEYS"},
+		row: func(o *api.ConfigMap) []string {
+			return []string{o.Metadata.Name, strconv.Itoa(len(o.Data))}
+		},
+		details:  func(o *api.ConfigMap) []detail { return []detail{{"Keys", joinOrDash(sortedKeys(o.Data))}} },
+		items:    func(l *api.ConfigMapList) []api.ConfigMap { return l.Items },
+		meta:     func(o *api.ConfigMap) *api.ObjectMeta { return &o.Metadata },
+		validate: (*api.ConfigMap).Validate,
+		get:      (*api.Client).GetConfigMap,
+		list:     (*api.Client).ListConfigMaps,
+		put:      (*api.Client).PutConfigMap,
+		del:      (*api.Client).DeleteConfigMap,
+	}.kind(),
+	spec[api.ServiceAccount, api.ServiceAccountList]{
+		name:       "serviceaccount",
+		plural:     "serviceaccounts",
+		short:      "sa",
+		group:      api.Group,
+		apiKind:    api.KindServiceAccount,
+		collection: "/serviceaccounts",
+		header:     []string{"NAME"},
+		row:        func(o *api.ServiceAccount) []string { return []string{o.Metadata.Name} },
+		details:    func(*api.ServiceAccount) []detail { return nil },
+		items:      func(l *api.ServiceAccountList) []api.ServiceAccount { return l.Items },
+		meta:       func(o *api.ServiceAccount) *api.ObjectMeta { return &o.Metadata },
+		validate:   (*api.ServiceAccount).Validate,
+		get:        (*api.Client).GetServiceAccount,
+		list:       (*api.Client).ListServiceAccounts,
+		put:        (*api.Client).PutServiceAccount,
+		del:        (*api.Client).DeleteServiceAccount,
+	}.kind(),
+	spec[api.Service, api.ServiceList]{
+		name:       "service",
+		plural:     "services",
+		short:      "svc",
+		group:      api.Group,
+		apiKind:    api.KindService,
+		collection: "/services",
+		header:     []string{"NAME", "TYPE", "CLUSTER-IP", "EXTERNAL-IP", "PORTS"},
+		row: func(o *api.Service) []string {
+			return []string{o.Metadata.Name, string(o.Spec.EffectiveType()), orDash(o.Spec.ClusterIP), joinOrDash(ingressAddresses(o.Status)), joinOrDash(servicePorts(o.Spec.Ports))}
+		},
+		details: func(o *api.Service) []detail {
+			return []detail{
+				{"Type", string(o.Spec.EffectiveType())},
+				{"Selector", joinOrDash(labelPairs(o.Spec.Selector))},
+				{"Cluster IP", orDash(o.Spec.ClusterIP)},
+				{"Load balancer IP", orDash(o.Spec.LoadBalancerIP)},
+				{"External IP", joinOrDash(ingressAddresses(o.Status))},
+				{"Ports", joinOrDash(servicePorts(o.Spec.Ports))},
+			}
+		},
+		items:    func(l *api.ServiceList) []api.Service { return l.Items },
+		meta:     func(o *api.Service) *api.ObjectMeta { return &o.Metadata },
+		validate: (*api.Service).Validate,
+		keep:     (*api.Service).KeepAllocated,
+		get:      (*api.Client).GetService,
+		list:     (*api.Client).ListServices,
+		put:      (*api.Client).PutService,
+		del:      (*api.Client).DeleteService,
+	}.kind(),
+	spec[api.Endpoints, api.EndpointsList]{
+		name:       "endpoints",
+		plural:     "endpoints",
+		short:      "ep",
+		group:      api.Group,
+		apiKind:    api.KindEndpoints,
+		collection: "/endpoints",
+		header:     []string{"NAME", "ADDRESSES"},
+		row: func(o *api.Endpoints) []string {
+			return []string{o.Metadata.Name, strconv.Itoa(len(endpointAddresses(o.Subsets)))}
+		},
+		details:  func(o *api.Endpoints) []detail { return subsetDetails(o.Subsets) },
+		items:    func(l *api.EndpointsList) []api.Endpoints { return l.Items },
+		meta:     func(o *api.Endpoints) *api.ObjectMeta { return &o.Metadata },
+		validate: (*api.Endpoints).Validate,
+		get:      (*api.Client).GetEndpoints,
+		list:     (*api.Client).ListEndpoints,
+		put:      (*api.Client).PutEndpoints,
+		del:      (*api.Client).DeleteEndpoints,
+	}.kind(),
+	spec[api.NetworkPolicy, api.NetworkPolicyList]{
+		name:       "networkpolicy",
+		plural:     "networkpolicies",
+		short:      "netpol",
+		group:      api.Group,
+		apiKind:    api.KindNetworkPolicy,
+		collection: "/networkpolicies",
+		header:     []string{"NAME", "POLICY-TYPES", "INGRESS", "EGRESS"},
+		row: func(o *api.NetworkPolicy) []string {
+			return []string{o.Metadata.Name, policyTypes(o.Spec), strconv.Itoa(len(o.Spec.Ingress)), strconv.Itoa(len(o.Spec.Egress))}
+		},
+		details: func(o *api.NetworkPolicy) []detail {
+			return []detail{
+				{"Pod selector", selectorText(o.Spec.PodSelector)},
+				{"Policy types", policyTypes(o.Spec)},
+				{"Ingress rules", strconv.Itoa(len(o.Spec.Ingress))},
+				{"Egress rules", strconv.Itoa(len(o.Spec.Egress))},
+			}
+		},
+		items:    func(l *api.NetworkPolicyList) []api.NetworkPolicy { return l.Items },
+		meta:     func(o *api.NetworkPolicy) *api.ObjectMeta { return &o.Metadata },
+		validate: (*api.NetworkPolicy).Validate,
+		get:      (*api.Client).GetNetworkPolicy,
+		list:     (*api.Client).ListNetworkPolicies,
+		put:      (*api.Client).PutNetworkPolicy,
+		del:      (*api.Client).DeleteNetworkPolicy,
+	}.kind(),
 }
 
 // spec describes one kind in terms of its types and the client methods that
@@ -307,6 +441,7 @@ type spec[T, L any] struct {
 	list                func(*api.Client, context.Context) (*L, error)
 	put                 func(*api.Client, context.Context, *T) (*T, error)
 	del                 func(*api.Client, context.Context, string, api.ResourceVersion) (*T, error)
+	keep                func(want, have *T) // gives want the server-allocated fields of have that it leaves empty; nil for a kind with none
 }
 
 func (s spec[T, L]) kind() kind {
@@ -380,7 +515,13 @@ func (s spec[T, L]) kind() kind {
 					if err != nil {
 						return stored{}, err
 					}
-					return stored{s.meta(cur).ResourceVersion, holds(cur, obj)}, nil
+					want := obj
+					if s.keep != nil {
+						kept := *obj
+						s.keep(&kept, cur)
+						want = &kept
+					}
+					return stored{s.meta(cur).ResourceVersion, holds(cur, want)}, nil
 				},
 				send: func(ctx context.Context, cl *cluster, version api.ResourceVersion) error {
 					c, err := cl.client(s.group)
