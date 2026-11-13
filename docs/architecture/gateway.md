@@ -1,6 +1,6 @@
 # Gateway
 
-What the gateway is: the kinds `Gateway`, `HTTPRoute` and `TLSRoute`, how a Gateway holds one LAN address and listens on several ports, what its proxy does with a request or a connection, and which unit registers and runs it. This document states the contract; the unit `gateway/` and its kinds' definitions come with the serving issue and do not exist yet.
+What the gateway is: the kinds `Gateway`, `HTTPRoute` and `TLSRoute`, how a Gateway holds one LAN address and listens on several ports, what its proxy does with a request or a connection, and which unit registers and runs it. This document states the contract. The unit `gateway/` serves the kinds through `gaon-gateway-controller`; the proxy `gaon-gateway-proxy` is not built yet.
 
 Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds-of-their-own-group-a-gateway-unit-registers-and-runs-with-a-loadbalancer-service-and-a-deployment-of-proxies-for-each-gateway.md), with [ADR 0009](./adr/0009-a-user-registers-a-resource-kind-with-a-customresourcedefinition-the-api-server-serves-it-under-its-own-group.md) for the definition and [ADR 0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md) for the Service. Goal #117 gives the decisions cited as D6, D14, D16 and D18. The Kubernetes Gateway API statements hold for release v1.2.0 of kubernetes-sigs/gateway-api: `Gateway` and `HTTPRoute` in `apis/v1`, `TLSRoute` in `apis/v1alpha2`.
 
@@ -44,18 +44,25 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
 ### The unit
 
 - **Registration.** `gateway/` creates or updates the three definitions at start, `gateways.gateway.gaon.garam.sh`, `httproutes.gateway.gaon.garam.sh` and `tlsroutes.gateway.gaon.garam.sh`, as `workloads/` registers its kinds ([workloads.md](./workloads.md) §Registration).
-- **Two binaries.** `gaon-gateway-controller` registers the kinds and runs the controller; `gaon-gateway-proxy` is the proxy. The controller is a client of the public API with its own certificate and acts only while it holds a coordination Lease, as [workloads.md](./workloads.md) §Election states for `gaon-workloads`. The proxy needs no Lease.
-- **What the controller creates** for each Gateway, owned by it (an owner reference with its `uid`):
+- **Two binaries.** `gaon-gateway-controller` registers the kinds and runs the controller; `gaon-gateway-proxy` is the proxy. The controller is a client of the public API with its own certificate and acts only while it holds a coordination Lease named `gaon-gateway-controller`, as [workloads.md](./workloads.md) §Election states for `gaon-workloads`. The proxy needs no Lease. Only the controller exists so far.
+- **What the controller creates** for each Gateway it accepts, named `gateway-<Gateway name>` and owned by the Gateway (an owner reference with its `uid`), so that deleting the Gateway deletes both and the controller deletes neither:
   - a `Service` of type `LoadBalancer` whose `loadBalancerIP` is `spec.addresses[0].value`, with one TCP port for each distinct listener port and a selector on a label naming the Gateway;
   - a `Deployment` of the `workloads` group, one replica, whose MicroVM template runs the proxy, carries that label, names the Gateway to serve and holds a ServiceAccount.
-- **What it decides.** It validates each Gateway and route and writes their `status`. A route is attached to a listener when a parent reference names the Gateway, `sectionName` is absent or names the listener, the listener's protocol accepts the kind, a hostname of the route and the listener's `hostname` intersect (or either has none), and the backend's Service and port exist. The proxy serves a route on a listener only where `status.parents` records it `Accepted`.
+- **What it decides.** It validates each Gateway and route and writes their `status`, sweeping every 2 seconds by default and writing only what changed.
+  - A route is attached to a listener when a parent reference names the Gateway, `sectionName` is absent or names the listener, the listener's protocol accepts the kind, and a hostname of the route and the listener's `hostname` intersect (or either has none). The parent condition `Accepted` records this, with reason `NoMatchingParent`, `NotAllowedByListeners` or `NoMatchingListenerHostname` where it is False.
+  - A backend whose Service or port does not exist leaves the route `Accepted` and makes `ResolvedRefs` False with reason `BackendNotFound`.
+  - A route that breaks a check in §The kinds is `Accepted` False with reason `UnsupportedValue`. A route with no parent reference has an empty `status.parents`.
+  - A Gateway whose name leaves its Service name longer than 63 characters (a name of more than 55), that has no listener or has more than one address is `Accepted` False with reason `Invalid` and gets no Service. A listener that is `Conflicted` is not served; the Gateway is `Accepted` with reason `ListenersNotValid` while some other listener is.
+  - A Service named `gateway-<Gateway name>` that another object owns is not taken over: `Programmed` is False with reason `Invalid`.
+  - The proxy serves a route on a listener only where `status.parents` records it `Accepted`.
 - **What the proxy reads**, through the API with its ServiceAccount token: its Gateway, the routes, the Services and Endpoints they name, and the Secrets its listeners reference.
 
 ### LAN address
 
 - **A Gateway holds its address through its Service** (D18). The Service is a `LoadBalancer` whose `loadBalancerIP` names the address; [resource-api.md](./resource-api.md) §Service, Endpoints and NetworkPolicy states that the pool refuses a second holder and releases the address when the Service is deleted. The network plugin announces the address and forwards its ports to the Service's endpoints.
-- **The address is chosen once.** A Service's `loadBalancerIP` never changes, so a change of `spec.addresses` after create is not applied: the Gateway's `Programmed` condition is False with reason `AddressNotAssigned`, and the user deletes the Gateway and creates it again.
-- **An address that cannot be held** (outside the pool, or held by another Service) is `Invalid` or `Conflict` from the API server; the controller reports it as `Accepted` False and `Programmed` False with reason `AddressNotAssigned`, and creates no Deployment.
+- **The address is chosen once.** A Service's `loadBalancerIP` never changes, so a change of `spec.addresses` after create, including removing it, is not applied: the Gateway's `Programmed` condition is False with reason `AddressNotAssigned`, and the user deletes the Gateway and creates it again. Only the address is held: a change to the listeners in the same edit is applied to the Service and the Deployment.
+- **An address that cannot be held** (outside the pool, or held by another Service) is `Invalid` or `Conflict` from the API server when the Gateway asked for one in `spec.addresses`; the controller reports it as `Accepted` False and `Programmed` False with reason `AddressNotAssigned`, and creates no Deployment. A Service refused where no address was asked for is not an address fault: `Programmed` is False with reason `Invalid` for `Invalid`, and `Pending` for any other error, and `Accepted` stays True.
+- **`attachedRoutes`** counts each route once on a listener, however many of its parent references reach that listener.
 - **`status.addresses`** is the Service's `status.loadBalancer.ingress[0].ip`.
 
 ### Listeners
@@ -90,7 +97,7 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
 
 - **A listener's certificate is a `Secret`** (D14), the one `certificateRefs[0].name` names, with the keys `tls.crt` (the certificate chain, PEM) and `tls.key` (its private key, PEM).
 - **The proxy reloads it when the Secret changes** (D14): it watches the Secret, and a handshake that starts after the change uses the new pair. A connection already established keeps the pair it began with, and the proxy restarts nothing.
-- **A Secret that is missing, or whose pair does not parse or match,** makes the listener's `ResolvedRefs` False. The proxy keeps serving a pair it had loaded until a valid one replaces it, and a listener that never had one fails its handshakes.
+- **A certificate reference that is not well formed** (an `HTTPS` listener without `certificateRefs`, or a `TLS` listener with them) makes the listener's `ResolvedRefs` False with reason `InvalidCertificateRef`. The controller reads no Secret, so it does not judge whether the Secret exists or its pair parses: that is the proxy's, and its report is an open question below. The proxy keeps serving a pair it had loaded until a valid one replaces it, and a listener that never had one fails its handshakes.
 - **Renewal is not the gateway's** (D14): a workload the operator declares writes the Secret, and the gateway only reads it.
 
 ### ACME
@@ -105,7 +112,7 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
 
 ### Identity and role
 
-- **The controller's certificate** has the common name `gaon-gateway-controller`. Its Role is written with the unit and is an open question below.
+- **The controller's certificate** has the common name `gaon-gateway-controller`. Its ClusterRole and binding, `gaon:gateway-controller`, are in `gateway/deploy/rbac.yaml`: it creates and updates the definitions, Services and Deployments it labels, lists the three kinds, Services and Deployments, updates the three kinds' `status`, and reads, creates and updates its Lease. It has no rule for Secrets, deletes nothing and writes no spec.
 - **The proxy** authenticates as the user `gaon:serviceaccount:<name>` ([resource-api.md](./resource-api.md) §Secret, ConfigMap and ServiceAccount); the administrator creates the account and its binding from the unit's manifest.
 
 ### Departures from the Gateway API
@@ -128,7 +135,8 @@ Each is a decision of ADR 0032, with its reason there:
 
 ## Open questions
 
-- **What the serving issue holds:** the unit and its two binaries, the definitions' schemas, the controller's Role, the proxy's ServiceAccount, Role and image, the manifests, the proxy's flags, and the creation of the `gateway/` folder that [structure.md](./structure.md) §Units plans.
+- **What the proxy's issue holds:** `gaon-gateway-proxy`, its ServiceAccount, Role and image, and its flags. The controller's Deployment template runs the image it is given with `-gateway`, `-server` and `-tls-ca`, the serving issue's assumption until the proxy settles them.
+- **A listener's certificate status:** the controller does not read Secrets, so `ResolvedRefs` on a listener does not say whether the Secret exists or parses; who reports that, the proxy or the controller, is open.
 - **The proxy's Role for Secrets:** a rule names no object and a `get` of an absent object is judged on no labels ([workloads.md](./workloads.md) §Identity and role), so reading only the Secrets a Gateway references needs a label on them or a different rule.
 - **A client's address:** the proxy sees a client's address, and so can set `X-Forwarded-For`, only if the network plugin forwards a LoadBalancer Service's traffic without changing the source. That is the plugin's contract.
 - **More than one replica:** the Deployment has one replica, so a proxy's restart interrupts the Gateway; whether a Gateway has a replica count, and how several proxies are spread, is open.

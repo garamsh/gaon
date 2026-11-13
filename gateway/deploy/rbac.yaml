@@ -1,0 +1,56 @@
+# What gaon-gateway-controller is allowed, applied by an administrator with
+# `gaon apply -f gateway/deploy/rbac.yaml`. The unit's certificate has the
+# common name gaon-gateway-controller, which the binding names. The unit
+# registers the Gateway, HTTPRoute and TLSRoute kinds itself (ADR 0032), so it
+# may create and update the definitions it labels. For each Gateway it creates
+# and updates the Service and the Deployment it labels, and it never deletes
+# either: both are owned by the Gateway and go with it. It writes the status of
+# the three kinds and no spec. It reads no Secret. It acts only while it holds
+# the coordination Lease gaon-gateway-controller, which it reads, creates and
+# renews.
+apiVersion: rbac.gaon.garam.sh/v1alpha1
+kind: ClusterRole
+metadata:
+  name: gaon:gateway-controller
+rules:
+  - apiGroups: [apiextensions.gaon.garam.sh]
+    resources: [customresourcedefinitions]
+    verbs: [create, update]
+    labelSelector: gateway.gaon.garam.sh/managed-by=gaon-gateway-controller
+  - apiGroups: [apiextensions.gaon.garam.sh]
+    resources: [customresourcedefinitions]
+    verbs: [get]
+  - apiGroups: [coordination.gaon.garam.sh]
+    resources: [leases]
+    verbs: [get, create, update]
+  - apiGroups: [gateway.gaon.garam.sh]
+    resources: [gateways, httproutes, tlsroutes]
+    verbs: [list]
+  - apiGroups: [gateway.gaon.garam.sh]
+    resources: [gateways/status, httproutes/status, tlsroutes/status]
+    verbs: [update]
+  - apiGroups: [compute.gaon.garam.sh]
+    resources: [services]
+    verbs: [list]
+  - apiGroups: [compute.gaon.garam.sh]
+    resources: [services]
+    verbs: [create, update]
+    labelSelector: gateway.gaon.garam.sh/managed-by=gaon-gateway-controller
+  - apiGroups: [workloads.gaon.garam.sh]
+    resources: [deployments]
+    verbs: [list]
+  - apiGroups: [workloads.gaon.garam.sh]
+    resources: [deployments]
+    verbs: [create, update]
+    labelSelector: gateway.gaon.garam.sh/managed-by=gaon-gateway-controller
+---
+apiVersion: rbac.gaon.garam.sh/v1alpha1
+kind: ClusterRoleBinding
+metadata:
+  name: gaon:gateway-controller
+roleRef:
+  kind: ClusterRole
+  name: gaon:gateway-controller
+subjects:
+  - kind: User
+    name: gaon-gateway-controller
