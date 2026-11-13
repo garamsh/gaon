@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strconv"
 	"time"
@@ -29,10 +28,6 @@ const (
 	// maxAgentError bounds how much of an agent's error body is read.
 	maxAgentError = 1 << 16
 )
-
-// execEnvName is the name a MicroVM's spec.env entry may take, which an exec's
-// env obeys too (ADR 0043 Decision 3).
-var execEnvName = regexp.MustCompile(`^[-._a-zA-Z][-._a-zA-Z0-9]*$`)
 
 // agentClient calls the Node Agents with the server's client certificate and
 // trusts the cluster CA to have signed theirs.
@@ -172,7 +167,7 @@ func (e execRequest) validate() error {
 	}
 	seen := map[string]bool{}
 	for i, v := range e.Env {
-		if !execEnvName.MatchString(v.Name) {
+		if !api.ValidEnvName(v.Name) {
 			return api.NewAPIError(api.ReasonInvalid, "env[%d].name is %q, want letters, digits, '-', '_' or '.', not starting with a digit", i, v.Name)
 		}
 		if seen[v.Name] {

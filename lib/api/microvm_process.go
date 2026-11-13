@@ -23,6 +23,12 @@ var (
 	userID  = regexp.MustCompile(`^[^:\s]+(:[^:\s]+)?$`)
 )
 
+// ValidEnvName reports whether name is one a MicroVM's spec.env entry may take,
+// which an exec's env obeys too (ADR 0043 Decision 3).
+func ValidEnvName(name string) bool {
+	return envName.MatchString(name)
+}
+
 // KeyReference names a key of the Secret or the ConfigMap Name.
 type KeyReference struct {
 	Name string `json:"name"`
@@ -90,7 +96,7 @@ func validateProcess(s *MicroVMSpec) error {
 	}
 	seen := map[string]bool{}
 	for i, e := range s.Env {
-		if !envName.MatchString(e.Name) {
+		if !ValidEnvName(e.Name) {
 			return invalid("spec.env[%d].name is %q, want letters, digits, '-', '_' or '.', not starting with a digit", i, e.Name)
 		}
 		if seen[e.Name] {
