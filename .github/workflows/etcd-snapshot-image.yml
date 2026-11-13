@@ -2,7 +2,8 @@ name: etcd-snapshot-image
 
 # Action pins take the form ci.yml states.
 
-# A tag `etcd-snapshot/vX.Y.Z` publishes the image; a merge to main publishes
+# A tag `etcd-snapshot/v0.1.0-dev.N`, `etcd-snapshot/v0.1.0-rc.N` or
+# `etcd-snapshot/v0.1.0` publishes the image; a merge to main publishes
 # nothing. The tag is the release and the image tag is the version without the
 # prefix and the `v`.
 on:
@@ -30,14 +31,15 @@ jobs:
         run: cat /etc/os-release
 
       # The trigger admits every `etcd-snapshot/v*`, so a tag that is not
-      # `etcd-snapshot/vX.Y.Z` is refused here before anything is pushed. The
-      # tag name reaches the shell through the environment.
+      # one of those three forms, N a positive integer without leading zeros,
+      # is refused here before anything is pushed. The tag name reaches the
+      # shell through the environment.
       - id: version
         env:
           REF_NAME: ${{ github.ref_name }}
         run: |
-          if ! printf '%s' "$REF_NAME" | grep -Eq '^etcd-snapshot/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
-            echo "tag $REF_NAME is not etcd-snapshot/vX.Y.Z: nothing published" >&2
+          if ! printf '%s' "$REF_NAME" | grep -Eq '^etcd-snapshot/v0\.1\.0(-(dev|rc)\.[1-9][0-9]*)?$'; then
+            echo "tag $REF_NAME is not etcd-snapshot/v0.1.0-dev.N, v0.1.0-rc.N or v0.1.0: nothing published" >&2
             exit 1
           fi
           version="${REF_NAME#etcd-snapshot/v}"
