@@ -92,7 +92,7 @@ func (s *service) collect(ctx context.Context) (map[string]bool, error) {
 
 // remove stops the mvmd machine id and deletes it. Both calls are repeatable.
 func (s *service) remove(ctx context.Context, id string) error {
-	if _, err := s.runtime.StopMachine(ctx, &v1alpha2.StopMachineRequest{MachineId: id}); err != nil && !notFound(err) {
+	if _, err := s.runtime.StopMachine(ctx, stopRequest(id, s.specOf(id))); err != nil && !notFound(err) {
 		return fmt.Errorf("stop %s: %w", id, err)
 	}
 	if _, err := s.runtime.DeleteMachine(ctx, &v1alpha2.DeleteMachineRequest{MachineId: id}); err != nil && !notFound(err) {
@@ -102,6 +102,16 @@ func (s *service) remove(ctx context.Context, id string) error {
 		return fmt.Errorf("release %s: %w", id, err)
 	}
 	s.log.Info("removed microvm", "id", id)
+	return nil
+}
+
+// specOf returns the cached MicroVM the mvmd machine id was made for, nil when
+// the agent holds none.
+func (s *service) specOf(id string) *api.MicroVM {
+	name, _, _ := parseID(id)
+	if m, ok := s.cache.microvms[name]; ok {
+		return &m
+	}
 	return nil
 }
 
@@ -132,7 +142,7 @@ func (s *service) ensure(ctx context.Context, m *api.MicroVM) (outcome, error) {
 	switch {
 	case m.Spec.RunStrategy == api.RunHalted:
 		if r.GetState() == v1alpha2.MachineState_MACHINE_STATE_RUNNING || r.GetState() == v1alpha2.MachineState_MACHINE_STATE_PAUSED {
-			stopped, err := s.runtime.StopMachine(ctx, &v1alpha2.StopMachineRequest{MachineId: id})
+			stopped, err := s.runtime.StopMachine(ctx, stopRequest(id, m))
 			if err != nil {
 				return outcome{}, fmt.Errorf("stop %s: %w", id, err)
 			}
@@ -142,6 +152,9 @@ func (s *service) ensure(ctx context.Context, m *api.MicroVM) (outcome, error) {
 	case r.GetState() == v1alpha2.MachineState_MACHINE_STATE_RUNNING:
 		if st.started.IsZero() {
 			st.started = s.clock.Now()
+		}
+		if why, failing := livenessFailure(m, r); failing {
+			return s.stopUnhealthy(ctx, m, id, r, why)
 		}
 		expired = s.refresh(ctx, m, id)
 	case r.GetState() == v1alpha2.MachineState_MACHINE_STATE_CREATED:
@@ -264,7 +277,7 @@ func (s *service) start(ctx context.Context, m *api.MicroVM, id string, again bo
 		return nil, fmt.Errorf("start %s: %w", id, err)
 	}
 	st := s.runOf(id)
-	st.started = s.clock.Now()
+	st.started, st.liveness = s.clock.Now(), ""
 	if again {
 		s.log.Info("started microvm with its env and files resolved again", "id", id, "env", len(resolved.Env), "files", len(resolved.Files))
 		st.delivered, st.token = deliveredDigests(m, resolved), token

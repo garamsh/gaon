@@ -46,6 +46,7 @@ type Server struct {
 	legacy      map[string]bool
 	images      []string
 	calls       []string
+	stops       []*v1alpha2.StopMachineRequest
 	renewals    []Renewal
 	events      chan *v1alpha2.WatchEventsResponse
 	sequence    uint64
@@ -104,6 +105,17 @@ func (s *Server) Calls() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.calls...)
+}
+
+// StopRequests returns the StopMachine requests received, in order.
+func (s *Server) StopRequests() []*v1alpha2.StopMachineRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*v1alpha2.StopMachineRequest, 0, len(s.stops))
+	for _, r := range s.stops {
+		out = append(out, proto.Clone(r).(*v1alpha2.StopMachineRequest))
+	}
+	return out
 }
 
 // CreateRequest returns a copy of the request that created the Machine id, as
