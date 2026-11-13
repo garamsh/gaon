@@ -3,6 +3,7 @@ package command
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -181,4 +182,116 @@ func established(d *api.CustomResourceDefinition) string {
 		}
 	}
 	return "-"
+}
+
+// sortedKeys lists the keys of m in order.
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// secretKeys lists each key of a Secret's data with the size of its value.
+// The values are never rendered.
+func secretKeys(data map[string][]byte) string {
+	keys := sortedKeys(data)
+	for i, k := range keys {
+		keys[i] = fmt.Sprintf("%s (%d bytes)", k, len(data[k]))
+	}
+	return joinOrDash(keys)
+}
+
+// labelPairs lists a label map as key=value, in key order.
+func labelPairs(m map[string]string) []string {
+	pairs := sortedKeys(m)
+	for i, k := range pairs {
+		pairs[i] = k + "=" + m[k]
+	}
+	return pairs
+}
+
+func servicePorts(ps []api.ServicePort) []string {
+	out := make([]string, len(ps))
+	for i, p := range ps {
+		out[i] = strconv.FormatInt(int64(p.Port), 10) + "/" + string(p.Protocol)
+		if p.TargetPort != nil {
+			out[i] += "->" + portRef(*p.TargetPort)
+		}
+		if p.Name != "" {
+			out[i] = p.Name + ":" + out[i]
+		}
+	}
+	return out
+}
+
+func portRef(r api.PortRef) string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return strconv.FormatInt(int64(r.Number), 10)
+}
+
+// ingressAddresses lists the LAN addresses the API server gave a Service.
+func ingressAddresses(s api.ServiceStatus) []string {
+	if s.LoadBalancer == nil {
+		return nil
+	}
+	out := make([]string, len(s.LoadBalancer.Ingress))
+	for i, in := range s.LoadBalancer.Ingress {
+		out[i] = in.IP
+	}
+	return out
+}
+
+func endpointAddresses(subsets []api.EndpointSubset) []string {
+	var out []string
+	for _, s := range subsets {
+		for _, a := range s.Addresses {
+			out = append(out, a.IP)
+		}
+	}
+	return out
+}
+
+// subsetDetails lists one line per subset, or one line for none.
+func subsetDetails(subsets []api.EndpointSubset) []detail {
+	if len(subsets) == 0 {
+		return []detail{{"Subsets", "-"}}
+	}
+	out := make([]detail, len(subsets))
+	for i, s := range subsets {
+		ports := make([]string, len(s.Ports))
+		for j, p := range s.Ports {
+			ports[j] = strconv.FormatInt(int64(p.Port), 10) + "/" + string(p.Protocol)
+			if p.Name != "" {
+				ports[j] = p.Name + ":" + ports[j]
+			}
+		}
+		out[i] = detail{"Subset " + strconv.Itoa(i+1), fmt.Sprintf("addresses=%v ports=%v", endpointAddresses([]api.EndpointSubset{s}), ports)}
+	}
+	return out
+}
+
+func policyTypes(s api.NetworkPolicySpec) string {
+	types := s.EffectivePolicyTypes()
+	out := make([]string, len(types))
+	for i, t := range types {
+		out[i] = string(t)
+	}
+	return joinOrDash(out)
+}
+
+// selectorText renders a label selector, or "all MicroVMs" for the empty one.
+func selectorText(l api.LabelSelector) string {
+	parts := labelPairs(l.MatchLabels)
+	for _, r := range l.MatchExpressions {
+		parts = append(parts, fmt.Sprintf("%s %s (%s)", r.Key, r.Operator, strings.Join(r.Values, ", ")))
+	}
+	if len(parts) == 0 {
+		return "all MicroVMs"
+	}
+	return strings.Join(parts, ", ")
 }
