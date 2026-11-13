@@ -70,3 +70,12 @@ updates:
         update-types:
           - version-update:semver-minor
           - version-update:semver-major
+  - package-ecosystem: docker
+    directory: /gateway
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: golang
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major

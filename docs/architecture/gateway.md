@@ -59,6 +59,13 @@ Basis: [ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds
 - **Flags of the proxy.** `-gateway`, `-server` and `-tls-ca`, all required, and `-token-file`, which defaults to `/var/run/secrets/gaon.garam.sh/serviceaccount/token`. The controller's Deployment passes the first three.
 - **Ports.** The proxy opens a port for each distinct port of its Gateway's served listeners and closes one the Gateway no longer has or whose protocol changed. A port that cannot be bound, or whose listener fails with an error that is not temporary, is logged and opened again at the next change; a temporary error of accepting a passthrough connection is retried after a delay of up to a second.
 
+### The image
+
+- **The proxy image is built from `gateway/Dockerfile`:** `gaon-gateway-proxy` as a static binary in a distroless static base that runs as uid 65532, with no shell and no init. The module replaces `lib/api` with `../lib/api`, so the build takes `lib/api` as the named context `libapi` beside the context `gateway/`. The controller's binary is not in the image.
+- **A release is a git tag `gateway-proxy/v0.1.0-dev.N`, `gateway-proxy/v0.1.0-rc.N` or `gateway-proxy/v0.1.0`,** with N a positive integer without leading zeros (aurora#749, decision 14). The workflow `.github/workflows/gateway-proxy-image.yml` refuses a tag of another shape before it assumes the role, builds the image from the tagged commit and pushes it to the ECR repository `gaon/gateway-proxy` in account 486152169996, region ap-northeast-2, tagged with the version without the `gateway-proxy/v` prefix. It assumes the IAM role `github-actions-gaon` by GitHub OIDC and stores no AWS key. The digest is in the run's job summary.
+- **`-proxy-image` of `gaon-gateway-controller` names it by digest,** `<registry>/gaon/gateway-proxy@<digest>`, which the Node Agent pulls ([node-agent.md](./node-agent.md) §MicroVMs).
+- **The base images are pinned by digest** in the Dockerfile and moved by Dependabot: the distroless digest within its `nonroot` tag, the golang digest within the tag's minor. The owner moves the golang minor with the toolchain directive in `go.work`.
+
 ### LAN address
 
 - **A Gateway holds its address through its Service** (D18). The Service is a `LoadBalancer` whose `loadBalancerIP` names the address; [resource-api.md](./resource-api.md) §Service, Endpoints and NetworkPolicy states that the pool refuses a second holder and releases the address when the Service is deleted. The network plugin announces the address and forwards its ports to the Service's endpoints.
@@ -140,6 +147,7 @@ Each is a decision of ADR 0032, with its reason there:
 
 ## Open questions
 
+- **Whether uid 65532 can bind a listener port below 1024 in a MicroVM.** The image runs as 65532, and the contract has the proxy listen on the ports its Gateway names, 80 among them (§ACME). Under a kernel whose `net.ipv4.ip_unprivileged_port_start` is 1024 the bind of port 80 fails (`listen tcp :80: bind: permission denied`, seen with `docker run --sysctl`); what the guest's value is has not been observed. If it is 1024, the controller's Deployment template names `user: "0"` or the guest lowers the value.
 - **A client's address:** the proxy sees a client's address, and so can set `X-Forwarded-For`, only if the network plugin forwards a LoadBalancer Service's traffic without changing the source. That is the plugin's contract.
 - **More than one replica:** the Deployment has one replica, so a proxy's restart interrupts the Gateway; whether a Gateway has a replica count, and how several proxies are spread, is open.
 - **HTTP/2** on a terminating listener, and gRPC through it.

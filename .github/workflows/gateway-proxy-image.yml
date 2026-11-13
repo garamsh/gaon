@@ -1,0 +1,88 @@
+name: gateway-proxy-image
+
+# Action pins take the form ci.yml states.
+
+# A tag `gateway-proxy/v0.1.0-dev.N`, `gateway-proxy/v0.1.0-rc.N` or
+# `gateway-proxy/v0.1.0` publishes the image (aurora#749 decision 14); a merge
+# to main publishes nothing. The tag is the release and the image tag is the
+# version without the prefix and the `v`.
+on:
+  push:
+    tags: ["gateway-proxy/v*"]
+
+permissions: read-all
+
+jobs:
+  image:
+    # ubuntu-24.04 is a hosted runner label and cannot be pinned by digest;
+    # the "Record the runner" step records what it resolved to on each run.
+    # Its mover is a manual bump by the owner of .github/ when GitHub
+    # announces the label's deprecation.
+    runs-on: ubuntu-24.04
+    permissions:
+      # A job's block replaces the workflow's, so the read the checkout needs
+      # is written here beside the federated push credential.
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Record the runner
+        run: cat /etc/os-release
+
+      # The trigger admits every `gateway-proxy/v*`, so a tag of another shape is
+      # refused here before the role is assumed and before anything is pushed. N
+      # is a positive integer without leading zeros. The tag name reaches the
+      # shell through the environment.
+      - id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if ! printf '%s' "$REF_NAME" | grep -Eq '^gateway-proxy/v0\.1\.0(-(dev|rc)\.[1-9][0-9]*)?$'; then
+            echo "tag $REF_NAME is not gateway-proxy/v0.1.0-dev.N, gateway-proxy/v0.1.0-rc.N or gateway-proxy/v0.1.0: nothing published" >&2
+            exit 1
+          fi
+          version="${REF_NAME#gateway-proxy/v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::486152169996:role/github-actions-gaon
+          aws-region: ap-northeast-2
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # provenance and sbom are off so the pushed digest names one image
+      # manifest and not an index holding attestations beside it.
+      - id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: gateway
+          file: gateway/Dockerfile
+          build-contexts: |
+            libapi=lib/api
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          push: true
+          build-args: |
+            IMAGE_REVISION=${{ github.sha }}
+            IMAGE_VERSION=${{ steps.version.outputs.version }}
+          tags: ${{ steps.ecr.outputs.registry }}/gaon/gateway-proxy:${{ steps.version.outputs.version }}
+
+      - name: Report the pushed digest
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          VERSION: ${{ steps.version.outputs.version }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo "Pushed \`${REGISTRY}/gaon/gateway-proxy:${VERSION}\`"
+            echo
+            echo "Digest: \`${DIGEST}\`"
+            echo
+            echo "Reference: \`${REGISTRY}/gaon/gateway-proxy@${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
