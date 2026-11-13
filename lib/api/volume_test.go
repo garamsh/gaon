@@ -394,3 +394,139 @@ func TestVolume_AttachmentIsWrittenAndReadUnderMicroVMName(t *testing.T) {
 	require.NotNil(t, back.Status.Attachment, "control: the key written is the key read")
 	assert.Equal(t, api.Attachment{MicroVMName: "web", BindingEpoch: 3}, *back.Status.Attachment)
 }
+
+func newClass(name, provisioner string, expand bool) *api.StorageClass {
+	return &api.StorageClass{
+		TypeMeta:             api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindStorageClass},
+		Metadata:             api.ObjectMeta{Name: name},
+		Provisioner:          provisioner,
+		AllowVolumeExpansion: expand,
+	}
+}
+
+// resizeOld is a stored local Volume of 10Gi whose disk holds 10Gi.
+func resizeOld() *api.Volume {
+	old := newVolume("data")
+	old.Spec.NodeName = "node-a"
+	old.Status = api.VolumeStatus{Phase: api.VolumeAvailable, Capacity: "10Gi"}
+	return old
+}
+
+func TestVolumeValidateResizeGrowth(t *testing.T) {
+	old := resizeOld()
+	grown := *old
+	grown.Spec.Storage = "20Gi"
+
+	assert.NoError(t, grown.ValidateResize(old, newClass("local", "local", true)), "growth under a class that allows expansion")
+	assert.NoError(t, old.ValidateResize(old, newClass("local", "local", false)), "control: no change needs no expansion")
+
+	same := *old
+	same.Spec.Storage = "10240Mi"
+	assert.NoError(t, same.ValidateResize(old, newClass("local", "local", false)), "the same size in another unit is no change")
+}
+
+func TestVolumeValidateResizeRefusesAShrink(t *testing.T) {
+	old := resizeOld()
+	class := newClass("local", "local", true)
+
+	shrunk := *old
+	shrunk.Spec.Storage = "5Gi"
+	assert.ErrorIs(t, shrunk.ValidateResize(old, class), api.ErrInvalid, "below the disk")
+
+	atDisk := *old
+	atDisk.Spec.Storage = "10Gi"
+	assert.NoError(t, atDisk.ValidateResize(old, class), "control: the size of the disk")
+
+	asked := resizeOld()
+	asked.Spec.Storage = "40Gi"
+	lowered := *asked
+	lowered.Spec.Storage = "20Gi"
+	assert.NoError(t, lowered.ValidateResize(asked, class), "a request the disk has not reached may be lowered, above the disk")
+	cancelled := *asked
+	cancelled.Spec.Storage = "10Gi"
+	assert.NoError(t, cancelled.ValidateResize(asked, newClass("local", "local", false)), "and down to the disk, under a class that no longer allows expansion")
+	below := *asked
+	below.Spec.Storage = "9Gi"
+	assert.ErrorIs(t, below.ValidateResize(asked, class), api.ErrInvalid, "but not below the disk")
+
+	pending := newVolume("data")
+	pendingLowered := *pending
+	pendingLowered.Spec.Storage = "5Gi"
+	assert.NoError(t, pendingLowered.ValidateResize(pending, class), "a volume with no disk yet has nothing to shrink")
+}
+
+func TestVolumeValidateResizeNeedsAClassThatAllowsExpansion(t *testing.T) {
+	old := resizeOld()
+	grown := *old
+	grown.Spec.Storage = "20Gi"
+
+	assert.ErrorIs(t, grown.ValidateResize(old, newClass("local", "local", false)), api.ErrInvalid, "a class that forbids expansion")
+	assert.ErrorIs(t, grown.ValidateResize(old, nil), api.ErrInvalid, "a class that does not exist")
+	assert.NoError(t, grown.ValidateResize(old, newClass("local", "local", true)), "control: the same growth under a class that allows it")
+}
+
+func TestVolumeValidateResizeChangesStorageOnly(t *testing.T) {
+	old := resizeOld()
+	class := newClass("local", "local", true)
+
+	tests := []struct {
+		name   string
+		mutate func(v *api.Volume)
+		valid  bool
+	}{
+		{"storage grown", func(v *api.Volume) { v.Spec.Storage = "20Gi" }, true},
+		{"storage grown and access modes changed", func(v *api.Volume) {
+			v.Spec.Storage = "20Gi"
+			v.Spec.AccessModes = []string{"ReadWriteMany"}
+		}, false},
+		{"storage grown and nodeName cleared", func(v *api.Volume) {
+			v.Spec.Storage = "20Gi"
+			v.Spec.NodeName = ""
+		}, false},
+		{"storage grown and data source set", func(v *api.Volume) {
+			v.Spec.Storage = "20Gi"
+			v.Spec.DataSource = "snap-1"
+		}, false},
+		{"storage class changed", func(v *api.Volume) { v.Spec.StorageClass = "ceph" }, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			next := *old
+			tt.mutate(&next)
+			err := next.ValidateResize(old, class)
+			if tt.valid {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorIs(t, err, api.ErrInvalid)
+			}
+		})
+	}
+
+	broken := *old
+	broken.Spec.AccessModes = nil
+	brokenOld := broken
+	assert.ErrorIs(t, broken.ValidateResize(&brokenOld, class), api.ErrInvalid, "an unchanged spec must still validate")
+}
+
+func TestVolumeValidateResizeRefusesAChangeOnADeletingVolume(t *testing.T) {
+	class := newClass("local", "local", true)
+	grown := resizeOld()
+	grown.Spec.Storage = "20Gi"
+
+	assert.NoError(t, grown.ValidateResize(resizeOld(), class), "control: the same growth of a volume that is not deleting")
+
+	deleting := resizeOld()
+	now := time.Now()
+	deleting.Metadata.DeletionTimestamp = &now
+	assert.ErrorIs(t, grown.ValidateResize(deleting, class), api.ErrConflict)
+}
+
+func TestVolumeValidateStatusChecksConditions(t *testing.T) {
+	v := newVolume("data")
+	v.Status.Phase = api.VolumeAvailable
+	v.Status.Conditions = []api.Condition{{Type: api.VolumeConditionResizing, Status: api.ConditionTrue, Reason: "InProgress"}}
+	assert.NoError(t, v.ValidateStatus(), "control: a known condition status")
+
+	v.Status.Conditions[0].Status = "Maybe"
+	assert.ErrorIs(t, v.ValidateStatus(), api.ErrInvalid)
+}
