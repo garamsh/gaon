@@ -37,6 +37,9 @@ type run struct {
 	streak int
 	// unwritten counts the restarts not yet written to status.restartCount.
 	unwritten int32
+	// liveness is why the agent stopped the MicroVM for a failing liveness
+	// probe, until the next start; the exit it caused is judged failed.
+	liveness string
 	// halted is set while the agent holds the MicroVM stopped for Halted, so
 	// resuming it is a start and not a restart.
 	halted bool
@@ -97,7 +100,7 @@ func (s *service) restart(ctx context.Context, m *api.MicroVM, id string, r *v1a
 		return o, nil
 	}
 	if !st.exited {
-		failed, rec, err := s.classify(ctx, id, r, st.last)
+		failed, rec, err := s.judge(ctx, id, r, st)
 		if err != nil {
 			return outcome{runtime: r}, err
 		}
@@ -114,7 +117,7 @@ func (s *service) restart(ctx context.Context, m *api.MicroVM, id string, r *v1a
 		return outcome{runtime: r}, nil
 	}
 	if r.GetState() == v1alpha2.MachineState_MACHINE_STATE_FAULTED {
-		stopped, err := s.runtime.StopMachine(ctx, &v1alpha2.StopMachineRequest{MachineId: id})
+		stopped, err := s.runtime.StopMachine(ctx, stopRequest(id, m))
 		if err != nil {
 			return outcome{runtime: r}, fmt.Errorf("stop %s: %w", id, err)
 		}
@@ -130,6 +133,15 @@ func (s *service) restart(ctx context.Context, m *api.MicroVM, id string, r *v1a
 	st.streak++
 	st.unwritten++
 	return o, nil
+}
+
+// judge decides whether the exit of the MicroVM r failed: one the agent caused
+// for a failing liveness probe did, and any other is classified.
+func (s *service) judge(ctx context.Context, id string, r *v1alpha2.Machine, st *run) (bool, *v1alpha2.ExecRecord, error) {
+	if st.liveness != "" {
+		return true, nil, nil
+	}
+	return s.classify(ctx, id, r, st.last)
 }
 
 // classify judges how the entrypoint of the MicroVM r ended. A faulted

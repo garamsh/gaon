@@ -14,6 +14,8 @@ github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkp
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/garamsh/mvmd/lib/runtimeapi v0.0.0-20261113045958-29ce9e35b190 h1:g1Ncj79B3HjKFv9FDGjaSNT08D76og08dCjqxmpwcvs=
 github.com/garamsh/mvmd/lib/runtimeapi v0.0.0-20261113045958-29ce9e35b190/go.mod h1:8t2aW3JKdSjTUh5gF7F+8riZwxdh5Zv5UMKmmT0XftU=
+github.com/garamsh/mvmd/lib/runtimeapi v0.0.0-20261113081709-eebb760d6237 h1:8QYBKTIxw17qPQ8qEmV4awn6xoWA0zBrik8D4nVltr0=
+github.com/garamsh/mvmd/lib/runtimeapi v0.0.0-20261113081709-eebb760d6237/go.mod h1:8t2aW3JKdSjTUh5gF7F+8riZwxdh5Zv5UMKmmT0XftU=
 github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
 github.com/go-logr/logr v1.4.4 h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8=
 github.com/go-logr/logr v1.4.4/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=

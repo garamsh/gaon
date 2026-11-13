@@ -118,6 +118,9 @@ func createRequest(m *api.MicroVM) (*v1alpha2.CreateMachineRequest, *v1alpha2.Im
 			return nil, nil, invalidSpec{err}
 		}
 	}
+	if err := withProbes(m, req); err != nil {
+		return nil, nil, err
+	}
 	return req, &v1alpha2.ImageRef{Repository: image[1], Digest: image[2]}, nil
 }
 
@@ -178,6 +181,8 @@ func microvmStatus(m *api.MicroVM, o outcome, now time.Time, restarts int32) api
 		case o.tokenExpired && next.Phase == api.MicroVMRunning:
 			ready = api.Condition{Type: ConditionReady, Status: api.ConditionFalse, Reason: ReasonTokenExpired,
 				Message: "the ServiceAccount token in the MicroVM has expired and the agent could not renew it, which is retried"}
+		case next.Phase == api.MicroVMRunning && m.Spec.ReadinessProbe != nil:
+			ready = readiness(ready, o.runtime)
 		}
 	}
 	if m.Status.BindingEpoch == m.Spec.BindingEpoch {
