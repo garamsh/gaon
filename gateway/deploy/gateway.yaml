@@ -1,0 +1,83 @@
+# A Gateway with a plain HTTP listener, a terminating HTTPS listener and a
+# passthrough TLS listener, and the routes that attach to them, applied with
+# `gaon apply -f gateway/deploy/gateway.yaml` (docs/architecture/gateway.md).
+# The values in angle brackets are the operator's.
+#
+# The controller creates the Service `gateway-edge`, which holds the address,
+# and the Deployment `gateway-edge`, whose MicroVMs run the proxy. The
+# ServiceAccount and the CA below are the ones the controller's flags
+# -proxy-service-account and -proxy-ca-configmap name; the proxy's Role is not
+# in this file, because the proxy is not built yet.
+apiVersion: compute.gaon.garam.sh/v1alpha1
+kind: ServiceAccount
+metadata:
+  name: gaon-gateway-proxy
+---
+# The CA that signed the API server's certificate, which the proxies trust.
+apiVersion: compute.gaon.garam.sh/v1alpha1
+kind: ConfigMap
+metadata:
+  name: gaon-gateway-ca
+data:
+  ca.crt: |
+    <PEM of the CA that signed the API server's certificate>
+---
+apiVersion: gateway.gaon.garam.sh/v1alpha1
+kind: Gateway
+metadata:
+  name: edge
+spec:
+  addresses:
+    - {type: IPAddress, value: <LAN address from the pool>}
+  listeners:
+    - {name: http, port: 80, protocol: HTTP}
+    - name: https
+      port: 443
+      protocol: HTTPS
+      hostname: app.example.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: app-example-com
+    - name: passthrough
+      port: 8443
+      protocol: TLS
+      hostname: db.example.com
+      tls:
+        mode: Passthrough
+---
+apiVersion: gateway.gaon.garam.sh/v1alpha1
+kind: HTTPRoute
+metadata:
+  name: app
+spec:
+  parentRefs:
+    - {name: edge, sectionName: https}
+  hostnames:
+    - app.example.com
+  rules:
+    - matches:
+        - path: {type: PathPrefix, value: /api}
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path: {type: ReplacePrefixMatch, replacePrefixMatch: /}
+      backendRefs:
+        - {name: api, port: 8080}
+    - matches:
+        - path: {type: PathPrefix, value: /}
+      backendRefs:
+        - {name: web, port: 80}
+---
+apiVersion: gateway.gaon.garam.sh/v1alpha1
+kind: TLSRoute
+metadata:
+  name: db
+spec:
+  parentRefs:
+    - {name: edge, sectionName: passthrough}
+  hostnames:
+    - db.example.com
+  rules:
+    - backendRefs:
+        - {name: db, port: 5432}

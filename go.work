@@ -11,6 +11,7 @@ use (
 	./controllers
 	./dns
 	./etcd-snapshot
+	./gateway
 	./gaon-cli
 	./lib/api
 	./lib/plugin
