@@ -109,9 +109,12 @@ func (a *rbac) pinned(ctx context.Context, user, name string) (bool, error) {
 	return v.Spec.NodeName == user, nil
 }
 
-// holds reports whether the VolumeSnapshot name is held by the Node user: its
+// holds reports whether the VolumeSnapshot name is held by user, a Node: its
 // status.nodeName is user, or its source Volume is pinned to user.
 func (a *rbac) holds(ctx context.Context, user, name string) (bool, error) {
+	if ok, err := a.isNode(ctx, user); !ok || err != nil {
+		return false, err
+	}
 	s, err := a.src.GetVolumeSnapshot(ctx, name)
 	if ok, err := found(err); !ok || err != nil {
 		return false, err

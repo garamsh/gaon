@@ -53,6 +53,8 @@ func TestNodeAuthorizer_ANodeNeitherCreatesNorDeletesAVolumeSnapshot(t *testing.
 
 	_, err = f.admin.PutVolumeSnapshot(ctx(t), volumeSnapshot("fresh", "v1"))
 	assert.NoError(t, err, "control: an administrator creates one")
+	_, err = f.admin.DeleteVolumeSnapshot(ctx(t), "s1", s.Metadata.ResourceVersion)
+	assert.NoError(t, err, "control: an administrator deletes one")
 }
 
 func TestNodeAuthorizer_ANodeWritesTheStatusOfAVolumeSnapshotItsStatusOrItsSourceVolumeNamesIt(t *testing.T) {
@@ -176,4 +178,33 @@ func TestRBAC_ARoleNamingVolumeSnapshotsGrantsTheirVerbsAndNoMore(t *testing.T) 
 	assert.ErrorIs(t, err, api.ErrForbidden, "the role does not grant update of the status")
 	_, err = f.admin.PutVolumeSnapshotStatus(ctx(t), s)
 	assert.NoError(t, err, "control: an administrator writes it")
+	deleted, err := f.admin.GetVolumeSnapshot(ctx(t), "s1")
+	require.NoError(t, err)
+	_, err = f.admin.DeleteVolumeSnapshot(ctx(t), "s1", deleted.Metadata.ResourceVersion)
+	assert.NoError(t, err, "control: an administrator deletes it")
+}
+
+func TestNodeAuthorizer_ACallerThatIsNoNodeIsNotGrantedASnapshotByTheNodeNameOfItsStatus(t *testing.T) {
+	f := newNodeFixture(t)
+	ghost, _ := f.c.clients(t, f.addr, nodeID("ghost"))
+	s := f.snapshotOf(t, "ghosted", "v2")
+	s.Status = readyStatus("ghost")
+	_, err := f.admin.PutVolumeSnapshotStatus(ctx(t), s)
+	require.NoError(t, err)
+	s, err = f.admin.GetVolumeSnapshot(ctx(t), "ghosted")
+	require.NoError(t, err)
+	require.Equal(t, "ghost", s.Status.NodeName, "the status names a CN that is no Node")
+
+	s.Status.Conditions = []api.Condition{{Type: api.VolumeSnapshotConditionSnapshotting, Status: "False"}}
+	_, err = ghost.PutVolumeSnapshotStatus(ctx(t), s)
+	assert.ErrorIs(t, err, api.ErrForbidden, "a status write by a CN that is no Node")
+	unfinalized := *s
+	unfinalized.Metadata.Finalizers = nil
+	_, err = ghost.PutVolumeSnapshot(ctx(t), &unfinalized)
+	assert.ErrorIs(t, err, api.ErrForbidden, "its finalizer removed by a CN that is no Node")
+
+	_, err = f.admin.PutNode(ctx(t), node("ghost"))
+	require.NoError(t, err)
+	_, err = ghost.PutVolumeSnapshotStatus(ctx(t), s)
+	assert.NoError(t, err, "control: the same write once a Node is named ghost")
 }

@@ -100,6 +100,10 @@ func TestPutVolumeSnapshot_UpdateKeepsTheSpecAndTheStatusAndTheDeletionTime(t *t
 	assert.Nil(t, updated.Metadata.DeletionTimestamp, "the deletion time is the server's")
 	assert.Equal(t, api.VolumeSnapshotStatus{}, updated.Status, "the status is written at /status")
 	assert.Equal(t, s.Metadata.UID, updated.Metadata.UID)
+
+	got, err := e.api.GetVolumeSnapshot(ctx(t), "s1")
+	require.NoError(t, err)
+	assert.Equal(t, updated, got, "the snapshot stored is the snapshot answered")
 }
 
 func TestPutVolumeSnapshotStatus_ChecksTheStatusAndWhatAReadySnapshotKeeps(t *testing.T) {
