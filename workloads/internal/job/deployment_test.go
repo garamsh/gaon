@@ -136,6 +136,8 @@ func TestDeployment_ARolloutKeepsToTheSurgeAndUnavailableBounds(t *testing.T) {
 		{"one surge none unavailable", 4, `{"type":"RollingUpdate","rollingUpdate":{"maxSurge":"1","maxUnavailable":"0"}}`, 1, 0},
 		{"none surge one unavailable", 4, `{"type":"RollingUpdate","rollingUpdate":{"maxSurge":"0","maxUnavailable":"1"}}`, 0, 1},
 		{"two surge two unavailable", 5, `{"rollingUpdate":{"maxSurge":"2","maxUnavailable":"2"}}`, 2, 2},
+		{"integers", 4, `{"rollingUpdate":{"maxSurge":1,"maxUnavailable":0}}`, 1, 0},
+		{"an integer and a percentage", 5, `{"rollingUpdate":{"maxSurge":2,"maxUnavailable":"40%"}}`, 2, 2},
 		{"percentages round surge up and unavailable down", 5, `{"rollingUpdate":{"maxSurge":"50%","maxUnavailable":"30%"}}`, 3, 1},
 		{"default of a quarter", 8, "", 2, 2},
 	}
@@ -226,6 +228,41 @@ func TestDeployment_LeavesAnUnusableSpecAloneAndServesTheOthers(t *testing.T) {
 			assert.Empty(t, f.replicasOf("bad"), "no MicroVM is created for it")
 			assert.Len(t, f.replicasOf("web"), 1, "the other Deployment is served")
 		})
+	}
+}
+
+func TestDeployment_RefusesABoundThatIsNeitherAnIntegerNorAString(t *testing.T) {
+	for name, bound := range map[string]string{
+		"boolean":          `true`,
+		"fraction":         `1.5`,
+		"negative integer": `-1`,
+		"array":            `[1]`,
+		"object":           `{"n":1}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeAPI(t)
+			f.addDeployment("bad", "uid-bad", depSpec(2, "alpine", `{"rollingUpdate":{"maxSurge":`+bound+`}}`))
+			f.addDeployment("ok", "uid-ok", depSpec(2, "alpine", `{"rollingUpdate":{"maxSurge":1}}`))
+
+			start(t, f)
+
+			assert.Empty(t, f.replicasOf("bad"), "nothing is created for a bound of this kind")
+			assert.Len(t, f.replicasOf("ok"), 2, "the same field as an integer is accepted")
+		})
+	}
+}
+
+func TestDeploymentDefinition_TakesAnIntegerOrAStringForEachBound(t *testing.T) {
+	def := job.DeploymentDefinition()
+	require.NoError(t, def.Validate(), "the schema is one the API server accepts")
+
+	root := def.Spec.Versions[0].Schema.OpenAPIV3Schema
+	bounds := root.Properties["spec"].Properties["strategy"].Properties["rollingUpdate"].Properties
+	require.Len(t, bounds, 2, "maxSurge and maxUnavailable")
+	for name, node := range bounds {
+		assert.True(t, node.IntOrString, name)
+		assert.Empty(t, node.Type, name)
+		assert.Equal(t, job.BoundPattern, node.Pattern, name)
 	}
 }
 
