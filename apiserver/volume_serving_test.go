@@ -70,10 +70,10 @@ func TestPutVolume_SpecIsImmutableButFinalizersAreNot(t *testing.T) {
 	e := newEnv(t)
 	created := e.createVolume(t, "v1")
 
-	resized := *created
-	resized.Spec.Storage = "2Gi"
-	_, err := e.api.PutVolume(ctx(t), &resized)
-	assert.ErrorIs(t, err, api.ErrInvalid, "a spec change")
+	reclassed := *created
+	reclassed.Spec.StorageClass = "ceph"
+	_, err := e.api.PutVolume(ctx(t), &reclassed)
+	assert.ErrorIs(t, err, api.ErrInvalid, "a spec change other than storage")
 	pinned := *created
 	pinned.Spec.NodeName = "n1"
 	_, err = e.api.PutVolume(ctx(t), &pinned)

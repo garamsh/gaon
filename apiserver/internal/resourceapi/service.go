@@ -117,6 +117,12 @@ type Service interface {
 	ListEndpoints(ctx context.Context, sel api.Selector) (*api.EndpointsList, error)
 	WatchEndpoints(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
+	PutStorageClass(ctx context.Context, name string, c *api.StorageClass) (*api.StorageClass, error)
+	DeleteStorageClass(ctx context.Context, name string, rv api.ResourceVersion) (*api.StorageClass, error)
+	GetStorageClass(ctx context.Context, name string) (*api.StorageClass, error)
+	ListStorageClasses(ctx context.Context, sel api.Selector) (*api.StorageClassList, error)
+	WatchStorageClasses(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
 	PutNetworkPolicy(ctx context.Context, name string, o *api.NetworkPolicy) (*api.NetworkPolicy, error)
 	DeleteNetworkPolicy(ctx context.Context, name string, rv api.ResourceVersion) (*api.NetworkPolicy, error)
 	GetNetworkPolicy(ctx context.Context, name string) (*api.NetworkPolicy, error)
@@ -167,6 +173,8 @@ var (
 
 	mutatingWebhookConfigurations   = kind[api.MutatingWebhookConfiguration]{"mutatingwebhookconfigurations", func(c *api.MutatingWebhookConfiguration) *api.ObjectMeta { return &c.Metadata }, func(c *api.MutatingWebhookConfiguration) any { return c.Webhooks }, gvk(api.AdmissionRegistrationGroup, api.KindMutatingWebhookConfiguration)}
 	validatingWebhookConfigurations = kind[api.ValidatingWebhookConfiguration]{"validatingwebhookconfigurations", func(c *api.ValidatingWebhookConfiguration) *api.ObjectMeta { return &c.Metadata }, func(c *api.ValidatingWebhookConfiguration) any { return c.Webhooks }, gvk(api.AdmissionRegistrationGroup, api.KindValidatingWebhookConfiguration)}
+
+	storageClasses = kind[api.StorageClass]{"storageclasses", func(c *api.StorageClass) *api.ObjectMeta { return &c.Metadata }, func(c *api.StorageClass) any { return [2]any{c.Provisioner, c.AllowVolumeExpansion} }, gvk(api.Group, api.KindStorageClass)}
 
 	customResourceDefinitions = kind[api.CustomResourceDefinition]{"customresourcedefinitions", func(d *api.CustomResourceDefinition) *api.ObjectMeta { return &d.Metadata }, func(d *api.CustomResourceDefinition) any { return d.Spec }, gvk(api.APIExtensionsGroup, api.KindCustomResourceDefinition)}
 )

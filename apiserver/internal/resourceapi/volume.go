@@ -55,10 +55,10 @@ func (s *service) checkAttachment(ctx context.Context, v *api.Volume, a *api.Att
 	return v.Attach(a.MicroVMName, a.BindingEpoch)
 }
 
-// PutVolume creates v with phase Pending, or changes the finalizers of the
-// stored Volume v was read at. Neither takes the status or the node from v: a
-// Volume's spec is immutable, and only the binding of a MicroVM pins it. An
-// update that clears the last finalizer of a Volume being deleted removes it.
+// PutVolume creates v with phase Pending, or changes the finalizers and
+// spec.storage of the stored Volume v was read at. Neither takes the status or
+// the node from v: only the binding of a MicroVM pins a Volume, and storage
+// changes as Volume.ValidateResize allows. An update that clears the last finalizer of a Volume being deleted removes it.
 func (s *service) PutVolume(ctx context.Context, name string, v *api.Volume) (*api.Volume, error) {
 	if err := checkName(name, v.Metadata.Name); err != nil {
 		return nil, err
@@ -95,7 +95,11 @@ func (s *service) updateVolume(ctx context.Context, v *api.Volume) (*api.Volume,
 		return nil, err
 	}
 	v.Metadata.UID = old.Metadata.UID
-	if err := v.ValidateUpdate(old); err != nil {
+	class, err := s.storageClassOf(ctx, v.Spec.StorageClass)
+	if err != nil {
+		return nil, err
+	}
+	if err := v.ValidateResize(old, class); err != nil {
 		return nil, err
 	}
 	deleting := old.Metadata.DeletionTimestamp != nil
@@ -111,11 +115,22 @@ func (s *service) updateVolume(ctx context.Context, v *api.Volume) (*api.Volume,
 	}
 	v.Status = old.Status
 	v.Metadata.DeletionTimestamp = old.Metadata.DeletionTimestamp
-	v.Metadata.Generation = old.Metadata.Generation
+	v.Metadata.Generation = nextGeneration(old.Metadata.Generation, old.Spec, sameSize(old.Spec, v.Spec))
 	if err := validate(ctx, s, volumes, "", api.OperationUpdate, v, old); err != nil {
 		return nil, err
 	}
 	return v, volumes.update(ctx, s.st, v, rev)
+}
+
+// sameSize returns next with the storage of old where both are the same size,
+// so a size written in another unit is no change of spec.
+func sameSize(old, next api.VolumeSpec) api.VolumeSpec {
+	a, errA := old.Storage.Value()
+	b, errB := next.Storage.Value()
+	if errA == nil && errB == nil && a.Cmp(b) == 0 {
+		next.Storage = old.Storage
+	}
+	return next
 }
 
 // DeleteVolume sets the deletion time of the Volume if rv is its current
