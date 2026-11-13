@@ -1,5 +1,7 @@
 # gaon
 
+gaon is discontinued. Its repository stays as it is, marked and not removed or archived. The decision is recorded in [garamsh/discussions Discussion #5](https://github.com/orgs/garamsh/discussions/5) and [garamsh/aurora#804](https://github.com/garamsh/aurora/issues/804).
+
 gaon is the orchestration project of the garamsh microVM platform. It schedules and manages MicroVMs on nodes whose runtime is mvmd. Its scope is set by the project owner's decisions in garamsh/discussions Discussion #2 (`discussioncomment-19466471`, `discussioncomment-19466961`, `discussioncomment-19533418`).
 
 ## Scope
