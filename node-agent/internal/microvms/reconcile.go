@@ -12,7 +12,8 @@ import (
 
 // reconcileAll removes what is not wanted here, releases the MicroVMs being
 // deleted that mvmd no longer holds, then brings each wanted MicroVM to its
-// run strategy. The error joins what failed; one MicroVM's failure does not
+// run strategy, and last passes the NetworkPolicy limits to the network
+// plugin that enforces them. The error joins what failed; one MicroVM's failure does not
 // stop the others.
 func (s *service) reconcileAll(ctx context.Context) error {
 	held, err := s.collect(ctx)
@@ -24,6 +25,7 @@ func (s *service) reconcileAll(ctx context.Context) error {
 	for _, name := range s.cache.names() {
 		errs = append(errs, s.reconcile(ctx, name))
 	}
+	errs = append(errs, s.enforce(ctx))
 	return errors.Join(errs...)
 }
 

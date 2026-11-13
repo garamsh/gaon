@@ -48,6 +48,13 @@ func (c *NetworkClient) Policy(ctx context.Context, m *api.MicroVM) (*NetworkPol
 	return policyFromWire(resp.GetPolicy()), nil
 }
 
+// Enforce calls the plugin as an Enforcer. A plugin that does not implement
+// it answers gRPC Unimplemented.
+func (c *NetworkClient) Enforce(ctx context.Context, limits []MicroVMLimits) error {
+	_, err := c.client.Enforce(ctx, &pb.EnforceRequest{Microvms: limitsToWire(limits)})
+	return err
+}
+
 // StorageClient calls the storage plugin on a socket as a Storage.
 type StorageClient struct {
 	conn   *grpc.ClientConn

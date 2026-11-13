@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/gaon/lib/plugin"
 	"github.com/garamsh/gaon/node-agent/internal/microvms"
@@ -69,6 +72,18 @@ func (n timedNetwork) Policy(ctx context.Context, m *api.MicroVM) (*plugin.Netwo
 	ctx, cancel := context.WithTimeout(ctx, n.timeout)
 	defer cancel()
 	return n.Network.Policy(ctx, m)
+}
+
+// Enforce is called when the network plugin enforces NetworkPolicy, which a
+// client does by asking; one that does not answers Unimplemented.
+func (n timedNetwork) Enforce(ctx context.Context, limits []plugin.MicroVMLimits) error {
+	e, ok := n.Network.(plugin.Enforcer)
+	if !ok {
+		return status.Error(codes.Unimplemented, "the network plugin does not enforce NetworkPolicy")
+	}
+	ctx, cancel := context.WithTimeout(ctx, n.timeout)
+	defer cancel()
+	return e.Enforce(ctx, limits)
 }
 
 type timedStorage struct {

@@ -16,6 +16,8 @@ func (policy) Policy(ctx context.Context, m *api.MicroVM) (*plugin.NetworkPolicy
 err := plugin.ServeNetwork(ctx, plugin.DefaultDir, "mynet", policy{})
 ```
 
+A network plugin that also enforces NetworkPolicy implements `plugin.Enforcer`, whose `Enforce(ctx, limits)` receives the complete set of limits of the MicroVMs on its Node on every call and replaces what it enforced; a plugin that does not implement it is answered `Unimplemented` and left to its create-time policy.
+
 `ServeStorage` does the same for a `plugin.Storage`. The socket is `<dir>/network-mynet.sock`, and the agent is started with `--network-plugin mynet`.
 
 ## The proto

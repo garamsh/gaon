@@ -16,4 +16,5 @@ type API interface {
 	GetConfigMap(ctx context.Context, name string) (*api.ConfigMap, error)
 	PutMicroVMStatus(ctx context.Context, m *api.MicroVM) (*api.MicroVM, error)
 	CreateServiceAccountToken(ctx context.Context, name string, req *api.TokenRequest) (*api.TokenRequest, error)
+	ListNetworkPolicies(ctx context.Context) (*api.NetworkPolicyList, error)
 }

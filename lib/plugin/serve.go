@@ -119,6 +119,17 @@ func (s networkServer) Policy(ctx context.Context, req *pb.PolicyRequest) (*pb.P
 	return &pb.PolicyResponse{Policy: policyToWire(p)}, nil
 }
 
+func (s networkServer) Enforce(ctx context.Context, req *pb.EnforceRequest) (*pb.EnforceResponse, error) {
+	e, ok := s.n.(Enforcer)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "this network plugin does not enforce NetworkPolicy")
+	}
+	if err := e.Enforce(ctx, limitsFromWire(req.GetMicrovms())); err != nil {
+		return nil, status.Error(codes.Unknown, err.Error())
+	}
+	return &pb.EnforceResponse{}, nil
+}
+
 type storageServer struct {
 	pb.UnimplementedStorageServiceServer
 	s Storage

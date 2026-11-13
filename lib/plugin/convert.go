@@ -39,17 +39,68 @@ func rulesFromWire(rules []*pb.NetworkRule) []NetworkRule {
 	var out []NetworkRule
 	for _, w := range rules {
 		r := NetworkRule{Prefix: w.GetPrefix()}
-		for p, wp := range protocolToWire {
-			if wp == w.GetProtocol() {
-				r.Protocol = p
-			}
-		}
+		r.Protocol = protocolFromWire(w.GetProtocol())
 		for _, p := range w.GetPorts() {
 			r.Ports = append(r.Ports, PortRange{First: p.GetFirst(), Last: p.GetLast()})
 		}
 		out = append(out, r)
 	}
 	return out
+}
+
+func limitsToWire(in []MicroVMLimits) []*pb.MicroVMLimits {
+	var out []*pb.MicroVMLimits
+	for _, l := range in {
+		out = append(out, &pb.MicroVMLimits{Microvm: l.MicroVM, Addresses: l.Addresses, Ingress: limitToWire(l.Ingress), Egress: limitToWire(l.Egress)})
+	}
+	return out
+}
+
+func limitToWire(l *Limit) *pb.Limit {
+	if l == nil {
+		return nil
+	}
+	out := &pb.Limit{}
+	for _, a := range l.Allow {
+		w := &pb.Allow{Prefix: a.Prefix, Except: a.Except}
+		for _, p := range a.Ports {
+			w.Ports = append(w.Ports, &pb.PolicyPort{Protocol: protocolToWire[p.Protocol], Port: p.Port})
+		}
+		out.Allow = append(out.Allow, w)
+	}
+	return out
+}
+
+func limitsFromWire(in []*pb.MicroVMLimits) []MicroVMLimits {
+	var out []MicroVMLimits
+	for _, w := range in {
+		out = append(out, MicroVMLimits{MicroVM: w.GetMicrovm(), Addresses: w.GetAddresses(), Ingress: limitFromWire(w.GetIngress()), Egress: limitFromWire(w.GetEgress())})
+	}
+	return out
+}
+
+func limitFromWire(w *pb.Limit) *Limit {
+	if w == nil {
+		return nil
+	}
+	out := &Limit{}
+	for _, wa := range w.GetAllow() {
+		a := Allow{Prefix: wa.GetPrefix(), Except: wa.GetExcept()}
+		for _, wp := range wa.GetPorts() {
+			a.Ports = append(a.Ports, PolicyPort{Protocol: protocolFromWire(wp.GetProtocol()), Port: wp.GetPort()})
+		}
+		out.Allow = append(out.Allow, a)
+	}
+	return out
+}
+
+func protocolFromWire(w pb.Protocol) Protocol {
+	for p, wp := range protocolToWire {
+		if wp == w {
+			return p
+		}
+	}
+	return 0
 }
 
 func refusalToWire(r *Refusal) *pb.Refusal {

@@ -102,6 +102,66 @@ func TestNetwork_APolicyArrivesWithEveryFieldAndTheMicroVMItWasAskedFor(t *testi
 	assert.Equal(t, "img", n.seen.Spec.Image)
 }
 
+// enforcingNetwork is a network that also implements plugin.Enforcer.
+type enforcingNetwork struct {
+	network
+	limits []plugin.MicroVMLimits
+	err    error
+}
+
+func (n *enforcingNetwork) Enforce(_ context.Context, limits []plugin.MicroVMLimits) error {
+	n.limits = limits
+	return n.err
+}
+
+func TestNetwork_LimitsArriveWithEveryFieldAndAnUnsetDirectionStaysUnset(t *testing.T) {
+	dir := plugintest.SocketDir(t)
+	want := []plugin.MicroVMLimits{
+		{
+			MicroVM:   "a",
+			Addresses: []string{"10.0.0.2", "fd00::2"},
+			Ingress: &plugin.Limit{Allow: []plugin.Allow{
+				{Prefix: "10.1.0.0/16", Except: []string{"10.1.2.0/24"}, Ports: []plugin.PolicyPort{{Protocol: plugin.TCP, Port: 80}, {Protocol: plugin.UDP, Port: 53}}},
+				{},
+			}},
+			Egress: &plugin.Limit{},
+		},
+		{MicroVM: "b", Addresses: []string{"10.0.0.3"}},
+	}
+	n := &enforcingNetwork{}
+	start(t, func(ctx context.Context) error { return plugin.ServeNetwork(ctx, dir, "test", n) })
+	waitSocket(t, dir, plugin.KindNetwork, "test")
+	c, err := plugin.DialNetwork(dir, "test")
+	require.NoError(t, err)
+	defer c.Close()
+
+	require.NoError(t, c.Enforce(t.Context(), want))
+
+	assert.Equal(t, want, n.limits)
+	// The control: an empty limit is a limit that allows nothing, and an
+	// unset one is no limit, so the two did not collapse on the wire.
+	require.NotNil(t, n.limits[0].Egress)
+	assert.Nil(t, n.limits[1].Ingress)
+
+	n.err = errors.New("the table could not be written")
+	err = c.Enforce(t.Context(), want)
+	assert.Equal(t, codes.Unknown, status.Code(err))
+	assert.Contains(t, err.Error(), "the table could not be written")
+}
+
+func TestNetwork_ANetworkThatDoesNotEnforceAnswersUnimplemented(t *testing.T) {
+	dir := plugintest.SocketDir(t)
+	start(t, func(ctx context.Context) error { return plugin.ServeNetwork(ctx, dir, "test", &network{}) })
+	waitSocket(t, dir, plugin.KindNetwork, "test")
+	c, err := plugin.DialNetwork(dir, "test")
+	require.NoError(t, err)
+	defer c.Close()
+
+	err = c.Enforce(t.Context(), nil)
+
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+}
+
 func TestNetwork_ARefusalArrivesAsARefusalAndAnyOtherErrorDoesNot(t *testing.T) {
 	dir := plugintest.SocketDir(t)
 	n := &network{err: &plugin.Refusal{Reason: "UnknownNetwork", Message: "no such network"}}

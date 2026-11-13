@@ -81,3 +81,46 @@ type DiskAttachment struct {
 	DiskID   string
 	ReadOnly bool
 }
+
+// Enforcer is implemented by a Network that enforces NetworkPolicy. The agent
+// calls it after each round of MicroVMs; a Network that does not implement it
+// answers the call as unimplemented and NetworkPolicy is not enforced on its
+// node.
+type Enforcer interface {
+	// Enforce makes the node enforce exactly limits and no others, replacing
+	// those of an earlier call. A MicroVM not in limits is unrestricted. It
+	// is repeatable.
+	Enforce(ctx context.Context, limits []MicroVMLimits) error
+}
+
+// MicroVMLimits are the limits NetworkPolicy puts on one MicroVM of the node.
+// A direction whose limit is nil is unrestricted.
+type MicroVMLimits struct {
+	MicroVM string
+	// Addresses are the MicroVM's IPv4 and IPv6 addresses; the limits apply
+	// to the traffic to and from them.
+	Addresses       []string
+	Ingress, Egress *Limit
+}
+
+// Limit restricts a direction of traffic to what its Allow entries permit. A
+// Limit with none allows nothing.
+type Limit struct {
+	Allow []Allow
+}
+
+// Allow is one entry of a Limit: traffic passes if the other end's address is
+// in Prefix and in none of Except, and its destination port is one of Ports.
+// An empty Prefix matches every address, and no Ports every port and
+// protocol.
+type Allow struct {
+	Prefix string
+	Except []string
+	Ports  []PolicyPort
+}
+
+// PolicyPort is a TCP or UDP port number.
+type PolicyPort struct {
+	Protocol Protocol
+	Port     uint32
+}
