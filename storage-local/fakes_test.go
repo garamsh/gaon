@@ -171,6 +171,16 @@ func (f *fakeVolumes) SnapshotStatuses() []api.VolumeSnapshotStatus {
 	return slices.Clone(f.snapshotStatuses)
 }
 
+func (f *fakeVolumes) GetVolumeSnapshot(_ context.Context, name string) (*api.VolumeSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.snapshots[name]
+	if !ok {
+		return nil, api.NewAPIError(api.ReasonNotFound, "volume snapshot %q does not exist", name)
+	}
+	return &s, nil
+}
+
 func (f *fakeVolumes) ListVolumeSnapshots(context.Context) (*api.VolumeSnapshotList, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -231,6 +241,7 @@ type fakeDisks struct {
 	mu            sync.Mutex
 	disks         map[string]*v1alpha2.Disk
 	calls         []string
+	creates       []*v1alpha2.CreateDiskRequest
 	failure       v1alpha2.OutcomeKind
 	resizeFailure v1alpha2.OutcomeKind
 	onResize      func()
@@ -337,6 +348,13 @@ func (f *fakeDisks) DeleteDiskSnapshot(_ context.Context, r *v1alpha2.DeleteDisk
 	return &v1alpha2.DeleteDiskSnapshotResponse{}, nil
 }
 
+// CreateRequests returns the CreateDisk requests received, in order.
+func (f *fakeDisks) CreateRequests() []*v1alpha2.CreateDiskRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.creates)
+}
+
 // Calls returns the disk calls made, as "<Call> <disk id>".
 func (f *fakeDisks) Calls() []string {
 	f.mu.Lock()
@@ -403,6 +421,7 @@ func (f *fakeDisks) CreateDisk(_ context.Context, r *v1alpha2.CreateDiskRequest,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "CreateDisk "+r.GetDiskId())
+	f.creates = append(f.creates, proto.Clone(r).(*v1alpha2.CreateDiskRequest))
 	if f.failure != v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED {
 		return nil, v1alpha2.NewError(f.failure, "the node cannot make the disk")
 	}

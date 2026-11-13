@@ -248,15 +248,125 @@ func TestPutVolumeSnapshot_ClearingTheLastFinalizerOfASnapshotBeingDeletedRemove
 	assert.ErrorIs(t, err, api.ErrNotFound, "the last finalizer was cleared")
 }
 
-func TestPutVolume_ALocalDataSourceIsStillRefusedWhileSnapshotsAreServed(t *testing.T) {
-	e := newEnv(t)
-	e.createVolumeSnapshot(t, "s1", "v1")
-	v := volume("restored")
-	v.Spec.DataSource = "s1"
+// readySnapshot creates a snapshot of v1 that holds holdFinalizer, so that it
+// outlives a delete, and writes status to it.
+func (e *env) readySnapshot(t *testing.T, name string, status api.VolumeSnapshotStatus) *api.VolumeSnapshot {
+	t.Helper()
+	s := volumeSnapshot(name, "v1")
+	s.Metadata.Finalizers = []string{holdFinalizer}
+	created, err := e.api.PutVolumeSnapshot(ctx(t), s)
+	require.NoError(t, err)
+	created.Status = status
+	ready, err := e.api.PutVolumeSnapshotStatus(ctx(t), created)
+	require.NoError(t, err)
+	return ready
+}
 
-	_, err := e.api.PutVolume(ctx(t), v)
-	assert.ErrorIs(t, err, api.ErrInvalid, "a local Volume from a snapshot waits for #253")
-	v.Spec.DataSource = ""
-	_, err = e.api.PutVolume(ctx(t), v)
-	assert.NoError(t, err, "control: the same Volume with no data source")
+func volumeFrom(name, snapshot string) *api.Volume {
+	v := volume(name)
+	v.Spec.DataSource = snapshot
+	return v
+}
+
+func TestPutVolume_FromAReadySnapshotStoresALocalVolumePinnedToItsNodeWithTheFinalizer(t *testing.T) {
+	e := newEnv(t)
+	e.readySnapshot(t, "s1", readyStatus("n1"))
+	remote := e.readySnapshot(t, "remote-snap", api.VolumeSnapshotStatus{ReadyToUse: true, RestoreSize: "1Gi", StorageClass: "ceph"})
+	require.Equal(t, "ceph", remote.Status.StorageClass, "the setup made a snapshot of another class")
+
+	created, err := e.api.PutVolume(ctx(t), volumeFrom("restored", "s1"))
+	require.NoError(t, err)
+	assert.Equal(t, "n1", created.Spec.NodeName)
+	assert.Equal(t, []string{api.NodeAgentFinalizer}, created.Metadata.Finalizers)
+	assert.Equal(t, "s1", created.Spec.DataSource)
+	assert.Equal(t, api.VolumePending, created.Status.Phase)
+	assert.Equal(t, int64(1), created.Metadata.Generation)
+	assert.Equal(t, created, e.getVolume(t, "restored"), "the Volume stored is the one returned")
+
+	other := volumeFrom("remote-restored", "remote-snap")
+	other.Spec.StorageClass = "ceph"
+	other.Spec.AccessModes = nil
+	created, err = e.api.PutVolume(ctx(t), other)
+	require.NoError(t, err, "control: a Volume of another class is accepted")
+	assert.Empty(t, created.Spec.NodeName, "and not pinned")
+	assert.Empty(t, created.Metadata.Finalizers)
+
+	plain, err := e.api.PutVolume(ctx(t), volume("plain"))
+	require.NoError(t, err, "control: a Volume with no data source")
+	assert.Empty(t, plain.Spec.NodeName)
+}
+
+func TestPutVolume_FromASnapshotThatCannotBeUsedIsRefusedWithItsReasonAndStoresNothing(t *testing.T) {
+	tests := []struct {
+		name string
+		// prepare returns the Volume to create, after making its snapshot.
+		prepare func(t *testing.T, e *env) *api.Volume
+		want    error
+	}{
+		{"control: a ready snapshot of the same class", func(t *testing.T, e *env) *api.Volume {
+			e.readySnapshot(t, "s1", readyStatus("n1"))
+			return volumeFrom("restored", "s1")
+		}, nil},
+		{"control: a size equal to the restore size and one above it", func(t *testing.T, e *env) *api.Volume {
+			e.readySnapshot(t, "s1", readyStatus("n1"))
+			v := volumeFrom("restored", "s1")
+			v.Spec.Storage = "1Gi"
+			_, err := e.api.PutVolume(ctx(t), v)
+			require.NoError(t, err)
+			bigger := volumeFrom("restored", "s1")
+			bigger.Spec.Storage = "2Gi"
+			bigger.Metadata.Name = "bigger"
+			_, err = e.api.PutVolume(ctx(t), bigger)
+			require.NoError(t, err)
+			return volumeFrom("restored2", "s1")
+		}, nil},
+		{"the snapshot does not exist", func(t *testing.T, e *env) *api.Volume {
+			e.readySnapshot(t, "s1", readyStatus("n1"))
+			return volumeFrom("restored", "absent")
+		}, api.ErrInvalid},
+		{"the snapshot is not ready", func(t *testing.T, e *env) *api.Volume {
+			e.createVolumeSnapshot(t, "s1", "v1")
+			return volumeFrom("restored", "s1")
+		}, api.ErrConflict},
+		{"the snapshot is being deleted", func(t *testing.T, e *env) *api.Volume {
+			s := e.readySnapshot(t, "s1", readyStatus("n1"))
+			deleting, err := e.api.DeleteVolumeSnapshot(ctx(t), "s1", s.Metadata.ResourceVersion)
+			require.NoError(t, err)
+			require.NotNil(t, deleting.Metadata.DeletionTimestamp)
+			got, err := e.api.GetVolumeSnapshot(ctx(t), "s1")
+			require.NoError(t, err, "the other finalizer keeps the snapshot")
+			require.True(t, got.Status.ReadyToUse, "and it is still ready")
+			return volumeFrom("restored", "s1")
+		}, api.ErrConflict},
+		{"the snapshot is of another class", func(t *testing.T, e *env) *api.Volume {
+			e.readySnapshot(t, "s1", api.VolumeSnapshotStatus{ReadyToUse: true, RestoreSize: "1Gi", StorageClass: "ceph"})
+			return volumeFrom("restored", "s1")
+		}, api.ErrInvalid},
+		{"the storage is below the restore size", func(t *testing.T, e *env) *api.Volume {
+			e.readySnapshot(t, "s1", readyStatus("n1"))
+			v := volumeFrom("restored", "s1")
+			v.Spec.Storage = "512Mi"
+			return v
+		}, api.ErrInvalid},
+		{"the Volume carries the snapshot's own node in spec.nodeName", func(t *testing.T, e *env) *api.Volume {
+			e.readySnapshot(t, "s1", readyStatus("n1"))
+			v := volumeFrom("restored", "s1")
+			v.Spec.NodeName = "n1"
+			return v
+		}, api.ErrInvalid},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			v := tt.prepare(t, e)
+			_, err := e.api.PutVolume(ctx(t), v)
+			if tt.want == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, tt.want)
+			_, err = e.api.GetVolume(ctx(t), v.Metadata.Name)
+			assert.ErrorIs(t, err, api.ErrNotFound, "a refused create stores nothing")
+		})
+	}
 }

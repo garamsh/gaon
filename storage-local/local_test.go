@@ -394,3 +394,59 @@ func TestLocal_RunLetsAVolumeGoWhenItsLastFinalizerGoesAndKeepsAHeldOneUntilThen
 	_, ok = r.mvmd.Disk("volume-a-held")
 	assert.False(t, ok)
 }
+
+func restoredVolume(name, snapshot string) api.Volume {
+	v := volume(name, node)
+	v.Spec.DataSource = snapshot
+	return v
+}
+
+func TestLocal_RunMakesTheDiskOfAVolumeFromASnapshotFromThatSnapshotsIdentifierWithNoMicroVM(t *testing.T) {
+	r := newRig(t)
+	const otherUID = "fedcba9876543210fedcba9876543210"
+	for name, id := range map[string]api.UID{"backup": uid, "other": otherUID} {
+		s := snapshotOf(name, "source", id)
+		s.Status = api.VolumeSnapshotStatus{ReadyToUse: true, RestoreSize: "10485760", StorageClass: api.StorageClassLocal, NodeName: node}
+		r.gaon.SetSnapshot(s)
+	}
+	r.gaon.SetVolume(restoredVolume("restored", "backup"))
+	r.gaon.SetVolume(volume("plain", node))
+	r.run(t)
+
+	eventually(t, "restored is Available", r.phase("restored", api.VolumeAvailable))
+	eventually(t, "plain is Available", r.phase("plain", api.VolumeAvailable))
+
+	made := map[string]*v1alpha2.CreateDiskRequest{}
+	for _, req := range r.mvmd.CreateRequests() {
+		made[req.GetDiskId()] = req
+	}
+	require.Contains(t, made, "volume-restored")
+	assert.Equal(t, "snapshot-"+uid, made["volume-restored"].GetFromSnapshotId())
+	assert.EqualValues(t, 10<<20, made["volume-restored"].GetSizeBytes())
+	require.Contains(t, made, "volume-plain")
+	assert.Empty(t, made["volume-plain"].GetFromSnapshotId(), "control: a Volume with no data source is made from no snapshot")
+	disk, ok := r.mvmd.Disk("volume-restored")
+	require.True(t, ok)
+	assert.Empty(t, disk.GetHolderMachineId(), "no MicroVM uses the disk")
+	v := r.volume(t, "restored")
+	assert.Equal(t, api.Quantity("10485760"), v.Status.Capacity)
+	assert.Nil(t, v.Status.Attachment)
+}
+
+func TestLocal_RunMakesNoEmptyDiskForAVolumeWhoseSnapshotIsGone(t *testing.T) {
+	r := newRig(t)
+	s := snapshotOf("backup", "source", uid)
+	s.Status = api.VolumeSnapshotStatus{ReadyToUse: true, RestoreSize: "10485760", StorageClass: api.StorageClassLocal, NodeName: node}
+	r.gaon.SetSnapshot(s)
+	r.gaon.SetVolume(restoredVolume("a-lost", "absent"))
+	r.gaon.SetVolume(restoredVolume("z-kept", "backup"))
+	r.run(t)
+
+	eventually(t, "a-lost is Failed", r.phase("a-lost", api.VolumeFailed))
+	eventually(t, "z-kept is Available", r.phase("z-kept", api.VolumeAvailable))
+
+	_, ok := r.mvmd.Disk("volume-a-lost")
+	assert.False(t, ok, "a Volume of a snapshot that is gone gets no empty disk")
+	_, ok = r.mvmd.Disk("volume-z-kept")
+	assert.True(t, ok, "control: the Volume whose snapshot exists gets its disk")
+}

@@ -76,9 +76,9 @@ type Attachment struct {
 }
 
 // Validate checks the identity and the spec of v. A Volume of the local
-// class is a disk of a positive size, ReadWriteOnce, with no data source.
-// CreateFromSnapshot holds the rules of one that names a VolumeSnapshot; the
-// API server drops this refusal in the change that applies them.
+// class is a disk of a positive size, ReadWriteOnce, whose data source, if
+// any, is a name. CreateFromSnapshot holds the rules of one that names a
+// VolumeSnapshot.
 func (v *Volume) Validate() error {
 	if err := validateIdentity(v.TypeMeta, GroupVersion, KindVolume, v.Metadata); err != nil {
 		return err
@@ -97,7 +97,7 @@ func (v *Volume) Validate() error {
 		return invalid("spec.storage is %q, want a positive size for class %s", spec.Storage, StorageClassLocal)
 	}
 	if spec.DataSource != "" {
-		return invalid("spec.dataSource is %q, want empty for class %s", spec.DataSource, StorageClassLocal)
+		return validateObjectName("spec.dataSource", spec.DataSource)
 	}
 	return nil
 }

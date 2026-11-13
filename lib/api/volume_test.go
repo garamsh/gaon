@@ -80,7 +80,13 @@ func TestVolumeValidate(t *testing.T) {
 		}, false},
 		{"local, no storage", func(v *api.Volume) { v.Spec.Storage = "" }, false},
 		{"local, zero storage", func(v *api.Volume) { v.Spec.Storage = "0" }, false},
-		{"local, data source", func(v *api.Volume) { v.Spec.DataSource = "snap-1" }, false},
+		{"local, data source that is a name", func(v *api.Volume) { v.Spec.DataSource = "snap-1" }, true},
+		{"local, data source that is not a name", func(v *api.Volume) { v.Spec.DataSource = "Snap_1" }, false},
+		{"local, data source with a slash", func(v *api.Volume) { v.Spec.DataSource = "a/b" }, false},
+		{"local, data source and no storage", func(v *api.Volume) {
+			v.Spec.DataSource = "snap-1"
+			v.Spec.Storage = ""
+		}, false},
 		{"other class, other access mode and a data source", func(v *api.Volume) {
 			v.Spec.StorageClass = "ceph"
 			v.Spec.AccessModes = []string{"ReadWriteMany"}

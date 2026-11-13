@@ -31,6 +31,7 @@ const (
 
 // Snapshots is the part of the resource API Local uses for VolumeSnapshots.
 type Snapshots interface {
+	GetVolumeSnapshot(ctx context.Context, name string) (*api.VolumeSnapshot, error)
 	ListVolumeSnapshots(ctx context.Context) (*api.VolumeSnapshotList, error)
 	PutVolumeSnapshot(ctx context.Context, s *api.VolumeSnapshot) (*api.VolumeSnapshot, error)
 	PutVolumeSnapshotStatus(ctx context.Context, s *api.VolumeSnapshot) (*api.VolumeSnapshot, error)
