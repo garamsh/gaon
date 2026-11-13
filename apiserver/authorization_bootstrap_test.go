@@ -52,6 +52,7 @@ func TestBootstrap_TheRulesAreThoseOfADR0008AsADR0021ChangesThem(t *testing.T) {
 	assert.Equal(t, []api.PolicyRule{
 		{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []api.Verb{api.VerbGet, api.VerbList, api.VerbWatch, api.VerbDelete}},
 		{APIGroups: []string{api.Group}, Resources: []string{"microvms"}, Verbs: []api.Verb{api.VerbCreate, api.VerbUpdate}},
+		{APIGroups: []string{api.Group}, Resources: []string{"endpoints"}, Verbs: []api.Verb{api.VerbCreate, api.VerbUpdate}},
 		{APIGroups: []string{api.Group}, Resources: []string{"microvms/status", "nodes/status", "volumes/status", "certificatesigningrequests/status"}, Verbs: []api.Verb{api.VerbUpdate}},
 		{APIGroups: []string{api.CoordinationGroup}, Resources: []string{"leases"}, Verbs: []api.Verb{api.VerbGet, api.VerbCreate, api.VerbUpdate}},
 	}, controllers.Rules)

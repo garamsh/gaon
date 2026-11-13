@@ -105,6 +105,24 @@ type Service interface {
 	ListServiceAccounts(ctx context.Context, sel api.Selector) (*api.ServiceAccountList, error)
 	WatchServiceAccounts(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
+	PutService(ctx context.Context, name string, o *api.Service) (*api.Service, error)
+	DeleteService(ctx context.Context, name string, rv api.ResourceVersion) (*api.Service, error)
+	GetService(ctx context.Context, name string) (*api.Service, error)
+	ListServices(ctx context.Context, sel api.Selector) (*api.ServiceList, error)
+	WatchServices(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
+	PutEndpoints(ctx context.Context, name string, o *api.Endpoints) (*api.Endpoints, error)
+	DeleteEndpoints(ctx context.Context, name string, rv api.ResourceVersion) (*api.Endpoints, error)
+	GetEndpoints(ctx context.Context, name string) (*api.Endpoints, error)
+	ListEndpoints(ctx context.Context, sel api.Selector) (*api.EndpointsList, error)
+	WatchEndpoints(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
+	PutNetworkPolicy(ctx context.Context, name string, o *api.NetworkPolicy) (*api.NetworkPolicy, error)
+	DeleteNetworkPolicy(ctx context.Context, name string, rv api.ResourceVersion) (*api.NetworkPolicy, error)
+	GetNetworkPolicy(ctx context.Context, name string) (*api.NetworkPolicy, error)
+	ListNetworkPolicies(ctx context.Context, sel api.Selector) (*api.NetworkPolicyList, error)
+	WatchNetworkPolicies(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
 	// CreateServiceAccountToken signs a token of the ServiceAccount name for
 	// req.Spec.BoundMicroVM and returns req with the token in its status. The
 	// request is not stored and is not sent to a webhook.
@@ -138,6 +156,10 @@ var (
 	configMaps      = kind[api.ConfigMap]{"configmaps", func(o *api.ConfigMap) *api.ObjectMeta { return &o.Metadata }, func(o *api.ConfigMap) any { return o.Data }, gvk(api.Group, api.KindConfigMap)}
 	serviceAccounts = kind[api.ServiceAccount]{"serviceaccounts", func(o *api.ServiceAccount) *api.ObjectMeta { return &o.Metadata }, func(*api.ServiceAccount) any { return nil }, gvk(api.Group, api.KindServiceAccount)}
 
+	services        = kind[api.Service]{"services", func(o *api.Service) *api.ObjectMeta { return &o.Metadata }, func(o *api.Service) any { return o.Spec }, gvk(api.Group, api.KindService)}
+	endpointsKind   = kind[api.Endpoints]{"endpoints", func(o *api.Endpoints) *api.ObjectMeta { return &o.Metadata }, func(o *api.Endpoints) any { return o.Subsets }, gvk(api.Group, api.KindEndpoints)}
+	networkPolicies = kind[api.NetworkPolicy]{"networkpolicies", func(o *api.NetworkPolicy) *api.ObjectMeta { return &o.Metadata }, func(o *api.NetworkPolicy) any { return o.Spec }, gvk(api.Group, api.KindNetworkPolicy)}
+
 	certificateSigningRequests = kind[api.CertificateSigningRequest]{"certificatesigningrequests", func(r *api.CertificateSigningRequest) *api.ObjectMeta { return &r.Metadata }, func(r *api.CertificateSigningRequest) any { return r.Spec }, gvk(api.Group, api.KindCertificateSigningRequest)}
 
 	clusterRoles        = kind[api.ClusterRole]{"clusterroles", func(r *api.ClusterRole) *api.ObjectMeta { return &r.Metadata }, func(r *api.ClusterRole) any { return r.Rules }, gvk(api.RBACGroup, api.KindClusterRole)}
@@ -159,13 +181,15 @@ type service struct {
 	now    func() time.Time
 	hooks  *admission.Caller
 	signer TokenSigner
+	ranges Ranges
 }
 
 // NewService returns the Service over st. now is the clock that stamps a
 // deletion and a token. signer signs service account tokens and is nil where
-// the server has no signing key, which refuses every token request.
-func NewService(st Store, now func() time.Time, signer TokenSigner) Service {
-	return &service{st: st, now: now, hooks: &admission.Caller{Source: webhookSource{st}}, signer: signer}
+// the server has no signing key, which refuses every token request. ranges
+// are the two ranges Service addresses are allocated from.
+func NewService(st Store, now func() time.Time, signer TokenSigner, ranges Ranges) Service {
+	return &service{st: st, now: now, hooks: &admission.Caller{Source: webhookSource{st}}, signer: signer, ranges: ranges}
 }
 
 func (s *service) GetMicroVM(ctx context.Context, name string) (*api.MicroVM, error) {

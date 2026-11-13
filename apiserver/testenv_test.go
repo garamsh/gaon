@@ -46,6 +46,8 @@ func newEnv(t *testing.T) *env {
 type envOptions struct {
 	log     io.Writer
 	signing *signingKey
+	// serviceRange and lanPool are the ranges Service addresses come from.
+	serviceRange, lanPool string
 }
 
 func newEnvWith(t *testing.T, opts envOptions) *env {
@@ -63,6 +65,7 @@ func newEnvWith(t *testing.T, opts envOptions) *env {
 	if opts.signing != nil {
 		cfg.ServiceAccountIssuer, cfg.ServiceAccountSigningKeyFile = opts.signing.issuer, opts.signing.file
 	}
+	cfg.ServiceClusterIPRange, cfg.LoadBalancerPool = opts.serviceRange, opts.lanPool
 	logTo := opts.log
 	if logTo == nil {
 		logTo = io.Discard

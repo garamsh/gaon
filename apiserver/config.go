@@ -4,9 +4,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/garamsh/gaon/apiserver/internal/resourceapi"
 )
 
 // Config is how gaon-apiserver is run.
@@ -47,6 +50,12 @@ type Config struct {
 	// token: a token is authenticated only if its aud holds one of them. Where
 	// none is given the issuer is the one. They need the issuer.
 	APIAudiences []string
+	// ServiceClusterIPRange is the CIDR Service addresses are allocated from,
+	// the service prefix, and LoadBalancerPool the CIDR of LAN addresses
+	// LoadBalancer Services take theirs from. A range left empty allocates
+	// nothing, and a Service that needs an address from it is refused. They do
+	// not overlap, and every API server of a cell is given the same two.
+	ServiceClusterIPRange, LoadBalancerPool string
 }
 
 // The authorization modes of ADR 0008, Decision 2.
@@ -93,6 +102,8 @@ func ParseConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.EtcdCA, "etcd-ca-file", "", "PEM file of the CA that signs etcd's certificate; given with etcd-cert-file and etcd-key-file")
 	fs.StringVar(&cfg.EtcdCert, "etcd-cert-file", "", "PEM file of the client certificate presented to etcd; given with etcd-ca-file and etcd-key-file")
 	fs.StringVar(&cfg.EtcdKey, "etcd-key-file", "", "PEM file of the client certificate's key; given with etcd-ca-file and etcd-cert-file")
+	fs.StringVar(&cfg.ServiceClusterIPRange, "service-cluster-ip-range", "", "CIDR Service cluster IPs are allocated from, a virtual prefix; the same on every API server")
+	fs.StringVar(&cfg.LoadBalancerPool, "load-balancer-pool", "", "CIDR of LAN addresses LoadBalancer Services are allocated from; the same on every API server, and not overlapping service-cluster-ip-range")
 	fs.DurationVar(&cfg.DialTimeout, "etcd-dial-timeout", 5*time.Second, "time allowed to reach etcd at start")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -130,6 +141,9 @@ func ParseConfig(args []string) (Config, error) {
 	if err := cfg.validateTokenSigning(); err != nil {
 		return Config{}, err
 	}
+	if _, err := cfg.ranges(); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 
@@ -155,4 +169,36 @@ func (c Config) validateTokenSigning() error {
 		return fmt.Errorf("service-account-issuer %q is not an https URL of a host, with no path, query or fragment", c.ServiceAccountIssuer)
 	}
 	return nil
+}
+
+// ranges parses the two address ranges. A range is a CIDR in canonical form,
+// with no host bits, of global unicast addresses, and the two do not overlap,
+// because an address of both would be held by a service and a LAN host at once.
+func (c Config) ranges() (resourceapi.Ranges, error) {
+	var r resourceapi.Ranges
+	var err error
+	if r.ClusterIP, err = parseRange("service-cluster-ip-range", c.ServiceClusterIPRange); err != nil {
+		return resourceapi.Ranges{}, err
+	}
+	if r.LoadBalancer, err = parseRange("load-balancer-pool", c.LoadBalancerPool); err != nil {
+		return resourceapi.Ranges{}, err
+	}
+	if r.ClusterIP.IsValid() && r.LoadBalancer.IsValid() && r.ClusterIP.Overlaps(r.LoadBalancer) {
+		return resourceapi.Ranges{}, fmt.Errorf("service-cluster-ip-range %s and load-balancer-pool %s overlap", r.ClusterIP, r.LoadBalancer)
+	}
+	return r, nil
+}
+
+func parseRange(flag, text string) (netip.Prefix, error) {
+	if text == "" {
+		return netip.Prefix{}, nil
+	}
+	p, err := netip.ParsePrefix(text)
+	if err != nil || p.Addr().Zone() != "" || p.Masked() != p {
+		return netip.Prefix{}, fmt.Errorf("%s %q is not a CIDR in canonical form with no host bits", flag, text)
+	}
+	if !p.Addr().IsGlobalUnicast() {
+		return netip.Prefix{}, fmt.Errorf("%s %q does not hold global unicast addresses", flag, text)
+	}
+	return p, nil
 }

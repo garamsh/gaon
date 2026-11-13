@@ -161,3 +161,48 @@ func TestRun_FailsWithoutEtcd(t *testing.T) {
 
 	assert.Error(t, err)
 }
+
+func TestParseConfig_AddressRangeFlags(t *testing.T) {
+	cfg, err := apiserver.ParseConfig([]string{"-service-cluster-ip-range", "10.96.0.0/12", "-load-balancer-pool", "192.168.50.0/28"})
+	require.NoError(t, err)
+	assert.Equal(t, "10.96.0.0/12", cfg.ServiceClusterIPRange)
+	assert.Equal(t, "192.168.50.0/28", cfg.LoadBalancerPool)
+
+	cfg, err = apiserver.ParseConfig(nil)
+	require.NoError(t, err)
+	assert.Empty(t, cfg.ServiceClusterIPRange, "control: a range not given stays empty")
+	assert.Empty(t, cfg.LoadBalancerPool)
+}
+
+func TestParseConfig_RefusesARangeThatIsNotOneAndTwoThatOverlap(t *testing.T) {
+	for name, args := range map[string][]string{
+		"not a CIDR":           {"-service-cluster-ip-range", "10.96.0.0"},
+		"host bits":            {"-load-balancer-pool", "192.168.50.5/28"},
+		"loopback":             {"-service-cluster-ip-range", "127.0.0.0/8"},
+		"link-local":           {"-load-balancer-pool", "169.254.0.0/16"},
+		"identical":            {"-service-cluster-ip-range", "10.96.0.0/12", "-load-balancer-pool", "10.96.0.0/12"},
+		"pool inside prefix":   {"-service-cluster-ip-range", "10.96.0.0/12", "-load-balancer-pool", "10.97.0.0/24"},
+		"prefix inside pool":   {"-service-cluster-ip-range", "192.168.50.0/28", "-load-balancer-pool", "192.168.0.0/16"},
+		"overlap, IPv6 ranges": {"-service-cluster-ip-range", "fd00:1::/64", "-load-balancer-pool", "fd00:1::/96"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := apiserver.ParseConfig(args)
+			assert.Error(t, err)
+		})
+	}
+	_, err := apiserver.ParseConfig([]string{"-service-cluster-ip-range", "10.96.0.0/12", "-load-balancer-pool", "192.168.50.0/28"})
+	assert.NoError(t, err, "control: two ranges that do not overlap")
+	_, err = apiserver.ParseConfig([]string{"-service-cluster-ip-range", "10.96.0.0/12", "-load-balancer-pool", "fd00:1::/64"})
+	assert.NoError(t, err, "control: ranges of two families do not overlap")
+}
+
+func TestRun_RefusesOverlappingRangesAtStart(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	cfg := apiserver.Config{Endpoints: []string{"http://127.0.0.1:1"}, DialTimeout: time.Second, ServiceClusterIPRange: "10.96.0.0/12", LoadBalancerPool: "10.96.1.0/24"}
+
+	err = apiserver.Run(context.Background(), cfg, ln, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	assert.ErrorContains(t, err, "overlap")
+}
