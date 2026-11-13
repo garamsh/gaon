@@ -24,9 +24,14 @@ type fakeVolumes struct {
 	volumes map[string]api.Volume
 
 	statuses []api.VolumeStatus
+
+	snapshots        map[string]api.VolumeSnapshot
+	snapshotStatuses []api.VolumeSnapshotStatus
 }
 
-func newFakeVolumes() *fakeVolumes { return &fakeVolumes{volumes: map[string]api.Volume{}} }
+func newFakeVolumes() *fakeVolumes {
+	return &fakeVolumes{volumes: map[string]api.Volume{}, snapshots: map[string]api.VolumeSnapshot{}}
+}
 
 // SetVolume stores v under a new version, as a user or a binding does.
 func (f *fakeVolumes) SetVolume(v api.Volume) {
@@ -129,6 +134,97 @@ func (f *fakeVolumes) Statuses() []api.VolumeStatus {
 	return slices.Clone(f.statuses)
 }
 
+// SetSnapshot stores s under a new version, as a user or a provisioner does.
+func (f *fakeVolumes) SetSnapshot(s api.VolumeSnapshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rev++
+	s.Metadata.ResourceVersion = api.ResourceVersion(strconv.Itoa(f.rev))
+	f.snapshots[s.Metadata.Name] = s
+}
+
+// Snapshot returns the stored VolumeSnapshot name, and whether it exists.
+func (f *fakeVolumes) Snapshot(name string) (api.VolumeSnapshot, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.snapshots[name]
+	return s, ok
+}
+
+// MarkSnapshotDeleting sets deletionTimestamp on the VolumeSnapshot name.
+func (f *fakeVolumes) MarkSnapshotDeleting(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s := f.snapshots[name]
+	now := time.Now().UTC()
+	s.Metadata.DeletionTimestamp = &now
+	f.rev++
+	s.Metadata.ResourceVersion = api.ResourceVersion(strconv.Itoa(f.rev))
+	f.snapshots[name] = s
+}
+
+// SnapshotStatuses returns every status written through
+// PutVolumeSnapshotStatus, in order.
+func (f *fakeVolumes) SnapshotStatuses() []api.VolumeSnapshotStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.snapshotStatuses)
+}
+
+func (f *fakeVolumes) ListVolumeSnapshots(context.Context) (*api.VolumeSnapshotList, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	list := &api.VolumeSnapshotList{Items: []api.VolumeSnapshot{}}
+	for _, s := range f.snapshots {
+		list.Items = append(list.Items, s)
+	}
+	slices.SortFunc(list.Items, func(a, b api.VolumeSnapshot) int { return strings.Compare(a.Metadata.Name, b.Metadata.Name) })
+	return list, nil
+}
+
+// PutVolumeSnapshot changes the finalizers of a VolumeSnapshot and nothing
+// else, and removes one being deleted when its last finalizer goes.
+func (f *fakeVolumes) PutVolumeSnapshot(_ context.Context, next *api.VolumeSnapshot) (*api.VolumeSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.snapshots[next.Metadata.Name]
+	if !ok {
+		return nil, api.ErrNotFound
+	}
+	if s.Metadata.ResourceVersion != next.Metadata.ResourceVersion {
+		return nil, api.ErrConflict
+	}
+	f.rev++
+	s.Metadata.ResourceVersion = api.ResourceVersion(strconv.Itoa(f.rev))
+	s.Metadata.Finalizers = next.Metadata.Finalizers
+	if s.Metadata.DeletionTimestamp != nil && len(s.Metadata.Finalizers) == 0 {
+		delete(f.snapshots, s.Metadata.Name)
+		return &s, nil
+	}
+	f.snapshots[s.Metadata.Name] = s
+	return &s, nil
+}
+
+// PutVolumeSnapshotStatus replaces the status of a VolumeSnapshot and nothing
+// else.
+func (f *fakeVolumes) PutVolumeSnapshotStatus(_ context.Context, next *api.VolumeSnapshot) (*api.VolumeSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.snapshots[next.Metadata.Name]
+	if !ok {
+		return nil, api.ErrNotFound
+	}
+	if s.Metadata.ResourceVersion != next.Metadata.ResourceVersion {
+		return nil, api.ErrConflict
+	}
+	f.rev++
+	s.Metadata.ResourceVersion = api.ResourceVersion(strconv.Itoa(f.rev))
+	s.Status = next.Status
+	f.snapshots[s.Metadata.Name] = s
+	f.snapshotStatuses = append(f.snapshotStatuses, s.Status)
+	return &s, nil
+}
+
 // fakeDisks is the disk calls of mvmd's runtime API held in memory: a disk is
 // held by at most one machine, and one a machine holds cannot be deleted.
 type fakeDisks struct {
@@ -139,10 +235,106 @@ type fakeDisks struct {
 	resizeFailure v1alpha2.OutcomeKind
 	onResize      func()
 	machines      map[string][]string
+
+	snapshots       map[string]*v1alpha2.DiskSnapshot
+	snapshotFailure v1alpha2.OutcomeKind
+	onSnapshot      func()
+	deleteFailure   v1alpha2.OutcomeKind
 }
 
 func newFakeDisks() *fakeDisks {
-	return &fakeDisks{disks: map[string]*v1alpha2.Disk{}, machines: map[string][]string{}}
+	return &fakeDisks{disks: map[string]*v1alpha2.Disk{}, machines: map[string][]string{}, snapshots: map[string]*v1alpha2.DiskSnapshot{}}
+}
+
+// FailDiskSnapshotsWith makes every SnapshotDisk fail with an error of kind,
+// until it is called with OUTCOME_KIND_UNSPECIFIED.
+func (f *fakeDisks) FailDiskSnapshotsWith(kind v1alpha2.OutcomeKind) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.snapshotFailure = kind
+}
+
+// FailSnapshotDeletesWith makes every DeleteDiskSnapshot fail with an error of
+// kind, until it is called with OUTCOME_KIND_UNSPECIFIED.
+func (f *fakeDisks) FailSnapshotDeletesWith(kind v1alpha2.OutcomeKind) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deleteFailure = kind
+}
+
+// OnSnapshot sets fn to run at the start of every SnapshotDisk, before it
+// answers.
+func (f *fakeDisks) OnSnapshot(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onSnapshot = fn
+}
+
+// AddSnapshot makes a disk snapshot, without recording a call.
+func (f *fakeDisks) AddSnapshot(id, diskID string, sizeBytes uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.snapshots[id] = &v1alpha2.DiskSnapshot{Id: id, DiskId: diskID, SizeBytes: sizeBytes}
+}
+
+// DiskSnapshot returns a copy of the disk snapshot id, and whether mvmd holds
+// it.
+func (f *fakeDisks) DiskSnapshot(id string) (*v1alpha2.DiskSnapshot, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	d, ok := f.snapshots[id]
+	if !ok {
+		return nil, false
+	}
+	return proto.Clone(d).(*v1alpha2.DiskSnapshot), true
+}
+
+// SnapshotDisk copies the disk as it is, once per snapshot identifier: a repeat
+// makes nothing again.
+func (f *fakeDisks) SnapshotDisk(_ context.Context, r *v1alpha2.SnapshotDiskRequest, _ ...grpc.CallOption) (*v1alpha2.SnapshotDiskResponse, error) {
+	f.mu.Lock()
+	fn := f.onSnapshot
+	f.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "SnapshotDisk "+r.GetDiskId()+" "+r.GetSnapshotId()+" "+r.GetRequestId())
+	if f.snapshotFailure != v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED {
+		return nil, v1alpha2.NewError(f.snapshotFailure, "mvmd refuses the snapshot")
+	}
+	d, ok := f.disks[r.GetDiskId()]
+	if !ok {
+		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such disk")
+	}
+	if _, ok := f.snapshots[r.GetSnapshotId()]; !ok {
+		f.snapshots[r.GetSnapshotId()] = &v1alpha2.DiskSnapshot{Id: r.GetSnapshotId(), DiskId: d.Id, SizeBytes: d.SizeBytes}
+	}
+	return &v1alpha2.SnapshotDiskResponse{DiskSnapshot: proto.Clone(f.snapshots[r.GetSnapshotId()]).(*v1alpha2.DiskSnapshot)}, nil
+}
+
+func (f *fakeDisks) ListDiskSnapshots(context.Context, *v1alpha2.ListDiskSnapshotsRequest, ...grpc.CallOption) (*v1alpha2.ListDiskSnapshotsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := &v1alpha2.ListDiskSnapshotsResponse{}
+	for _, d := range f.snapshots {
+		out.DiskSnapshots = append(out.DiskSnapshots, proto.Clone(d).(*v1alpha2.DiskSnapshot))
+	}
+	slices.SortFunc(out.DiskSnapshots, func(a, b *v1alpha2.DiskSnapshot) int { return strings.Compare(a.Id, b.Id) })
+	return out, nil
+}
+
+// DeleteDiskSnapshot removes the snapshot; an absent one succeeds.
+func (f *fakeDisks) DeleteDiskSnapshot(_ context.Context, r *v1alpha2.DeleteDiskSnapshotRequest, _ ...grpc.CallOption) (*v1alpha2.DeleteDiskSnapshotResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "DeleteDiskSnapshot "+r.GetSnapshotId())
+	if f.deleteFailure != v1alpha2.OutcomeKind_OUTCOME_KIND_UNSPECIFIED {
+		return nil, v1alpha2.NewError(f.deleteFailure, "a call is using the snapshot")
+	}
+	delete(f.snapshots, r.GetSnapshotId())
+	return &v1alpha2.DeleteDiskSnapshotResponse{}, nil
 }
 
 // Calls returns the disk calls made, as "<Call> <disk id>".

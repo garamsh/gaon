@@ -74,6 +74,9 @@ type Disks interface {
 	ListDisks(ctx context.Context, in *v1alpha2.ListDisksRequest, opts ...grpc.CallOption) (*v1alpha2.ListDisksResponse, error)
 	DeleteDisk(ctx context.Context, in *v1alpha2.DeleteDiskRequest, opts ...grpc.CallOption) (*v1alpha2.DeleteDiskResponse, error)
 	ResizeDisk(ctx context.Context, in *v1alpha2.ResizeDiskRequest, opts ...grpc.CallOption) (*v1alpha2.ResizeDiskResponse, error)
+	SnapshotDisk(ctx context.Context, in *v1alpha2.SnapshotDiskRequest, opts ...grpc.CallOption) (*v1alpha2.SnapshotDiskResponse, error)
+	ListDiskSnapshots(ctx context.Context, in *v1alpha2.ListDiskSnapshotsRequest, opts ...grpc.CallOption) (*v1alpha2.ListDiskSnapshotsResponse, error)
+	DeleteDiskSnapshot(ctx context.Context, in *v1alpha2.DeleteDiskSnapshotRequest, opts ...grpc.CallOption) (*v1alpha2.DeleteDiskSnapshotResponse, error)
 }
 
 // Sleeper waits, for the loop's period.
@@ -103,19 +106,21 @@ func (SystemSleeper) Sleep(ctx context.Context, d time.Duration) error {
 // MicroVM names and writes the Volume's attachment; Run keeps each Volume's
 // phase and capacity, grows the disk of a Volume whose storage is above its
 // capacity, and deletes the disk of a Volume being deleted that no
-// MicroVM holds.
+// MicroVM holds and no unfinished VolumeSnapshot waits for. Run also takes
+// and deletes the VolumeSnapshots of those Volumes (snapshot.go).
 type Local struct {
-	node    string
-	resync  time.Duration
-	volumes Volumes
-	runtime Disks
-	clk     Sleeper
-	log     *slog.Logger
+	node      string
+	resync    time.Duration
+	volumes   Volumes
+	snapshots Snapshots
+	runtime   Disks
+	clk       Sleeper
+	log       *slog.Logger
 }
 
 // NewLocal returns a Local for the Node node, reconciling every resync.
-func NewLocal(node string, resync time.Duration, volumes Volumes, runtime Disks, clk Sleeper, log *slog.Logger) *Local {
-	return &Local{node: node, resync: resync, volumes: volumes, runtime: runtime, clk: clk, log: log}
+func NewLocal(node string, resync time.Duration, volumes Volumes, snapshots Snapshots, runtime Disks, clk Sleeper, log *slog.Logger) *Local {
+	return &Local{node: node, resync: resync, volumes: volumes, snapshots: snapshots, runtime: runtime, clk: clk, log: log}
 }
 
 func diskID(volume string) string { return "volume-" + volume }
@@ -278,19 +283,25 @@ func (l *Local) Run(ctx context.Context) {
 	}
 }
 
-// reconcile writes the status of each local Volume pinned to this Node and
-// deletes the disk and drops the finalizer of each such Volume being deleted
-// that no MicroVM holds. One Volume's failure does not stop the others.
+// reconcile takes and deletes the VolumeSnapshots of this Node's Volumes, then
+// writes the status of each local Volume pinned to this Node and deletes the
+// disk and drops the finalizer of each such Volume being deleted that no
+// MicroVM holds and no unfinished snapshot waits for. One object's failure does
+// not stop the others.
 func (l *Local) reconcile(ctx context.Context) error {
 	list, err := l.volumes.ListVolumes(ctx)
 	if err != nil {
 		return fmt.Errorf("list volumes: %w", err)
 	}
+	snapshots, err := l.snapshots.ListVolumeSnapshots(ctx)
+	if err != nil {
+		return fmt.Errorf("list volume snapshots: %w", err)
+	}
 	disks, err := l.listDisks(ctx)
 	if err != nil {
 		return err
 	}
-	var errs []error
+	errs := l.reconcileSnapshots(ctx, list.Items, snapshots.Items)
 	for i := range list.Items {
 		v := &list.Items[i]
 		if v.Spec.StorageClass != api.StorageClassLocal || v.Spec.NodeName != l.node {
@@ -298,7 +309,7 @@ func (l *Local) reconcile(ctx context.Context) error {
 		}
 		var err error
 		if v.Metadata.DeletionTimestamp != nil {
-			err = l.finish(ctx, v, disks)
+			err = l.finish(ctx, v, disks, snapshots.Items)
 		} else {
 			err = l.sync(ctx, v, disks)
 		}
@@ -431,10 +442,17 @@ func compareQuantity(a, b api.Quantity) (int, error) {
 }
 
 // finish deletes the disk of the deleting v and removes the agent's finalizer,
-// changing no other entry, once mvmd holds the disk for no MicroVM. A disk
-// still held keeps both.
-func (l *Local) finish(ctx context.Context, v *api.Volume, disks map[string]*v1alpha2.Disk) error {
+// changing no other entry, once mvmd holds the disk for no MicroVM, no
+// VolumeSnapshot of v is waiting to be taken, and none carries the agent's
+// finalizer without a status.nodeName: no other Node may delete that one, and
+// v's pin is how this Node still does. A disk still held keeps both.
+func (l *Local) finish(ctx context.Context, v *api.Volume, disks map[string]*v1alpha2.Disk, snapshots []api.VolumeSnapshot) error {
 	if !slices.Contains(v.Metadata.Finalizers, api.NodeAgentFinalizer) {
+		return nil
+	}
+	if slices.ContainsFunc(snapshots, func(s api.VolumeSnapshot) bool {
+		return s.Spec.VolumeName == v.Metadata.Name && (snapshotWaiting(&s) || unplaced(&s))
+	}) {
 		return nil
 	}
 	id := diskID(v.Metadata.Name)

@@ -86,6 +86,7 @@ func newServer() (*Server, *http.ServeMux) {
 	mux.HandleFunc("GET /volumes/{name}", s.getVolume)
 	mux.HandleFunc("PUT /volumes/{name}", s.putVolume)
 	mux.HandleFunc("PUT /volumes/{name}/status", s.putVolumeStatus)
+	mux.HandleFunc("GET /volumesnapshots", s.listVolumeSnapshots)
 	mux.HandleFunc("GET /secrets/{name}", s.getSecret)
 	mux.HandleFunc("GET /configmaps/{name}", s.getConfigMap)
 	mux.HandleFunc("GET /networkpolicies", s.listNetworkPolicies)
@@ -273,6 +274,18 @@ func (s *Server) record(t api.EventType, m *api.MicroVM) {
 	s.log = append(s.log, logged{rev: s.rev, event: ev})
 	close(s.changed)
 	s.changed = make(chan struct{})
+}
+
+// listVolumeSnapshots serves the list the local storage plugin reads at each
+// resync. The fake holds no VolumeSnapshot, so the list is empty.
+func (s *Server) listVolumeSnapshots(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	writeJSON(w, http.StatusOK, api.VolumeSnapshotList{
+		TypeMeta: api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindVolumeSnapshotList},
+		Metadata: api.ListMeta{ResourceVersion: version(s.rev)},
+		Items:    []api.VolumeSnapshot{},
+	})
 }
 
 func version(rev int64) api.ResourceVersion { return api.ResourceVersion(strconv.FormatInt(rev, 10)) }
