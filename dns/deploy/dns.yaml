@@ -9,6 +9,10 @@
 # which the Node Agent writes into each MicroVM, so the ClusterRole below is
 # everything it is allowed. The Service requests the address naru writes to
 # every Node's mvmd as `network.resolvers`.
+#
+# The unit listens on 1053, not 53, because it runs as uid 65532 and a guest
+# kernel's net.ipv4.ip_unprivileged_port_start is 1024 by default; the Service
+# serves port 53 and maps it to the MicroVM's named port.
 apiVersion: compute.gaon.garam.sh/v1alpha1
 kind: ServiceAccount
 metadata:
@@ -60,14 +64,14 @@ spec:
       - -zone=cluster.local
       - -upstream=<upstream resolver address>
     ports:
-      - {name: dns-udp, port: 53, protocol: UDP}
-      - {name: dns-tcp, port: 53, protocol: TCP}
+      - {name: dns-udp, port: 1053, protocol: UDP}
+      - {name: dns-tcp, port: 1053, protocol: TCP}
     files:
       - {path: /etc/gaon/dns/ca.crt, mode: 0444, valueFrom: {configMapKeyRef: {name: gaon-dns-ca, key: ca.crt}}}
     serviceAccountName: gaon-dns
     readinessProbe:
       tcpSocket:
-        port: 53
+        port: 1053
     resources:
       requests: {cpu: 100m, memory: 64Mi}
       limits: {memory: 128Mi}
@@ -82,5 +86,5 @@ spec:
   selector:
     gaon.garam.sh/app: gaon-dns
   ports:
-    - {name: dns-udp, protocol: UDP, port: 53}
-    - {name: dns-tcp, protocol: TCP, port: 53}
+    - {name: dns-udp, protocol: UDP, port: 53, targetPort: dns-udp}
+    - {name: dns-tcp, protocol: TCP, port: 53, targetPort: dns-tcp}
