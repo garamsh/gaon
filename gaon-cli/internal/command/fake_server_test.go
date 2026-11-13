@@ -23,6 +23,7 @@ var listKinds = map[string]string{
 	"leases":   api.KindLeaseList,
 	"volumes":  "VolumeList",
 
+	"storageclasses":  api.KindStorageClassList,
 	"secrets":         api.KindSecretList,
 	"configmaps":      api.KindConfigMapList,
 	"serviceaccounts": api.KindServiceAccountList,

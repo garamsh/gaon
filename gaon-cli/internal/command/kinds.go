@@ -185,6 +185,30 @@ var kinds = []kind{
 		put:      (*api.Client).PutVolume,
 		del:      (*api.Client).DeleteVolume,
 	}.kind(),
+	spec[api.StorageClass, api.StorageClassList]{
+		name:       "storageclass",
+		plural:     "storageclasses",
+		group:      api.Group,
+		apiKind:    api.KindStorageClass,
+		collection: "/storageclasses",
+		header:     []string{"NAME", "PROVISIONER", "ALLOW-VOLUME-EXPANSION"},
+		row: func(c *api.StorageClass) []string {
+			return []string{c.Metadata.Name, c.Provisioner, strconv.FormatBool(c.AllowVolumeExpansion)}
+		},
+		details: func(c *api.StorageClass) []detail {
+			return []detail{
+				{"Provisioner", c.Provisioner},
+				{"Allow volume expansion", strconv.FormatBool(c.AllowVolumeExpansion)},
+			}
+		},
+		items:    func(l *api.StorageClassList) []api.StorageClass { return l.Items },
+		meta:     func(c *api.StorageClass) *api.ObjectMeta { return &c.Metadata },
+		validate: (*api.StorageClass).Validate,
+		get:      (*api.Client).GetStorageClass,
+		list:     (*api.Client).ListStorageClasses,
+		put:      (*api.Client).PutStorageClass,
+		del:      (*api.Client).DeleteStorageClass,
+	}.kind(),
 	spec[api.CertificateSigningRequest, api.CertificateSigningRequestList]{
 		name:       "certificatesigningrequest",
 		plural:     "certificatesigningrequests",
