@@ -47,19 +47,20 @@ type CSRCreate struct {
 }
 
 type tlsState struct {
-	clk      clock.Clock
-	caCert   *x509.Certificate
-	caKey    *ecdsa.PrivateKey
-	caFile   string
-	srv      *httptest.Server
-	tokens   map[string]bool
-	seen     []Seen
-	creates  []CSRCreate
-	gets     int
-	validity time.Duration
-	deny     string
-	hold     bool
-	pending  []string
+	clk        clock.Clock
+	caCert     *x509.Certificate
+	caKey      *ecdsa.PrivateKey
+	caFile     string
+	srv        *httptest.Server
+	tokens     map[string]bool
+	seen       []Seen
+	creates    []CSRCreate
+	gets       int
+	validity   time.Duration
+	deny       string
+	clientOnly bool
+	hold       bool
+	pending    []string
 }
 
 // NewTLS starts a fake that serves TLS 1.3 and acts as the API server and the
@@ -132,6 +133,14 @@ func (s *Server) SetSigning(validity time.Duration) {
 	s.tls.validity, s.tls.deny = validity, ""
 }
 
+// SignClientAuthOnly makes the signer ignore the extended key usage a request
+// asks for and sign client auth alone, as a signer from before ADR 0043 does.
+func (s *Server) SignClientAuthOnly() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tls.clientOnly = true
+}
+
 // DenyRequests makes the signer deny each request decided from now on, with
 // reason.
 func (s *Server) DenyRequests(reason string) {
@@ -198,6 +207,13 @@ func (s *Server) IssueFor(t testing.TB, subject pkix.Name, notBefore, notAfter t
 	require.NoError(t, err)
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
 		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+}
+
+func (s *Server) usages(csr *x509.CertificateRequest) []x509.ExtKeyUsage {
+	if s.tls.clientOnly {
+		return []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+	}
+	return requestedUsages(csr)
 }
 
 // requestedUsages returns the extended key usage csr asks for: client auth
@@ -329,7 +345,7 @@ func (s *Server) decide(name string) {
 	} else {
 		block, _ := pem.Decode([]byte(r.Spec.Request))
 		csr, _ := x509.ParseCertificateRequest(block.Bytes)
-		der, err := s.sign(csr.Subject, csr.PublicKey, now, now.Add(s.tls.validity), requestedUsages(csr)...)
+		der, err := s.sign(csr.Subject, csr.PublicKey, now, now.Add(s.tls.validity), s.usages(csr)...)
 		if err != nil {
 			panic(err)
 		}

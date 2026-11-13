@@ -24,6 +24,7 @@ import (
 
 	"github.com/garamsh/gaon/lib/api"
 	nodeagent "github.com/garamsh/gaon/node-agent"
+	"github.com/garamsh/gaon/node-agent/internal/certificate"
 	"github.com/garamsh/gaon/node-agent/internal/clock"
 	"github.com/garamsh/gaon/node-agent/internal/fakegaon"
 	"github.com/garamsh/gaon/node-agent/internal/fakemvmd"
@@ -92,6 +93,25 @@ func apiServerClient(t *testing.T, gaon *fakegaon.Server) *http.Client {
 			return err
 		},
 	}}}
+}
+
+// awaitStatusWritten waits for the agent's first write of the Node's status,
+// the write that carries the addresses and the port when it writes them: the
+// Ready condition is set by that write and by no other.
+func awaitStatusWritten(t *testing.T, gaon *fakegaon.Server) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		n, ok := gaon.Node("n1")
+		if !ok {
+			return false
+		}
+		for _, c := range n.Status.Conditions {
+			if c.Type == api.NodeReady && c.Status == api.ConditionTrue {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 5*time.Millisecond, "the agent wrote the Node's status")
 }
 
 func boundMicroVM() api.MicroVM {
@@ -192,11 +212,12 @@ func TestRun_ServesWithAnOperatorCertificateOnlyWhenItCarriesServerAuth(t *testi
 		certFile, keyFile := operatorFiles(t, gaon, x509.ExtKeyUsageClientAuth)
 		logs := startAgentLogging(t, operatorConfig(t, gaon, mvmd, certFile, keyFile, port), clk)
 
-		require.Eventually(t, func() bool { _, ok := gaon.Node("n1"); return ok }, 5*time.Second, 10*time.Millisecond)
+		awaitStatusWritten(t, gaon)
 		require.Eventually(t, func() bool { return strings.Contains(logs.String(), "does not serve") }, 5*time.Second, 10*time.Millisecond)
 		assert.Contains(t, logs.String(), "server auth")
 		n, _ := gaon.Node("n1")
 		assert.Zero(t, n.Status.AgentPort, "a port nothing listens on is not written")
+		assert.Equal(t, []string{"127.0.0.1"}, n.Status.Addresses, "the addresses are")
 		_, err := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), &tls.Config{InsecureSkipVerify: true}) //nolint:gosec // only to see whether anything listens
 		var op *net.OpError
 		assert.True(t, errors.As(err, &op), "nothing listens on the port: %v", err)
@@ -227,9 +248,43 @@ func TestRun_WithoutAnAddressTheAgentDoesNotServeAndSaysNothingOfIt(t *testing.T
 	require.NoError(t, err)
 	logs := startAgentLogging(t, cfg, clk)
 
-	require.Eventually(t, func() bool { _, ok := gaon.Node("n1"); return ok }, 5*time.Second, 10*time.Millisecond)
+	awaitStatusWritten(t, gaon)
 	n, _ := gaon.Node("n1")
 	assert.Zero(t, n.Status.AgentPort)
 	assert.Empty(t, n.Status.Addresses)
 	assert.NotContains(t, logs.String(), "does not serve")
+}
+
+// A Node bootstrapped before the agent asked for server auth holds a pair that
+// cannot serve: the agent that serves renews it at start.
+func TestRun_RenewsAtStartAHeldPairWithoutServerAuthAndThenServes(t *testing.T) {
+	clk := clock.System{}
+	gaon, mvmd := fakegaon.NewTLS(t, clk), fakemvmd.New(t, clk)
+	dir := filepath.Join(t.TempDir(), "certs")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	now := time.Now()
+	certPEM, keyPEM := gaon.Issue(t, "n1", now.Add(-time.Minute), now.Add(24*time.Hour))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, certificate.PairFile), append(certPEM, keyPEM...), 0o600))
+	port := freePort(t)
+	args := []string{
+		"--api-server", gaon.URL, "--mvmd-socket", mvmd.Socket, "--tls-ca", gaon.CAFile(), "--cert-dir", dir,
+		"--agent-addresses", "127.0.0.1", "--agent-port", strconv.Itoa(port),
+	}
+	cfg, err := nodeagent.ParseConfig(args, env(required), io.Discard)
+	require.NoError(t, err)
+	startAgentLogging(t, cfg, clk)
+	gaon.SetMicroVM(boundMicroVM())
+
+	require.Eventually(t, func() bool { return len(gaon.CSRCreates()) == 1 }, 5*time.Second, 10*time.Millisecond,
+		"the pair is a day old at most, and it is renewed at once")
+	require.Eventually(t, func() bool { return gaon.MicroVM("m1").Status.Phase == api.MicroVMRunning }, 5*time.Second, 10*time.Millisecond)
+	mvmd.AppendOutput("m1-e1", "entrypoint", v1alpha2.OutputStream_OUTPUT_STREAM_STDOUT, "hello\n")
+	require.Eventually(t, func() bool {
+		resp, err := apiServerClient(t, gaon).Get(logURL(port))
+		if err != nil {
+			return false
+		}
+		defer func() { _ = resp.Body.Close() }()
+		return resp.StatusCode == http.StatusOK
+	}, 5*time.Second, 20*time.Millisecond, "the renewed pair serves")
 }

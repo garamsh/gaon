@@ -25,6 +25,9 @@ type Params struct {
 	NodeName string
 	// Dir is the directory of the key and the certificate.
 	Dir string
+	// Serving is whether the agent serves with the pair. Then a pair without
+	// server auth is renewed at once, not at two thirds of its validity.
+	Serving bool
 }
 
 // Holder holds the pair the agent presents, so that a client built before

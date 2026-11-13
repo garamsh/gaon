@@ -1,12 +1,17 @@
 package guest
 
 import (
+	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/garamsh/gaon/lib/api"
@@ -28,7 +33,48 @@ func Handler(svc Service, log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /microvms/{name}/log", h.serveLog)
 	mux.HandleFunc("POST /microvms/{name}/exec", h.exec)
-	return mux
+	return h.recoverPanics(mux)
+}
+
+type traceKey struct{}
+
+// recoverPanics answers 500 where a handler panics, which net/http would
+// answer by closing the connection, and gives each request a trace id that its
+// log lines carry. A panic of http.ErrAbortHandler is the handler's way to cut
+// a response, and goes on.
+func (h *handler) recoverPanics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(context.WithValue(r.Context(), traceKey{}, newTraceID()))
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			if rec == http.ErrAbortHandler {
+				panic(rec)
+			}
+			h.logOf(r).Error("handler panicked", "method", r.Method, "path", r.URL.Path, "panic", rec)
+			w.Header().Set("Content-Type", "application/json")
+			e := api.NewAPIError(api.ReasonInternalError, "internal error")
+			w.WriteHeader(e.Code)
+			_ = json.NewEncoder(w).Encode(e)
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// logOf returns the logger of a request, which carries its trace id.
+func (h *handler) logOf(r *http.Request) *slog.Logger {
+	id, _ := r.Context().Value(traceKey{}).(string)
+	return h.log.With("trace_id", id)
+}
+
+func newTraceID() string {
+	var b [8]byte
+	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b[:])
 }
 
 type handler struct {
@@ -36,9 +82,19 @@ type handler struct {
 	log *slog.Logger
 }
 
-// target reads the query that names the Machine, and the parameters in allowed.
-func target(r *http.Request, allowed ...string) (Target, error) {
-	q := r.URL.Query()
+// query parses the raw query of r, refusing one that does not parse instead of
+// dropping the pairs that do not.
+func query(r *http.Request) (url.Values, error) {
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return nil, api.NewAPIError(api.ReasonInvalid, "the query is malformed: %v", err)
+	}
+	return q, nil
+}
+
+// target reads the query q that names the Machine of r, and the parameters in
+// allowed.
+func target(r *http.Request, q url.Values, allowed ...string) (Target, error) {
 	known := map[string]bool{"bindingEpoch": true, "uid": true}
 	for _, a := range allowed {
 		known[a] = true
@@ -63,9 +119,12 @@ func target(r *http.Request, allowed ...string) (Target, error) {
 }
 
 func (h *handler) serveLog(w http.ResponseWriter, r *http.Request) {
-	t, err := target(r, "follow", "tailBytes")
+	q, err := query(r)
+	var t Target
+	if err == nil {
+		t, err = target(r, q, "follow", "tailBytes")
+	}
 	req := LogRequest{Target: t}
-	q := r.URL.Query()
 	if err == nil && q.Has("follow") {
 		switch q.Get("follow") {
 		case "true":
@@ -97,7 +156,7 @@ func (h *handler) serveLog(w http.ResponseWriter, r *http.Request) {
 	// The status is sent: the only way left to tell the client the log is
 	// incomplete is to cut the response short.
 	if r.Context().Err() == nil {
-		h.log.Error("log read failed after the response began", "microvm", t.Name, "error", err)
+		h.logOf(r).Error("log read failed after the response began", "microvm", t.Name, "error", err)
 	}
 	panic(http.ErrAbortHandler)
 }
@@ -115,7 +174,11 @@ type execBody struct {
 const maxExecBody = 1 << 20
 
 func readExec(r *http.Request, w http.ResponseWriter) (ExecRequest, error) {
-	t, err := target(r)
+	q, err := query(r)
+	if err != nil {
+		return ExecRequest{}, err
+	}
+	t, err := target(r, q)
 	if err != nil {
 		return ExecRequest{}, err
 	}
@@ -162,9 +225,9 @@ func (h *handler) exec(w http.ResponseWriter, r *http.Request) {
 	if r.Context().Err() != nil {
 		return
 	}
-	h.log.Error("exec failed after the response began", "microvm", req.Name, "error", err)
+	h.logOf(r).Error("exec failed after the response began", "microvm", req.Name, "error", err)
 	if werr := out.fail(failureOf(err)); werr != nil {
-		h.log.Debug("the exec error line was not sent", "microvm", req.Name, "error", werr)
+		h.logOf(r).Debug("the exec error line was not sent", "microvm", req.Name, "error", werr)
 	}
 }
 
@@ -184,12 +247,12 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	e := failureOf(err)
 	var f *failure
 	if errors.As(err, &f) && f.cause != nil || e.Reason == api.ReasonInternalError {
-		h.log.Warn("request failed", "method", r.Method, "path", r.URL.Path, "error", err)
+		h.logOf(r).Warn("request failed", "method", r.Method, "path", r.URL.Path, "error", err)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(e.Code)
 	if werr := json.NewEncoder(w).Encode(e); werr != nil {
-		h.log.Debug("the error response was not sent", "error", werr)
+		h.logOf(r).Debug("the error response was not sent", "error", werr)
 	}
 }
 

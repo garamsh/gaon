@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -63,11 +64,12 @@ func (g *gate) waitSleep(t *testing.T) time.Duration {
 func (g *gate) proceed() { g.release <- struct{}{} }
 
 type rig struct {
-	clock  *gate
-	gaon   *fakegaon.Server
-	dir    string
-	holder *certificate.Holder
-	now    time.Time
+	serving bool
+	clock   *gate
+	gaon    *fakegaon.Server
+	dir     string
+	holder  *certificate.Holder
+	now     time.Time
 }
 
 func newRig(t *testing.T) *rig {
@@ -92,7 +94,7 @@ func (r *rig) service(t *testing.T, withToken bool) certificate.Service {
 		require.NoError(t, err)
 		bootstrap = api.NewClient(r.gaon.URL, bare, api.WithBearerToken(token))
 	}
-	return certificate.NewService(certificate.Params{NodeName: "n1", Dir: r.dir}, r.holder, bootstrap,
+	return certificate.NewService(certificate.Params{NodeName: "n1", Dir: r.dir, Serving: r.serving}, r.holder, bootstrap,
 		api.NewClient(r.gaon.URL, mtls), r.clock, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
@@ -426,4 +428,54 @@ func TestRun_ReplacesThePairFileByRenameSoAFileInUseIsNeverRewritten(t *testing.
 	entries, err := os.ReadDir(r.dir)
 	require.NoError(t, err)
 	assert.Len(t, entries, 1, "no temporary file is left")
+}
+
+// A pair issued before the agent asked for server auth cannot serve, and the
+// agent that serves does not wait months for its renewal.
+func TestRun_WhenServingRenewsAtOnceAPairWithoutServerAuthAndOtherwiseWaitsForTwoThirds(t *testing.T) {
+	tests := []struct {
+		name    string
+		serving bool
+	}{
+		{"serving renews at once", true},
+		{"not serving waits for two thirds", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newRig(t)
+			r.serving = tt.serving
+			r.gaon.SetSigning(9 * time.Hour)
+			certPEM, keyPEM := r.gaon.Issue(t, "n1", r.now.Add(-time.Hour), r.now.Add(8*time.Hour))
+			r.seed(t, certPEM, keyPEM)
+			svc := r.service(t, false)
+			require.NoError(t, svc.Start(context.Background()))
+			before := r.presented(t)
+			require.False(t, slices.Contains(before.ExtKeyUsage, x509.ExtKeyUsageServerAuth), "setup: the pair in use has client auth only")
+			run(t, svc)
+
+			if !tt.serving {
+				assert.Equal(t, 5*time.Hour, r.clock.waitSleep(t), "one of nine hours old, so five remain until the two thirds")
+				assert.Empty(t, r.gaon.CSRCreates())
+				return
+			}
+			assert.Equal(t, 6*time.Hour, r.clock.waitSleep(t), "renewed, the next is due two thirds on")
+			require.Len(t, r.gaon.CSRCreates(), 1)
+			assert.Contains(t, r.presented(t).ExtKeyUsage, x509.ExtKeyUsageServerAuth, "the pair now presented can serve")
+		})
+	}
+}
+
+func TestRun_WhenServingAndTheSignerIssuesNoServerAuthAsksAgainAfterAMinuteNotAtOnce(t *testing.T) {
+	r := newRig(t)
+	r.serving = true
+	r.gaon.SetSigning(9 * time.Hour)
+	r.gaon.SignClientAuthOnly()
+	certPEM, keyPEM := r.gaon.Issue(t, "n1", r.now.Add(-time.Hour), r.now.Add(8*time.Hour))
+	r.seed(t, certPEM, keyPEM)
+	svc := r.service(t, false)
+	require.NoError(t, svc.Start(context.Background()))
+	run(t, svc)
+
+	assert.Equal(t, time.Minute, r.clock.waitSleep(t), "a renewal that still cannot serve is not repeated without a wait")
+	assert.Len(t, r.gaon.CSRCreates(), 1)
 }

@@ -33,7 +33,7 @@ func connect(ctx context.Context, cfg Config, clk clock.Clock, log *slog.Logger)
 		}
 		bootstrap = api.NewClient(cfg.APIServer, tokenClient, api.WithBearerToken(cfg.BootstrapToken))
 	}
-	certs := certificate.NewService(certificate.Params{NodeName: cfg.NodeName, Dir: cfg.CertDir}, holder, bootstrap, client, clk, log)
+	certs := certificate.NewService(certificate.Params{NodeName: cfg.NodeName, Dir: cfg.CertDir, Serving: len(cfg.AgentAddresses) > 0}, holder, bootstrap, client, clk, log)
 	if err := certs.Start(ctx); err != nil {
 		return nil, nil, nil, fmt.Errorf("client certificate: %w", err)
 	}
