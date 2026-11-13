@@ -521,6 +521,19 @@ func TestVolumeValidateResizeRefusesAChangeOnADeletingVolume(t *testing.T) {
 	assert.ErrorIs(t, grown.ValidateResize(deleting, class), api.ErrConflict)
 }
 
+func TestVolumeValidateResizeAcceptsUnchangedStorageOnADeletingVolume(t *testing.T) {
+	deleting := resizeOld()
+	now := time.Now()
+	deleting.Metadata.DeletionTimestamp = &now
+
+	same := resizeOld()
+	assert.NoError(t, same.ValidateResize(deleting, nil), "an unchanged storage passes on a deleting volume, under any class")
+
+	grown := resizeOld()
+	grown.Spec.Storage = "20Gi"
+	assert.ErrorIs(t, grown.ValidateResize(deleting, newClass("local", "local", true)), api.ErrConflict, "control: a change of storage on the same volume is refused")
+}
+
 func TestVolumeValidateStatusChecksConditions(t *testing.T) {
 	v := newVolume("data")
 	v.Status.Phase = api.VolumeAvailable

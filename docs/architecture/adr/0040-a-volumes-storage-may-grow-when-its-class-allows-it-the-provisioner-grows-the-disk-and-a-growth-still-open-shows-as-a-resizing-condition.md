@@ -1,9 +1,9 @@
-# ADR 0040: A Volume's storage may grow when its class allows it, the plugin on its Node grows the disk, and a growth still open shows as a Resizing condition
+# ADR 0040: A Volume's storage may grow when its class allows it, the provisioner grows the disk, and a growth still open shows as a Resizing condition
 
 > Status: accepted
 > Date: 2026-11-13
 
-Drafted for garamsh/gaon#230, part of goal #117, whose decision D7 is the PM's. It changes [ADR 0013](./0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md) Decision 1, which made `spec` immutable and left resizing undesigned, and its list of what the first scope lacks, which named expansion. It keeps ADR 0013's writers and finalizer, and the plugin boundary of [ADR 0019](./0019-the-node-agent-reaches-its-network-and-storage-plugins-as-separate-processes-through-a-versioned-grpc-api-on-unix-sockets.md). The class a growth needs is [ADR 0041](./0041-a-storageclass-names-the-plugin-that-serves-its-volumes-says-whether-they-may-grow-and-the-local-class-is-one-the-api-server-creates.md)'s. This ADR is the contract; serving it in the API server, the node agent and `storage-local` are later issues of #117.
+Drafted for garamsh/gaon#230, part of goal #117, whose decision D7 is the PM's. It changes [ADR 0013](./0013-a-volume-is-created-through-its-own-path-a-local-volume-is-a-disk-its-nodes-agent-makes-and-a-binding-pins-it-to-a-node.md) Decision 1, which made `spec` immutable and left resizing undesigned, and its list of what the first scope lacks, which named expansion. It keeps ADR 0013's writers and finalizer, and the plugin boundary of [ADR 0019](./0019-the-node-agent-reaches-its-network-and-storage-plugins-as-separate-processes-through-a-versioned-grpc-api-on-unix-sockets.md). The class a growth needs is [ADR 0041](./0041-a-storageclass-names-the-provisioner-that-serves-its-volumes-says-whether-they-may-grow-and-the-local-class-is-one-the-api-server-creates.md)'s. This ADR is the contract; serving it in the API server, the node agent and `storage-local` are later issues of #117.
 
 ## Context
 
@@ -33,7 +33,7 @@ Drafted for garamsh/gaon#230, part of goal #117, whose decision D7 is the PM's. 
 
 ## Decision
 
-**`spec.storage` of a Volume may be raised by a user while the Volume's class allows expansion; the plugin that serves the class, on the Volume's Node, grows the disk through the class's provisioner and writes the new `status.capacity`; a growth that has not finished shows as a `Resizing` condition in `status`; a size below `status.capacity` is `Invalid`; and a growth the Node cannot make yet waits.**
+**`spec.storage` of a Volume may be raised by a user while the Volume's class allows expansion; the provisioner of the class grows the disk and writes the new `status.capacity`; a growth that has not finished shows as a `Resizing` condition in `status`; a size below `status.capacity` is `Invalid`; and a growth the Node cannot make yet waits.**
 
 1. **What may change.** In a `PUT /volumes/{name}` of an existing Volume, `spec.storage` may differ from the stored one, and no other field of `spec` may, `nodeName` included (ADR 0013 Decision 1 otherwise stands). The API server stamps a new `generation` for it as for any change of `spec`. The rules of the change are in item 3.
 2. **Who may change it.** Users, under the rule that lets them `update` Volumes: `gaon:admin`'s `*`, with no role added. A Node does not: its write to a Volume stays the finalizer entry only (ADR 0013 Decision 6), so a Node that changes `spec.storage` is refused as it is for any other change of `spec`. The plugin writes `status`, never `spec`.
@@ -43,19 +43,22 @@ Drafted for garamsh/gaon#230, part of goal #117, whose decision D7 is the PM's. 
    - **A Volume with `deletionTimestamp` set** refuses any change of `spec.storage` as `Conflict`, because its disk is being deleted, as it refuses a binding and an attach.
    - A size in another unit of the same amount is no change, and passes under any class.
    - Kubernetes' pages do not state the status of a refusal (Context), so this ADR chooses: `Invalid` for what the request asks and `Conflict` for the state of the Volume.
-4. **What grows the disk.** The plugin of the Volume's class, on the Volume's Node (for a class other than `local`, the Node whose MicroVM first used the Volume, [ADR 0041](./0041-a-storageclass-names-the-plugin-that-serves-its-volumes-says-whether-they-may-grow-and-the-local-class-is-one-the-api-server-creates.md) Decision 4), compares `spec.storage` with `status.capacity`. For `local` that is `storage-local`, which asks mvmd to `ResizeDisk` the Volume's disk to `spec.storage` bytes and then writes `status.capacity` through `PUT /volumes/{name}/status`. It acts when `spec.storage` is above `status.capacity` and at each resync until they are equal, so a repeat after a failure finishes the growth, which mvmd's equal-size rule allows. A Volume with no disk yet gets one of the current `spec.storage`. No call is added to the plugin API of ADR 0019: the plugin learns of a growth the way it learns of a Volume's creation and deletion, from the Volume it reads through the resource API as its Node.
+4. **What grows the disk.** The provisioner of the Volume's class compares `spec.storage` with `status.capacity` and, while the first is above the second, grows the disk and writes `status.capacity` through `PUT /volumes/{name}/status`.
+   - **`local`:** `storage-local`, on the Volume's Node under the Node's identity, asks mvmd to `ResizeDisk` the Volume's disk to `spec.storage` bytes. It acts at each resync until the two are equal, so a repeat after a failure finishes the growth, which mvmd's equal-size rule allows. A Volume with no disk yet gets one of the current `spec.storage`.
+   - **Any other class:** the cluster-side provisioner of [ADR 0041](./0041-a-storageclass-names-the-provisioner-that-serves-its-volumes-says-whether-they-may-grow-and-the-local-class-is-one-the-api-server-creates.md) Decision 4, under its own identity, grows the Volume however its storage system does and writes the same `status` fields.
+   - No call is added to the plugin API of ADR 0019: a provisioner learns of a growth from the Volume it reads through the resource API.
 5. **How a pending or refused growth shows.**
    - `status.capacity` is the size of the disk. A growth is open exactly while `spec.storage` is above it.
-   - While it is open the plugin keeps a condition in `status.conditions` of `type` `Resizing` and `status` `True`, with a `reason` and a `message`. The plugin removes it, in the status write that raises `status.capacity` to `spec.storage`. For `local` the reasons are:
-     - `InProgress`: the plugin has taken the request and has not finished it;
+   - While it is open the provisioner keeps a condition in `status.conditions` of `type` `Resizing` and `status` `True`, with a `reason` and a `message`. The provisioner removes it, in the status write that raises `status.capacity` to `spec.storage`. For `local` the reasons are:
+     - `InProgress`: the provisioner has taken the request and has not finished it;
      - `HolderNotResizable`: mvmd answered precondition failed (item 7);
      - `Failed`: mvmd answered with any other error, with its message in the condition's `message`; a size mvmd refuses, such as one that is not a multiple of 512 on Cloud Hypervisor, is one.
-   - A reason of another plugin is its own.
+   - A reason of another provisioner is its own.
    - Every state is retried at each resync, as Kubernetes retries a growth. The way out of a `Failed` request is to lower it (item 3).
    - **`status.phase` does not change.** `Failed` is for a disk that cannot be made, and a disk whose growth failed is still the disk the Machines use.
-6. **What a shrink returns.** `Invalid`, with the message naming `status.capacity`, from the API server on the write (item 3). No plugin ever sees a request below its disk, since `spec.storage` cannot fall below `status.capacity`. The one disk size a plugin could read as smaller is one it made larger than a lowered `spec.storage`, and it does nothing for that: mvmd answers a smaller size as invalid and an equal one as no change, and the plugin calls only when `spec.storage` is above `status.capacity`.
+6. **What a shrink returns.** `Invalid`, with the message naming `status.capacity`, from the API server on the write (item 3). No provisioner ever sees a request below its disk, since `spec.storage` cannot fall below `status.capacity`. The one disk size a plugin could read as smaller is one it made larger than a lowered `spec.storage`, and it does nothing for that: mvmd answers a smaller size as invalid and an equal one as no change, and the plugin calls only when `spec.storage` is above `status.capacity`.
 7. **A Driver without live resize while the Volume is attached.** The API server cannot see a Node's Driver, so it does not refuse the growth; the Node does not yet do it.
-   - mvmd's answer for a disk that a Running Machine holds, on a Driver without `CAPABILITY_DISK_RESIZE`, and for a Paused or Faulted holder, is precondition failed. The plugin shows `Resizing` with the reason `HolderNotResizable` and tries again at each resync.
+   - mvmd's answer for a disk that a Running Machine holds, on a Driver without `CAPABILITY_DISK_RESIZE`, and for a Paused or Faulted holder, is precondition failed. storage-local shows `Resizing` with the reason `HolderNotResizable` and tries again at each resync.
    - The growth completes when the holder is Created or Stopped, or when no Machine holds the disk, because mvmd then grows the file offline. On a Driver that reports the capability it completes at once, with the Machine running.
    - Nothing stops a Machine to make a growth possible. A workload's run state is the user's.
    - After an offline growth `status.capacity` reports the grown device, and the filesystem follows at the Machine's next Start, as mvmd's ADR 0055 says. gaon does not show that interval.
@@ -80,6 +83,6 @@ Drafted for garamsh/gaon#230, part of goal #117, whose decision D7 is the PM's. 
 
 - Users lower a pending request to cancel it far more often than they grow, and ask for a cancel that does not depend on the capacity.
 - Volumes stay `HolderNotResizable` on Firecracker for long, and users ask for the API server to refuse what the Node cannot do, or for the agent to stop the Machine.
-- A plugin other than `local` needs the agent to tell it of a growth, because it cannot read the Volume.
+- A provisioner needs to be told of a growth by something other than the Volume it reads.
 - Plugins report states that the three reasons and the condition's message cannot carry.
 - Users ask where the filesystem is, because a Machine they read `status.capacity` from has a smaller one.

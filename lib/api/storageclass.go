@@ -8,11 +8,11 @@ const (
 	KindStorageClassList = "StorageClassList"
 )
 
-// provisionerPattern is the form of a provisioner: the name of the storage
-// plugin that serves the class, as a plugin's socket is named.
+// provisionerPattern is the form of a provisioner: the name of the extension
+// that serves the class.
 var provisionerPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
-// StorageClass names the storage plugin that serves the Volumes of a class,
+// StorageClass names the provisioner that serves the Volumes of a class,
 // and says whether their storage may grow. A Volume names its class by
 // spec.storageClass. It has no spec and no status: its fields are its own, as
 // those of a ClusterRole are.
@@ -31,7 +31,7 @@ type StorageClassList struct {
 }
 
 // Validate checks the identity of c and that its provisioner has the form of a
-// plugin name. The class named StorageClassLocal has the provisioner "local"
+// provisioner name. The class named StorageClassLocal has the provisioner "local"
 // and no other class has it, because Volume.Validate holds the rules of the
 // local class by that name.
 func (c *StorageClass) Validate() error {
@@ -39,7 +39,7 @@ func (c *StorageClass) Validate() error {
 		return err
 	}
 	if !provisionerPattern.MatchString(c.Provisioner) {
-		return invalid("provisioner is %q, want a plugin name matching %s", c.Provisioner, provisionerPattern)
+		return invalid("provisioner is %q, want a name matching %s", c.Provisioner, provisionerPattern)
 	}
 	if (c.Metadata.Name == StorageClassLocal) != (c.Provisioner == StorageClassLocal) {
 		return invalid("provisioner %q and name %q: the provisioner %q belongs to the class %q alone", c.Provisioner, c.Metadata.Name, StorageClassLocal, StorageClassLocal)
