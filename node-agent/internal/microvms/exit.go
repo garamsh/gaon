@@ -14,14 +14,18 @@ import (
 func (s *service) ended(ctx context.Context, id string, r *v1alpha2.Machine) (outcome, error) {
 	st := s.runOf(id)
 	if !st.exited {
-		failed, rec, err := s.classify(ctx, id, r, st.last)
+		failed, rec, err := s.judge(ctx, id, r, st)
 		if err != nil {
 			return outcome{runtime: r}, err
 		}
 		st.exited, st.failed, st.last = true, failed, rec
 	}
 	if st.failed {
-		return outcome{runtime: r, exitFailure: exitFailure(st.last)}, nil
+		why := exitFailure(st.last)
+		if st.liveness != "" {
+			why = st.liveness
+		}
+		return outcome{runtime: r, exitFailure: why}, nil
 	}
 	return outcome{runtime: r, clean: true}, nil
 }

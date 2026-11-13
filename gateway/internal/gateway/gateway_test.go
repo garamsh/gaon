@@ -71,8 +71,12 @@ func TestRun_AGatewayGetsItsServiceAndItsDeploymentBothOwned(t *testing.T) {
 	assert.Contains(t, spec.Template.Args, "-server="+proxy.Server)
 	assert.Equal(t, proxy.ServiceAccount, spec.Template.ServiceAccountName)
 	require.Len(t, spec.Template.Ports, 2)
-	assert.Equal(t, int32(80), spec.Template.Ports[0].Port)
-	assert.Equal(t, int32(443), spec.Template.Ports[1].Port)
+	assert.Equal(t, api.MicroVMPort{Name: "port-80", Port: 10080, Protocol: api.ProtocolTCP}, spec.Template.Ports[0], "the proxy listens above 1023 for a port below it")
+	assert.Equal(t, api.MicroVMPort{Name: "port-443", Port: 10443, Protocol: api.ProtocolTCP}, spec.Template.Ports[1])
+	assert.Equal(t, &api.PortRef{Name: "port-80"}, svc.Spec.Ports[0].TargetPort, "the Service reaches the MicroVM's port by name")
+	assert.Equal(t, &api.PortRef{Name: "port-443"}, svc.Spec.Ports[1].TargetPort)
+	require.NotNil(t, spec.Template.ReadinessProbe)
+	assert.Equal(t, api.PortRef{Number: 10080}, spec.Template.ReadinessProbe.TCPSocket.Port, "the probe names the port the proxy listens on")
 	assert.Equal(t, api.RunAlways, spec.Template.RunStrategy)
 
 	assert.Equal(t, []gateway.Address{{Type: "IPAddress", Value: "192.168.1.50"}}, s.Addresses)
@@ -157,6 +161,33 @@ func TestRun_ListenersThatCannotShareAPortAreConflictedAndNotServed(t *testing.T
 			assert.Equal(t, tt.ports, got, "only the ports of the listeners that are served")
 		})
 	}
+}
+
+func TestRun_AListenerOfAPortWhereTheProxyListensForALowerPortIsNotServed(t *testing.T) {
+	f := newFakeAPI(t)
+	f.addGateway("gw", "uid-gw", `{"listeners":[
+		{"name":"low","port":80,"protocol":"HTTP"},
+		{"name":"shifted","port":10080,"protocol":"HTTP"},
+		{"name":"high","port":8080,"protocol":"HTTP"}]}`)
+	f.start(t)
+
+	s := gatewayReady(t, f, "gw")
+	for _, l := range s.Listeners {
+		c := cond(l.Conditions, gateway.CondAccepted)
+		if l.Name == "shifted" {
+			assert.Equal(t, api.ConditionFalse, c.Status, l.Name)
+			assert.Equal(t, gateway.ReasonInvalid, c.Reason, l.Name)
+			assert.Contains(t, c.Message, "port 80", l.Name)
+		} else {
+			assert.Equal(t, api.ConditionTrue, c.Status, "control: "+l.Name)
+		}
+	}
+	svc, _ := f.service("gateway-gw")
+	var got []int32
+	for _, p := range svc.Spec.Ports {
+		got = append(got, p.Port)
+	}
+	assert.Equal(t, []int32{80, 8080}, got, "only the ports of the listeners that are served")
 }
 
 func TestRun_AGatewayTheControllerRefusesGetsNoServiceAndAGatewayBesideItDoes(t *testing.T) {

@@ -47,6 +47,9 @@ func (s *Server) CreateMachine(_ context.Context, r *v1alpha2.CreateMachineReque
 	if err := s.checkProcess(r); err != nil {
 		return nil, err
 	}
+	if err := checkProbes(r.GetProbes()); err != nil {
+		return nil, err
+	}
 	if _, ok := s.machines[r.GetMachineId()]; ok {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_CONFLICT, "machine exists")
 	}
@@ -72,11 +75,12 @@ func (s *Server) CreateMachine(_ context.Context, r *v1alpha2.CreateMachineReque
 		Disks:         r.GetDisks(),
 		NetworkPolicy: r.GetNetworkPolicy(),
 		WorkingDir:    r.GetWorkingDir(),
+		Probes:        unknownProbes(r.GetProbes()),
 	}
 	s.machines[m.Id] = m
 	s.requests[m.Id] = proto.Clone(r).(*v1alpha2.CreateMachineRequest)
 	s.resend(m.Id)
-	return &v1alpha2.CreateMachineResponse{Machine: proto.Clone(m).(*v1alpha2.Machine)}, nil
+	return &v1alpha2.CreateMachineResponse{Machine: reported(m)}, nil
 }
 
 func (s *Server) StartMachine(_ context.Context, r *v1alpha2.StartMachineRequest) (*v1alpha2.StartMachineResponse, error) {
@@ -99,14 +103,16 @@ func (s *Server) StartMachine(_ context.Context, r *v1alpha2.StartMachineRequest
 		record.Env, record.Files = clone.Env, clone.Files
 	}
 	m.State = v1alpha2.MachineState_MACHINE_STATE_RUNNING
+	m.Probes = unknownProbes(s.requests[m.Id].GetProbes())
 	s.resend(m.Id)
-	return &v1alpha2.StartMachineResponse{Machine: proto.Clone(m).(*v1alpha2.Machine)}, nil
+	return &v1alpha2.StartMachineResponse{Machine: reported(m)}, nil
 }
 
 func (s *Server) StopMachine(_ context.Context, r *v1alpha2.StopMachineRequest) (*v1alpha2.StopMachineResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.record("StopMachine", r.GetMachineId())
+	s.stops = append(s.stops, proto.Clone(r).(*v1alpha2.StopMachineRequest))
 	m, ok := s.machines[r.GetMachineId()]
 	if !ok {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such machine")
@@ -114,7 +120,7 @@ func (s *Server) StopMachine(_ context.Context, r *v1alpha2.StopMachineRequest) 
 	if m.State != v1alpha2.MachineState_MACHINE_STATE_CREATED {
 		m.State = v1alpha2.MachineState_MACHINE_STATE_STOPPED
 	}
-	return &v1alpha2.StopMachineResponse{Machine: proto.Clone(m).(*v1alpha2.Machine)}, nil
+	return &v1alpha2.StopMachineResponse{Machine: reported(m)}, nil
 }
 
 func (s *Server) DeleteMachine(_ context.Context, r *v1alpha2.DeleteMachineRequest) (*v1alpha2.DeleteMachineResponse, error) {
@@ -192,7 +198,7 @@ func (s *Server) InspectMachine(_ context.Context, r *v1alpha2.InspectMachineReq
 	if !ok {
 		return nil, v1alpha2.NewError(v1alpha2.OutcomeKind_OUTCOME_KIND_NOT_FOUND, "no such machine")
 	}
-	return &v1alpha2.InspectMachineResponse{Machine: proto.Clone(m).(*v1alpha2.Machine)}, nil
+	return &v1alpha2.InspectMachineResponse{Machine: reported(m)}, nil
 }
 
 // ReadExecOutput answers a read of the exec "entrypoint" with the record set
@@ -221,7 +227,7 @@ func (s *Server) ListMachines(context.Context, *v1alpha2.ListMachinesRequest) (*
 	defer s.mu.Unlock()
 	out := &v1alpha2.ListMachinesResponse{}
 	for _, m := range s.machines {
-		out.Machines = append(out.Machines, proto.Clone(m).(*v1alpha2.Machine))
+		out.Machines = append(out.Machines, reported(m))
 	}
 	return out, nil
 }

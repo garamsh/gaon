@@ -1,5 +1,7 @@
 package api
 
+import "slices"
+
 // VolumePhase is the phase a Volume's status reports.
 type VolumePhase string
 
@@ -217,7 +219,7 @@ func (v *Volume) CreateFromSnapshot(s *VolumeSnapshot) error {
 }
 
 // Pin pins a local v to node: it sets spec.nodeName and adds
-// NodeAgentFinalizer in the same change. It changes nothing of a Volume of
+// NodeAgentFinalizer, unless v holds it already, in the same change. It changes nothing of a Volume of
 // another class, or one already pinned to node. It returns ErrConflict for a
 // Volume that is being deleted or is pinned to another Node, and leaves v
 // unchanged.
@@ -232,7 +234,9 @@ func (v *Volume) Pin(node string) error {
 		return nil
 	}
 	v.Spec.NodeName = node
-	v.Metadata.Finalizers = append(v.Metadata.Finalizers, NodeAgentFinalizer)
+	if !slices.Contains(v.Metadata.Finalizers, NodeAgentFinalizer) {
+		v.Metadata.Finalizers = append(v.Metadata.Finalizers, NodeAgentFinalizer)
+	}
 	return nil
 }
 

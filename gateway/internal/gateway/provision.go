@@ -85,7 +85,7 @@ func desiredService(gw *api.CustomObject, spec GatewaySpec, ports []int32) *api.
 		svc.Spec.LoadBalancerIP = spec.Addresses[0].Value
 	}
 	for _, p := range ports {
-		svc.Spec.Ports = append(svc.Spec.Ports, api.ServicePort{Name: portName(p), Protocol: api.ProtocolTCP, Port: p, TargetPort: &api.PortRef{Number: p}})
+		svc.Spec.Ports = append(svc.Spec.Ports, api.ServicePort{Name: portName(p), Protocol: api.ProtocolTCP, Port: p, TargetPort: &api.PortRef{Name: portName(p)}})
 	}
 	return svc
 }
@@ -105,10 +105,10 @@ func desiredDeployment(gw *api.CustomObject, cfg ProxyConfig, ports []int32) (*a
 		Args:               ProxyArgs(name, cfg.Server),
 		Files:              []api.MicroVMFile{{Path: ProxyCAPath, Mode: &mode, ValueFrom: &api.ValueSource{ConfigMapKeyRef: &api.KeyReference{Name: cfg.CAConfigMap, Key: caKey}}}},
 		ServiceAccountName: cfg.ServiceAccount,
-		ReadinessProbe:     &api.Probe{TCPSocket: &api.TCPSocketAction{Port: api.PortRef{Number: ports[0]}}},
+		ReadinessProbe:     &api.Probe{TCPSocket: &api.TCPSocketAction{Port: api.PortRef{Number: BindPort(ports[0])}}},
 	}
 	for _, p := range ports {
-		tmpl.Ports = append(tmpl.Ports, api.MicroVMPort{Name: portName(p), Port: p, Protocol: api.ProtocolTCP})
+		tmpl.Ports = append(tmpl.Ports, api.MicroVMPort{Name: portName(p), Port: BindPort(p), Protocol: api.ProtocolTCP})
 	}
 	spec := deploymentSpec{Replicas: 1, Template: tmpl}
 	spec.Selector.MatchLabels = map[string]string{GatewayLabel: name}
