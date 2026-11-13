@@ -313,9 +313,12 @@ func (x *NetworkPolicy) GetIngress() []*NetworkRule {
 
 // DiskAttachment is one disk the node holds, attached to a MicroVM.
 type DiskAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DiskId        string                 `protobuf:"bytes,1,opt,name=disk_id,json=diskId,proto3" json:"disk_id,omitempty"`
-	ReadOnly      bool                   `protobuf:"varint,2,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	DiskId   string                 `protobuf:"bytes,1,opt,name=disk_id,json=diskId,proto3" json:"disk_id,omitempty"`
+	ReadOnly bool                   `protobuf:"varint,2,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
+	// Where the guest mounts the disk's file system before the entrypoint
+	// runs. Empty mounts nothing.
+	MountPath     string `protobuf:"bytes,3,opt,name=mount_path,json=mountPath,proto3" json:"mount_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -362,6 +365,13 @@ func (x *DiskAttachment) GetReadOnly() bool {
 		return x.ReadOnly
 	}
 	return false
+}
+
+func (x *DiskAttachment) GetMountPath() string {
+	if x != nil {
+		return x.MountPath
+	}
+	return ""
 }
 
 type PolicyRequest struct {
@@ -1208,10 +1218,12 @@ const file_gaon_plugin_v1alpha1_plugin_proto_rawDesc = "" +
 	"\x05ports\x18\x03 \x03(\v2\x1f.gaon.plugin.v1alpha1.PortRangeR\x05ports\"\x87\x01\n" +
 	"\rNetworkPolicy\x129\n" +
 	"\x06egress\x18\x01 \x03(\v2!.gaon.plugin.v1alpha1.NetworkRuleR\x06egress\x12;\n" +
-	"\aingress\x18\x02 \x03(\v2!.gaon.plugin.v1alpha1.NetworkRuleR\aingress\"F\n" +
+	"\aingress\x18\x02 \x03(\v2!.gaon.plugin.v1alpha1.NetworkRuleR\aingress\"e\n" +
 	"\x0eDiskAttachment\x12\x17\n" +
 	"\adisk_id\x18\x01 \x01(\tR\x06diskId\x12\x1b\n" +
-	"\tread_only\x18\x02 \x01(\bR\breadOnly\")\n" +
+	"\tread_only\x18\x02 \x01(\bR\breadOnly\x12\x1d\n" +
+	"\n" +
+	"mount_path\x18\x03 \x01(\tR\tmountPath\")\n" +
 	"\rPolicyRequest\x12\x18\n" +
 	"\amicrovm\x18\x01 \x01(\fR\amicrovm\"\x86\x01\n" +
 	"\x0ePolicyResponse\x127\n" +

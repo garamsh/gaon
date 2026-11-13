@@ -76,10 +76,13 @@ type NetworkPolicy struct {
 	Ingress []NetworkRule
 }
 
-// DiskAttachment is one disk the node holds, attached to a MicroVM.
+// DiskAttachment is one disk the node holds, attached to a MicroVM. MountPath
+// is where the guest mounts the disk's file system before the entrypoint runs;
+// empty mounts nothing.
 type DiskAttachment struct {
-	DiskID   string
-	ReadOnly bool
+	DiskID    string
+	ReadOnly  bool
+	MountPath string
 }
 
 // Enforcer is implemented by a Network that enforces NetworkPolicy. The agent

@@ -39,7 +39,7 @@ func policyToRuntime(p *plugin.NetworkPolicy) *v1alpha2.NetworkPolicy {
 func disksToRuntime(in []plugin.DiskAttachment) []*v1alpha2.DiskAttachment {
 	var out []*v1alpha2.DiskAttachment
 	for _, d := range in {
-		out = append(out, &v1alpha2.DiskAttachment{DiskId: d.DiskID, ReadOnly: d.ReadOnly})
+		out = append(out, &v1alpha2.DiskAttachment{DiskId: d.DiskID, ReadOnly: d.ReadOnly, MountPath: d.MountPath})
 	}
 	return out
 }

@@ -185,7 +185,7 @@ func (s *ledgerStorage) Attach(_ context.Context, m *api.MicroVM) ([]plugin.Disk
 	}
 	s.attached = append(s.attached, m.Metadata.Name)
 	s.mvmd.AddDisk("disk-"+m.Metadata.Name, 1<<20)
-	return []plugin.DiskAttachment{{DiskID: "disk-" + m.Metadata.Name, ReadOnly: true}}, nil
+	return []plugin.DiskAttachment{{DiskID: "disk-" + m.Metadata.Name, ReadOnly: true, MountPath: "/data/" + m.Metadata.Name}}, nil
 }
 
 func (s *ledgerStorage) Release(_ context.Context, id string) error {
@@ -211,6 +211,7 @@ func TestStorage_CreatesAMicroVMWithTheDisksItAttached(t *testing.T) {
 	require.Len(t, got.GetDisks(), 1)
 	assert.Equal(t, "disk-db", got.GetDisks()[0].GetDiskId())
 	assert.True(t, got.GetDisks()[0].GetReadOnly())
+	assert.Equal(t, "/data/db", got.GetDisks()[0].GetMountPath(), "the path the plugin named reaches mvmd")
 }
 
 func TestStorage_ARefusalFailsTheMicroVMBeforeMvmdIsAskedToCreateIt(t *testing.T) {

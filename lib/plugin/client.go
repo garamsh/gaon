@@ -96,7 +96,7 @@ func (c *StorageClient) Attach(ctx context.Context, m *api.MicroVM) ([]DiskAttac
 	}
 	var disks []DiskAttachment
 	for _, d := range resp.GetDisks() {
-		disks = append(disks, DiskAttachment{DiskID: d.GetDiskId(), ReadOnly: d.GetReadOnly()})
+		disks = append(disks, DiskAttachment{DiskID: d.GetDiskId(), ReadOnly: d.GetReadOnly(), MountPath: d.GetMountPath()})
 	}
 	return disks, nil
 }
