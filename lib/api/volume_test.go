@@ -171,6 +171,8 @@ func TestVolumePin(t *testing.T) {
 	pinnedHere.Metadata.Finalizers = []string{api.NodeAgentFinalizer}
 	other := newVolume("data")
 	other.Spec.StorageClass = "ceph"
+	holding := newVolume("data")
+	holding.Metadata.Finalizers = []string{"example.com/other", api.NodeAgentFinalizer}
 
 	tests := []struct {
 		name       string
@@ -180,6 +182,7 @@ func TestVolumePin(t *testing.T) {
 		wantFinals []string
 	}{
 		{"unpinned local", newVolume("data"), false, "node-a", []string{api.NodeAgentFinalizer}},
+		{"unpinned local already holding the finalizer", holding, false, "node-a", []string{"example.com/other", api.NodeAgentFinalizer}},
 		{"pinned to the same node", pinnedHere, false, "node-a", []string{api.NodeAgentFinalizer}},
 		{"pinned to another node", pinnedElsewhere, true, "node-b", nil},
 		{"deleting", deleting, true, "", nil},
