@@ -17,7 +17,7 @@ RUN CGO_ENABLED=1 go build -trimpath -tags netgo,osusergo -ldflags='-s -w -linkm
 
 # static-debian13 holds the CA bundle S3 and Roles Anywhere TLS verify against,
 # no shell and no init, and its nonroot tag runs as uid 65532.
-FROM gcr.io/distroless/static-debian13@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931
+FROM gcr.io/distroless/static-debian13@sha256:1a64f46364620465ef9e9a8f5413757dfdf22695e050bbfd7303eeaf17a59383
 COPY --from=build /out/gaon-etcd-snapshot /gaon-etcd-snapshot
 USER 65532:65532
 ARG IMAGE_REVISION=
