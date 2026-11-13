@@ -140,7 +140,7 @@ func (s *service) place(ctx context.Context, book *ledger, m *api.MicroVM, vols 
 	if err != nil {
 		return err
 	}
-	node, refused, err := s.choose(ctx, book, m, demand{req: r, volumes: vols})
+	node, refused, err := s.choose(ctx, book, m, demand{req: r, volumes: vols, selector: m.Spec.NodeSelector})
 	if err != nil {
 		s.log.Warn("not placed", "microvm", m.Metadata.Name, "err", err)
 		if rebinding {
