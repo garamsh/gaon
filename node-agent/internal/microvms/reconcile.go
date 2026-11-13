@@ -145,15 +145,16 @@ func (s *service) ensure(ctx context.Context, m *api.MicroVM) (outcome, error) {
 		}
 		expired = s.refresh(ctx, m, id)
 	case r.GetState() == v1alpha2.MachineState_MACHINE_STATE_CREATED:
-		r, err = s.start(ctx, id)
-		if err != nil {
-			return outcome{runtime: got.GetMachine()}, err
+		o, err := s.startAgain(ctx, m, id, r)
+		if err != nil || o.failure != nil {
+			return o, err
 		}
+		r = o.runtime
 	case restarts(m.Spec.RunStrategy) && (r.GetState() == v1alpha2.MachineState_MACHINE_STATE_STOPPED || r.GetState() == v1alpha2.MachineState_MACHINE_STATE_FAULTED):
 		return s.restart(ctx, m, id, r)
 	case m.Spec.RunStrategy == api.RunOnce && r.GetState() == v1alpha2.MachineState_MACHINE_STATE_STOPPED:
 		if st.halted {
-			return s.resume(ctx, id, r)
+			return s.resume(ctx, m, id, r)
 		}
 		return s.ended(ctx, id, r)
 	}
@@ -205,7 +206,7 @@ func (s *service) create(ctx context.Context, m *api.MicroVM) (outcome, error) {
 		return outcome{}, fmt.Errorf("create %s: %w", req.GetMachineId(), err)
 	}
 	s.log.Info("created microvm", "id", req.GetMachineId(), "env", len(req.GetEnv()), "files", len(req.GetFiles()))
-	started, err := s.start(ctx, req.GetMachineId())
+	started, err := s.start(ctx, m, req.GetMachineId(), false)
 	if err != nil {
 		return outcome{runtime: created.GetMachine()}, err
 	}
@@ -242,18 +243,55 @@ func (e preconditionFailure) Error() string {
 }
 func (e preconditionFailure) Unwrap() error { return e.err }
 
-func (s *service) start(ctx context.Context, id string) (*v1alpha2.Machine, error) {
-	started, err := s.runtime.StartMachine(ctx, &v1alpha2.StartMachineRequest{MachineId: id})
+// start starts the mvmd machine id. With again, it first resolves the
+// MicroVM's env and files again, the token file included, and gives them to
+// mvmd as the start's run update, which replaces what the machine holds. A
+// spec failure of that resolution is returned as a specFailure.
+func (s *service) start(ctx context.Context, m *api.MicroVM, id string, again bool) (*v1alpha2.Machine, error) {
+	req := &v1alpha2.StartMachineRequest{MachineId: id}
+	var resolved *v1alpha2.CreateMachineRequest
+	var token tokenState
+	if again {
+		resolved = &v1alpha2.CreateMachineRequest{}
+		var err error
+		if token, err = s.withProcess(ctx, m, resolved); err != nil {
+			return nil, err
+		}
+		req.RunUpdate = &v1alpha2.RunUpdate{Env: resolved.Env, Files: resolved.Files}
+	}
+	started, err := s.runtime.StartMachine(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("start %s: %w", id, err)
 	}
 	st := s.runOf(id)
 	st.started = s.clock.Now()
+	if again {
+		s.log.Info("started microvm with its env and files resolved again", "id", id, "env", len(resolved.Env), "files", len(resolved.Files))
+		st.delivered, st.token = deliveredDigests(m, resolved), token
+		return started.GetMachine(), nil
+	}
 	// mvmd sends the files of the create request at every boot, so the guest
 	// holds the token and the referenced values of that request.
 	st.delivered = nil
 	st.token = tokenState{expiresAt: st.token.createdExpiresAt, createdExpiresAt: st.token.createdExpiresAt}
 	return started.GetMachine(), nil
+}
+
+// startAgain starts the machine id, which mvmd holds created or stopped, with
+// the MicroVM's env and files resolved again. r is mvmd's machine before the
+// start. A reference that no longer resolves is the MicroVM's failure, and the
+// machine stays as it is; any other error is retried.
+func (s *service) startAgain(ctx context.Context, m *api.MicroVM, id string, r *v1alpha2.Machine) (outcome, error) {
+	started, err := s.start(ctx, m, id, true)
+	var f specFailure
+	switch {
+	case errors.As(err, &f):
+		s.log.Warn("microvm cannot be started", "microvm", m.Metadata.Name, "reason", f.reason, "error", err)
+		return outcome{runtime: r, failure: err, failReason: f.reason}, nil
+	case err != nil:
+		return outcome{runtime: r}, err
+	}
+	return outcome{runtime: started}, nil
 }
 
 // report writes the status for the MicroVM name from o, when it differs from

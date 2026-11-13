@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/garamsh/gaon/lib/api"
 	"github.com/garamsh/mvmd/lib/runtimeapi/v1alpha2"
 )
 
@@ -27,14 +28,14 @@ func (s *service) ended(ctx context.Context, id string, r *v1alpha2.Machine) (ou
 
 // resume starts the MicroVM that the agent holds stopped for `Halted` and that
 // now runs `Once`. Its next exit is judged afresh.
-func (s *service) resume(ctx context.Context, id string, r *v1alpha2.Machine) (outcome, error) {
-	st := s.runOf(id)
-	started, err := s.start(ctx, id)
-	if err != nil {
-		return outcome{runtime: r}, err
+func (s *service) resume(ctx context.Context, m *api.MicroVM, id string, r *v1alpha2.Machine) (outcome, error) {
+	o, err := s.startAgain(ctx, m, id, r)
+	if err != nil || o.failure != nil {
+		return o, err
 	}
+	st := s.runOf(id)
 	st.halted, st.exited = false, false
-	return outcome{runtime: started}, nil
+	return o, nil
 }
 
 // exitFailure names how the entrypoint's record shows it failed.

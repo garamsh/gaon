@@ -322,19 +322,21 @@ func (n *askedNetwork) names() []string {
 	return append([]string(nil), n.asked...)
 }
 
-func TestRun_FailsAMicroVMThatSetsAWorkingDirectoryBeforeThePolicyAndTheCreate(t *testing.T) {
+func TestRun_PassesTheWorkingDirectoryToMvmd(t *testing.T) {
 	network := &askedNetwork{}
 	e := start(t, true, nil, func(e *env) { e.network = network })
 	dir := microvm("wd", 1, node, api.RunAlways)
 	dir.Spec.WorkingDir = "/srv"
 	e.gaon.SetMicroVM(dir)
-	e.gaon.SetMicroVM(microvm("wd-ok", 1, node, api.RunAlways))
+	e.gaon.SetMicroVM(microvm("wd-none", 1, node, api.RunAlways))
 
-	cond := e.failed(t, "wd")
-	assert.Equal(t, microvms.ReasonInvalidSpec, cond.Reason)
-	assert.Contains(t, cond.Message, "spec.workingDir")
-	assert.Contains(t, cond.Message, "mvmd#519")
-	eventually(t, "control: the same MicroVM without workingDir runs", e.running("wd-ok-e1"))
-	assert.Equal(t, []string{"wd-ok"}, network.names(), "the network plugin is asked for the control only")
-	assert.NotContains(t, e.mvmd.Calls(), "CreateMachine wd-e1")
+	eventually(t, "wd-e1 runs", e.running("wd-e1"))
+	eventually(t, "control: the MicroVM without workingDir runs", e.running("wd-none-e1"))
+	req, ok := e.mvmd.CreateRequest("wd-e1")
+	require.True(t, ok)
+	assert.Equal(t, "/srv", req.GetWorkingDir())
+	none, ok := e.mvmd.CreateRequest("wd-none-e1")
+	require.True(t, ok)
+	assert.Empty(t, none.GetWorkingDir(), "control: a MicroVM that sets none gives mvmd none")
+	assert.NotContains(t, e.gaon.MicroVM("wd").Status.Phase, api.MicroVMFailed)
 }

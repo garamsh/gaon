@@ -90,11 +90,7 @@ func (s *service) restart(ctx context.Context, m *api.MicroVM, id string, r *v1a
 	now := s.clock.Now()
 	if st.halted {
 		st.halted = false
-		started, err := s.start(ctx, id)
-		if err != nil {
-			return outcome{runtime: r}, err
-		}
-		return outcome{runtime: started}, nil
+		return s.startAgain(ctx, m, id, r)
 	}
 	if !st.exited {
 		failed, rec, err := s.classify(ctx, id, r, st.last)
@@ -122,14 +118,14 @@ func (s *service) restart(ctx context.Context, m *api.MicroVM, id string, r *v1a
 			return outcome{runtime: r}, fmt.Errorf("stop %s: mvmd holds it %s", id, r.GetState())
 		}
 	}
-	started, err := s.start(ctx, id)
-	if err != nil {
-		return outcome{runtime: r}, err
+	o, err := s.startAgain(ctx, m, id, r)
+	if err != nil || o.failure != nil {
+		return o, err
 	}
 	st.exited = false
 	st.streak++
 	st.unwritten++
-	return outcome{runtime: started}, nil
+	return o, nil
 }
 
 // classify judges how the entrypoint of the MicroVM r ended. A faulted

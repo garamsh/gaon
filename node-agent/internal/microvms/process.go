@@ -24,20 +24,16 @@ type specFailure struct {
 func (e specFailure) Error() string { return e.err.Error() }
 func (e specFailure) Unwrap() error { return e.err }
 
-// withProcess puts the MicroVM's command, args, env, user and files in req.
-// It reads each Secret and ConfigMap the spec references once, with a get
-// under the Node's own identity. A missing object or key, a file that is over
-// the bound once resolved, and a file whose owner cannot be decided are
-// returned as a specFailure, as is a spec that sets workingDir, which mvmd has
-// no field for; any other error is retried. It also puts the token file of
-// the MicroVM's ServiceAccount in req, and returns what the agent remembers
-// of it.
+// withProcess puts the MicroVM's command, args, env, user, working directory
+// and files in req. It reads each Secret and ConfigMap the spec references
+// once, with a get under the Node's own identity. A missing object or key, a
+// file that is over the bound once resolved, and a file whose owner cannot be
+// decided are returned as a specFailure; any other error is retried. It also
+// puts the token file of the MicroVM's ServiceAccount in req, and returns what
+// the agent remembers of it.
 func (s *service) withProcess(ctx context.Context, m *api.MicroVM, req *v1alpha2.CreateMachineRequest) (tokenState, error) {
 	spec := &m.Spec
-	if spec.WorkingDir != "" {
-		return tokenState{}, specFailure{ReasonInvalidSpec, errors.New("spec.workingDir is set, and mvmd takes no working directory at create (garamsh/mvmd#519)")}
-	}
-	req.Command, req.Args, req.User = slices.Clone(spec.Command), slices.Clone(spec.Args), spec.User
+	req.Command, req.Args, req.User, req.WorkingDir = slices.Clone(spec.Command), slices.Clone(spec.Args), spec.User, spec.WorkingDir
 	refs := newReferences(s.api)
 	for _, e := range spec.Env {
 		value := []byte(e.Value)

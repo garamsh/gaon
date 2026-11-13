@@ -380,38 +380,106 @@ func TestFiles_AnUnreadableValueKeepsTheOldContentAndAFailedWriteIsRetried(t *te
 	assert.NotContains(t, logs.String(), v2)
 }
 
-func TestRestart_WritesTheTokenAndTheReferencedFilesAgainBecauseMvmdSendsTheCreateTimeOnes(t *testing.T) {
+func TestRestart_BootsWithTheEnvTheFilesAndTheTokenResolvedAgain(t *testing.T) {
 	r := newRig(t, nil)
+	logs := r.logs()
 	v1, v2 := unique(t), unique(t)
 	r.gaon.SetServiceAccount("sa")
 	r.gaon.SetSecret(rigSecret("creds", map[string]string{"pw": v1}))
 	r.beginWith(func(m *api.MicroVM) {
 		withAccount(m)
+		m.Spec.Env = []api.EnvVar{{Name: "PW", ValueFrom: &api.ValueSource{SecretKeyRef: &api.KeyReference{Name: "creds", Key: "pw"}}}}
 		m.Spec.Files = []api.MicroVMFile{{Path: "/run/pw", ValueFrom: &api.ValueSource{SecretKeyRef: &api.KeyReference{Name: "creds", Key: "pw"}}}}
 	})
+	req, _ := r.mvmd.CreateRequest(rigID)
+	require.Equal(t, v1, req.GetEnv()[0].GetValue(), "control: mvmd holds the create-time env")
+	first := r.token()
 	r.gaon.SetSecret(rigSecret("creds", map[string]string{"pw": v2}))
-	r.mustRound()
-	r.clk.Advance(renewAfter)
-	r.mustRound()
-	renewed := r.token()
-	require.NotEqual(t, r.gaon.IssuedTokens()[0], renewed)
 
 	r.exit(exited(1, 0))
 	r.mustRound()
 	r.clk.Advance(10 * time.Second)
 	r.mustRound()
-	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
-	got, _ := r.mvmd.File(rigID, "/run/pw")
-	require.Equal(t, v1, string(got), "control: mvmd sent the create-time value at the boot")
-	require.Equal(t, r.gaon.IssuedTokens()[0], r.token(), "control: and the create-time token")
 
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
+	req, _ = r.mvmd.CreateRequest(rigID)
+	require.Len(t, req.GetEnv(), 1)
+	assert.Equal(t, v2, req.GetEnv()[0].GetValue(), "the restart carried the new env")
+	got, _ := r.mvmd.File(rigID, "/run/pw")
+	assert.Equal(t, v2, string(got), "the guest booted with the new file")
+	issued := r.gaon.IssuedTokens()
+	require.Len(t, issued, 2, "a token was asked for again at the restart")
+	assert.Equal(t, issued[1], r.token(), "the guest booted with the new token")
+	assert.NotEqual(t, first, r.token())
+	assert.Zero(t, r.writes(), "the boot carried them: nothing is written into the guest afterwards")
+	r.mustRound()
+	assert.Zero(t, r.writes(), "and a round after the boot has nothing to replace")
+	assert.Equal(t, 1, len(req.GetFiles())-1, "the token file is in the record beside the file of the spec")
+	assert.NotContains(t, logs.String(), v1)
+	assert.NotContains(t, logs.String(), v2)
+	assert.NotContains(t, logs.String(), issued[1])
+}
+
+func TestRestart_FailsTheMicroVMWhoseReferenceNoLongerResolvesAndStartsItOnceItDoes(t *testing.T) {
+	r := newRig(t, nil)
+	logs := r.logs()
+	v1, v2 := unique(t), unique(t)
+	r.gaon.SetSecret(rigSecret("creds", map[string]string{"pw": v1}))
+	r.beginWith(func(m *api.MicroVM) {
+		m.Spec.Env = []api.EnvVar{{Name: "PW", ValueFrom: &api.ValueSource{SecretKeyRef: &api.KeyReference{Name: "creds", Key: "pw"}}}}
+	})
+	r.gaon.SetSecret(rigSecret("creds", map[string]string{"other": v2}))
+
+	r.exit(exited(1, 0))
+	r.mustRound()
+	r.clk.Advance(10 * time.Second)
 	r.mustRound()
 
-	got, _ = r.mvmd.File(rigID, "/run/pw")
-	assert.Equal(t, v2, string(got))
-	issued := r.gaon.IssuedTokens()
-	assert.Equal(t, issued[len(issued)-1], r.token())
-	assert.NotEqual(t, issued[0], r.token())
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_STOPPED)
+	assert.Equal(t, 1, r.starts(), "mvmd was not asked to start it")
+	assert.Equal(t, api.MicroVMFailed, r.gaon.MicroVM("m1").Status.Phase)
+	ready := r.ready()
+	assert.Equal(t, ReasonReferenceNotFound, ready.Reason)
+	assert.Contains(t, ready.Message, `Secret "creds" has no key "pw"`)
+
+	r.gaon.SetSecret(rigSecret("creds", map[string]string{"pw": v2}))
+	r.mustRound()
+
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
+	req, _ := r.mvmd.CreateRequest(rigID)
+	assert.Equal(t, v2, req.GetEnv()[0].GetValue(), "control: the same restart goes through once the key is back")
+	assert.Equal(t, api.MicroVMRunning, r.gaon.MicroVM("m1").Status.Phase)
+	assert.NotContains(t, logs.String(), v1)
+	assert.NotContains(t, logs.String(), v2)
+	assert.NotContains(t, ready.Message, v2)
+}
+
+func TestRestart_ResolvesAgainWhenAHaltedMicroVMIsStarted(t *testing.T) {
+	for _, strategy := range []api.RunStrategy{api.RunAlways, api.RunOnce} {
+		t.Run(string(strategy), func(t *testing.T) {
+			r := newRig(t, nil)
+			v1, v2 := unique(t), unique(t)
+			r.gaon.SetSecret(rigSecret("creds", map[string]string{"pw": v1}))
+			r.beginWith(func(m *api.MicroVM) {
+				m.Spec.Env = []api.EnvVar{{Name: "PW", ValueFrom: &api.ValueSource{SecretKeyRef: &api.KeyReference{Name: "creds", Key: "pw"}}}}
+			})
+			m := r.gaon.MicroVM("m1")
+			m.Spec.RunStrategy = api.RunHalted
+			r.put(m)
+			r.mustRound()
+			r.requireState(v1alpha2.MachineState_MACHINE_STATE_STOPPED)
+			r.gaon.SetSecret(rigSecret("creds", map[string]string{"pw": v2}))
+
+			m = r.gaon.MicroVM("m1")
+			m.Spec.RunStrategy = strategy
+			r.put(m)
+			r.mustRound()
+
+			r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
+			req, _ := r.mvmd.CreateRequest(rigID)
+			assert.Equal(t, v2, req.GetEnv()[0].GetValue())
+		})
+	}
 }
 
 func TestToken_WaitsForAnAudienceTheAgentIsGiven(t *testing.T) {
