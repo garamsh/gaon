@@ -128,7 +128,7 @@ Each is a decision of ADR 0032, with its reason there:
 
 ## Open questions
 
-- **What the serving issue holds:** the unit and its two binaries, the definitions' schemas, the controller's Role, the proxy's ServiceAccount, Role and image, the manifests, the proxy's flags, and the line in [structure.md](./structure.md) §Units.
+- **What the serving issue holds:** the unit and its two binaries, the definitions' schemas, the controller's Role, the proxy's ServiceAccount, Role and image, the manifests, the proxy's flags, and the creation of the `gateway/` folder that [structure.md](./structure.md) §Units plans.
 - **The proxy's Role for Secrets:** a rule names no object and a `get` of an absent object is judged on no labels ([workloads.md](./workloads.md) §Identity and role), so reading only the Secrets a Gateway references needs a label on them or a different rule.
 - **A client's address:** the proxy sees a client's address, and so can set `X-Forwarded-For`, only if the network plugin forwards a LoadBalancer Service's traffic without changing the source. That is the plugin's contract.
 - **More than one replica:** the Deployment has one replica, so a proxy's restart interrupts the Gateway; whether a Gateway has a replica count, and how several proxies are spread, is open.

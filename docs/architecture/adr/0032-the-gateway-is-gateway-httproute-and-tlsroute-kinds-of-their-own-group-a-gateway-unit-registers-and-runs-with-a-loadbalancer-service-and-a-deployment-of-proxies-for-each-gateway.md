@@ -43,8 +43,8 @@ Append-only: once merged, the body below is not rewritten. A fact later found wr
 - A connection reaches a proxy through the Service, so a client's address reaches the proxy only if the plugin forwards without changing the source. `gateway.md` leaves that to the serving issue.
 - A Gateway's address cannot change after create, because a Service's `loadBalancerIP` cannot; the Gateway is deleted and created again.
 - A route is served after the controller has written its status, so a change takes effect a status write later than the write of the route.
-- A new unit, `gateway/`, is added to `structure.md` by the issue that creates it.
-- `resource-api.md` §Open questions and §Naming and groups still name a `Gateway` of `apps.gaon.garam.sh` as an unwritten default extension. The group is `gateway.gaon.garam.sh`.
+- A new unit, `gateway/`, is planned in `structure.md` §Units and its folder is created by the serving issue.
+- `resource-api.md` §Naming and groups lists the group `gateway.gaon.garam.sh` and no longer names Gateway a default extension of `apps.gaon.garam.sh`.
 
 ## Signs the decision was wrong
 
