@@ -169,7 +169,7 @@ All three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, with `a
 
 ### Service, Endpoints and NetworkPolicy
 
-The three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, modelled on Kubernetes' Service, Endpoints and NetworkPolicy, and served by the core ([ADR 0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md)). The contract is in `lib/api/`. The API server serves them on the paths of the route table and allocates a Service's addresses ([apiserver.md](./apiserver.md) §Writes); the endpoints controller and enforcement in the network plugin are later issues.
+The three are kinds of `compute.gaon.garam.sh/v1alpha1`, cluster-scoped, modelled on Kubernetes' Service, Endpoints and NetworkPolicy, and served by the core ([ADR 0027](./adr/0027-a-service-allocates-its-addresses-from-two-configured-ranges-endpoints-lists-its-ready-microvms-and-a-networkpolicy-selects-microvms-by-label.md)). The contract is in `lib/api/`. The API server serves them on the paths of the route table and allocates a Service's addresses ([apiserver.md](./apiserver.md) §Writes); the network plugin enforces NetworkPolicy ([node-agent.md](./node-agent.md) §Plugins); the endpoints controller is a later issue.
 
 - **`Service`** has `spec` and `status`. A name is a DNS label of at most 63 characters that starts with a letter, because DNS names it. `spec`:
   - `selector`, a map of labels that selects MicroVMs by equality; empty, it selects none and the Service's Endpoints is written by its user.

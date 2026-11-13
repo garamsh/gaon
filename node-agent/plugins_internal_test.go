@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/lib/api"
+	"github.com/garamsh/gaon/lib/plugin"
 	"github.com/garamsh/gaon/lib/plugin/plugintest"
 )
 
@@ -51,6 +52,7 @@ func TestDialPlugins_ACallToAPluginThatNeverAnswersReturnsWithinTheTimeout(t *te
 	m := &api.MicroVM{}
 	for name, call := range map[string]func() error{
 		"Policy":  func() error { _, err := p.network.Policy(ctx, m); return err },
+		"Enforce": func() error { return p.network.(plugin.Enforcer).Enforce(ctx, nil) },
 		"Attach":  func() error { _, err := p.storage.Attach(ctx, m); return err },
 		"Release": func() error { return p.storage.Release(ctx, "id") },
 	} {

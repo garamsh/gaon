@@ -24,7 +24,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NetworkService_Policy_FullMethodName = "/gaon.plugin.v1alpha1.NetworkService/Policy"
+	NetworkService_Policy_FullMethodName  = "/gaon.plugin.v1alpha1.NetworkService/Policy"
+	NetworkService_Enforce_FullMethodName = "/gaon.plugin.v1alpha1.NetworkService/Enforce"
 )
 
 // NetworkServiceClient is the client API for NetworkService service.
@@ -35,6 +36,9 @@ const (
 type NetworkServiceClient interface {
 	// Policy returns the policy a MicroVM is created with.
 	Policy(ctx context.Context, in *PolicyRequest, opts ...grpc.CallOption) (*PolicyResponse, error)
+	// Enforce makes the node enforce exactly the limits in the request,
+	// replacing those of an earlier call. It is repeatable.
+	Enforce(ctx context.Context, in *EnforceRequest, opts ...grpc.CallOption) (*EnforceResponse, error)
 }
 
 type networkServiceClient struct {
@@ -55,6 +59,16 @@ func (c *networkServiceClient) Policy(ctx context.Context, in *PolicyRequest, op
 	return out, nil
 }
 
+func (c *networkServiceClient) Enforce(ctx context.Context, in *EnforceRequest, opts ...grpc.CallOption) (*EnforceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnforceResponse)
+	err := c.cc.Invoke(ctx, NetworkService_Enforce_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NetworkServiceServer is the server API for NetworkService service.
 // All implementations must embed UnimplementedNetworkServiceServer
 // for forward compatibility.
@@ -63,6 +77,9 @@ func (c *networkServiceClient) Policy(ctx context.Context, in *PolicyRequest, op
 type NetworkServiceServer interface {
 	// Policy returns the policy a MicroVM is created with.
 	Policy(context.Context, *PolicyRequest) (*PolicyResponse, error)
+	// Enforce makes the node enforce exactly the limits in the request,
+	// replacing those of an earlier call. It is repeatable.
+	Enforce(context.Context, *EnforceRequest) (*EnforceResponse, error)
 	mustEmbedUnimplementedNetworkServiceServer()
 }
 
@@ -75,6 +92,9 @@ type UnimplementedNetworkServiceServer struct{}
 
 func (UnimplementedNetworkServiceServer) Policy(context.Context, *PolicyRequest) (*PolicyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Policy not implemented")
+}
+func (UnimplementedNetworkServiceServer) Enforce(context.Context, *EnforceRequest) (*EnforceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Enforce not implemented")
 }
 func (UnimplementedNetworkServiceServer) mustEmbedUnimplementedNetworkServiceServer() {}
 func (UnimplementedNetworkServiceServer) testEmbeddedByValue()                        {}
@@ -115,6 +135,24 @@ func _NetworkService_Policy_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NetworkService_Enforce_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnforceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkServiceServer).Enforce(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkService_Enforce_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkServiceServer).Enforce(ctx, req.(*EnforceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NetworkService_ServiceDesc is the grpc.ServiceDesc for NetworkService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -125,6 +163,10 @@ var NetworkService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Policy",
 			Handler:    _NetworkService_Policy_Handler,
+		},
+		{
+			MethodName: "Enforce",
+			Handler:    _NetworkService_Enforce_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

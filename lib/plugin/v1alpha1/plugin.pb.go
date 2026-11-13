@@ -462,6 +462,324 @@ func (x *PolicyResponse) GetPolicy() *NetworkPolicy {
 	return nil
 }
 
+// PolicyPort is a protocol and a port number a limit allows.
+type PolicyPort struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// PROTOCOL_TCP or PROTOCOL_UDP.
+	Protocol      Protocol `protobuf:"varint,1,opt,name=protocol,proto3,enum=gaon.plugin.v1alpha1.Protocol" json:"protocol,omitempty"`
+	Port          uint32   `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PolicyPort) Reset() {
+	*x = PolicyPort{}
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PolicyPort) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PolicyPort) ProtoMessage() {}
+
+func (x *PolicyPort) ProtoReflect() protoreflect.Message {
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PolicyPort.ProtoReflect.Descriptor instead.
+func (*PolicyPort) Descriptor() ([]byte, []int) {
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *PolicyPort) GetProtocol() Protocol {
+	if x != nil {
+		return x.Protocol
+	}
+	return Protocol_PROTOCOL_UNSPECIFIED
+}
+
+func (x *PolicyPort) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+// Allow is one entry of a limit: traffic passes if any entry of the limit
+// matches the address of the other end and the destination port.
+type Allow struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// An IPv4 or IPv6 prefix; empty means every address.
+	Prefix string `protobuf:"bytes,1,opt,name=prefix,proto3" json:"prefix,omitempty"`
+	// Prefixes inside prefix whose addresses do not match.
+	Except []string `protobuf:"bytes,2,rep,name=except,proto3" json:"except,omitempty"`
+	// Empty means every port and protocol.
+	Ports         []*PolicyPort `protobuf:"bytes,3,rep,name=ports,proto3" json:"ports,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Allow) Reset() {
+	*x = Allow{}
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Allow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Allow) ProtoMessage() {}
+
+func (x *Allow) ProtoReflect() protoreflect.Message {
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Allow.ProtoReflect.Descriptor instead.
+func (*Allow) Descriptor() ([]byte, []int) {
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *Allow) GetPrefix() string {
+	if x != nil {
+		return x.Prefix
+	}
+	return ""
+}
+
+func (x *Allow) GetExcept() []string {
+	if x != nil {
+		return x.Except
+	}
+	return nil
+}
+
+func (x *Allow) GetPorts() []*PolicyPort {
+	if x != nil {
+		return x.Ports
+	}
+	return nil
+}
+
+// Limit restricts a direction of a MicroVM's traffic to what its entries
+// allow. No entry allows nothing.
+type Limit struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Allow         []*Allow               `protobuf:"bytes,1,rep,name=allow,proto3" json:"allow,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Limit) Reset() {
+	*x = Limit{}
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Limit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Limit) ProtoMessage() {}
+
+func (x *Limit) ProtoReflect() protoreflect.Message {
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Limit.ProtoReflect.Descriptor instead.
+func (*Limit) Descriptor() ([]byte, []int) {
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *Limit) GetAllow() []*Allow {
+	if x != nil {
+		return x.Allow
+	}
+	return nil
+}
+
+// MicroVMLimits are the limits NetworkPolicy puts on one MicroVM of the node.
+// A direction whose limit is unset is unrestricted.
+type MicroVMLimits struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Microvm string                 `protobuf:"bytes,1,opt,name=microvm,proto3" json:"microvm,omitempty"`
+	// The MicroVM's addresses; the limits apply to traffic to and from them.
+	Addresses     []string `protobuf:"bytes,2,rep,name=addresses,proto3" json:"addresses,omitempty"`
+	Ingress       *Limit   `protobuf:"bytes,3,opt,name=ingress,proto3" json:"ingress,omitempty"`
+	Egress        *Limit   `protobuf:"bytes,4,opt,name=egress,proto3" json:"egress,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MicroVMLimits) Reset() {
+	*x = MicroVMLimits{}
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MicroVMLimits) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MicroVMLimits) ProtoMessage() {}
+
+func (x *MicroVMLimits) ProtoReflect() protoreflect.Message {
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MicroVMLimits.ProtoReflect.Descriptor instead.
+func (*MicroVMLimits) Descriptor() ([]byte, []int) {
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *MicroVMLimits) GetMicrovm() string {
+	if x != nil {
+		return x.Microvm
+	}
+	return ""
+}
+
+func (x *MicroVMLimits) GetAddresses() []string {
+	if x != nil {
+		return x.Addresses
+	}
+	return nil
+}
+
+func (x *MicroVMLimits) GetIngress() *Limit {
+	if x != nil {
+		return x.Ingress
+	}
+	return nil
+}
+
+func (x *MicroVMLimits) GetEgress() *Limit {
+	if x != nil {
+		return x.Egress
+	}
+	return nil
+}
+
+type EnforceRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Every MicroVM of the node that NetworkPolicy limits. One absent from it
+	// is unrestricted by NetworkPolicy.
+	Microvms      []*MicroVMLimits `protobuf:"bytes,1,rep,name=microvms,proto3" json:"microvms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnforceRequest) Reset() {
+	*x = EnforceRequest{}
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnforceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnforceRequest) ProtoMessage() {}
+
+func (x *EnforceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnforceRequest.ProtoReflect.Descriptor instead.
+func (*EnforceRequest) Descriptor() ([]byte, []int) {
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *EnforceRequest) GetMicrovms() []*MicroVMLimits {
+	if x != nil {
+		return x.Microvms
+	}
+	return nil
+}
+
+type EnforceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnforceResponse) Reset() {
+	*x = EnforceResponse{}
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnforceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnforceResponse) ProtoMessage() {}
+
+func (x *EnforceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnforceResponse.ProtoReflect.Descriptor instead.
+func (*EnforceResponse) Descriptor() ([]byte, []int) {
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{12}
+}
+
 type AttachRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The MicroVM, as the JSON of the resource API's v1alpha1 MicroVM.
@@ -472,7 +790,7 @@ type AttachRequest struct {
 
 func (x *AttachRequest) Reset() {
 	*x = AttachRequest{}
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[7]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -484,7 +802,7 @@ func (x *AttachRequest) String() string {
 func (*AttachRequest) ProtoMessage() {}
 
 func (x *AttachRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[7]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -497,7 +815,7 @@ func (x *AttachRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachRequest.ProtoReflect.Descriptor instead.
 func (*AttachRequest) Descriptor() ([]byte, []int) {
-	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{7}
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *AttachRequest) GetMicrovm() []byte {
@@ -518,7 +836,7 @@ type AttachResponse struct {
 
 func (x *AttachResponse) Reset() {
 	*x = AttachResponse{}
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[8]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -530,7 +848,7 @@ func (x *AttachResponse) String() string {
 func (*AttachResponse) ProtoMessage() {}
 
 func (x *AttachResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[8]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -543,7 +861,7 @@ func (x *AttachResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachResponse.ProtoReflect.Descriptor instead.
 func (*AttachResponse) Descriptor() ([]byte, []int) {
-	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{8}
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *AttachResponse) GetRefusal() *Refusal {
@@ -569,7 +887,7 @@ type ReleaseRequest struct {
 
 func (x *ReleaseRequest) Reset() {
 	*x = ReleaseRequest{}
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[9]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -581,7 +899,7 @@ func (x *ReleaseRequest) String() string {
 func (*ReleaseRequest) ProtoMessage() {}
 
 func (x *ReleaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[9]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -594,7 +912,7 @@ func (x *ReleaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseRequest.ProtoReflect.Descriptor instead.
 func (*ReleaseRequest) Descriptor() ([]byte, []int) {
-	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{9}
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ReleaseRequest) GetMachineId() string {
@@ -612,7 +930,7 @@ type ReleaseResponse struct {
 
 func (x *ReleaseResponse) Reset() {
 	*x = ReleaseResponse{}
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[10]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -624,7 +942,7 @@ func (x *ReleaseResponse) String() string {
 func (*ReleaseResponse) ProtoMessage() {}
 
 func (x *ReleaseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[10]
+	mi := &file_gaon_plugin_v1alpha1_plugin_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -637,7 +955,7 @@ func (x *ReleaseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseResponse.ProtoReflect.Descriptor instead.
 func (*ReleaseResponse) Descriptor() ([]byte, []int) {
-	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{10}
+	return file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP(), []int{16}
 }
 
 var File_gaon_plugin_v1alpha1_plugin_proto protoreflect.FileDescriptor
@@ -665,7 +983,25 @@ const file_gaon_plugin_v1alpha1_plugin_proto_rawDesc = "" +
 	"\amicrovm\x18\x01 \x01(\fR\amicrovm\"\x86\x01\n" +
 	"\x0ePolicyResponse\x127\n" +
 	"\arefusal\x18\x01 \x01(\v2\x1d.gaon.plugin.v1alpha1.RefusalR\arefusal\x12;\n" +
-	"\x06policy\x18\x02 \x01(\v2#.gaon.plugin.v1alpha1.NetworkPolicyR\x06policy\")\n" +
+	"\x06policy\x18\x02 \x01(\v2#.gaon.plugin.v1alpha1.NetworkPolicyR\x06policy\"\\\n" +
+	"\n" +
+	"PolicyPort\x12:\n" +
+	"\bprotocol\x18\x01 \x01(\x0e2\x1e.gaon.plugin.v1alpha1.ProtocolR\bprotocol\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\rR\x04port\"o\n" +
+	"\x05Allow\x12\x16\n" +
+	"\x06prefix\x18\x01 \x01(\tR\x06prefix\x12\x16\n" +
+	"\x06except\x18\x02 \x03(\tR\x06except\x126\n" +
+	"\x05ports\x18\x03 \x03(\v2 .gaon.plugin.v1alpha1.PolicyPortR\x05ports\":\n" +
+	"\x05Limit\x121\n" +
+	"\x05allow\x18\x01 \x03(\v2\x1b.gaon.plugin.v1alpha1.AllowR\x05allow\"\xb3\x01\n" +
+	"\rMicroVMLimits\x12\x18\n" +
+	"\amicrovm\x18\x01 \x01(\tR\amicrovm\x12\x1c\n" +
+	"\taddresses\x18\x02 \x03(\tR\taddresses\x125\n" +
+	"\aingress\x18\x03 \x01(\v2\x1b.gaon.plugin.v1alpha1.LimitR\aingress\x123\n" +
+	"\x06egress\x18\x04 \x01(\v2\x1b.gaon.plugin.v1alpha1.LimitR\x06egress\"Q\n" +
+	"\x0eEnforceRequest\x12?\n" +
+	"\bmicrovms\x18\x01 \x03(\v2#.gaon.plugin.v1alpha1.MicroVMLimitsR\bmicrovms\"\x11\n" +
+	"\x0fEnforceResponse\")\n" +
 	"\rAttachRequest\x12\x18\n" +
 	"\amicrovm\x18\x01 \x01(\fR\amicrovm\"\x85\x01\n" +
 	"\x0eAttachResponse\x127\n" +
@@ -681,9 +1017,10 @@ const file_gaon_plugin_v1alpha1_plugin_proto_rawDesc = "" +
 	"\fPROTOCOL_UDP\x10\x02\x12\x11\n" +
 	"\rPROTOCOL_ICMP\x10\x03\x12\x13\n" +
 	"\x0fPROTOCOL_ICMPV6\x10\x04\x12\x10\n" +
-	"\fPROTOCOL_ANY\x10\x052e\n" +
+	"\fPROTOCOL_ANY\x10\x052\xbd\x01\n" +
 	"\x0eNetworkService\x12S\n" +
-	"\x06Policy\x12#.gaon.plugin.v1alpha1.PolicyRequest\x1a$.gaon.plugin.v1alpha1.PolicyResponse2\xbd\x01\n" +
+	"\x06Policy\x12#.gaon.plugin.v1alpha1.PolicyRequest\x1a$.gaon.plugin.v1alpha1.PolicyResponse\x12V\n" +
+	"\aEnforce\x12$.gaon.plugin.v1alpha1.EnforceRequest\x1a%.gaon.plugin.v1alpha1.EnforceResponse2\xbd\x01\n" +
 	"\x0eStorageService\x12S\n" +
 	"\x06Attach\x12#.gaon.plugin.v1alpha1.AttachRequest\x1a$.gaon.plugin.v1alpha1.AttachResponse\x12V\n" +
 	"\aRelease\x12$.gaon.plugin.v1alpha1.ReleaseRequest\x1a%.gaon.plugin.v1alpha1.ReleaseResponseB<Z:github.com/garamsh/gaon/lib/plugin/v1alpha1;pluginv1alpha1b\x06proto3"
@@ -701,7 +1038,7 @@ func file_gaon_plugin_v1alpha1_plugin_proto_rawDescGZIP() []byte {
 }
 
 var file_gaon_plugin_v1alpha1_plugin_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_gaon_plugin_v1alpha1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_gaon_plugin_v1alpha1_plugin_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_gaon_plugin_v1alpha1_plugin_proto_goTypes = []any{
 	(Protocol)(0),           // 0: gaon.plugin.v1alpha1.Protocol
 	(*Refusal)(nil),         // 1: gaon.plugin.v1alpha1.Refusal
@@ -711,10 +1048,16 @@ var file_gaon_plugin_v1alpha1_plugin_proto_goTypes = []any{
 	(*DiskAttachment)(nil),  // 5: gaon.plugin.v1alpha1.DiskAttachment
 	(*PolicyRequest)(nil),   // 6: gaon.plugin.v1alpha1.PolicyRequest
 	(*PolicyResponse)(nil),  // 7: gaon.plugin.v1alpha1.PolicyResponse
-	(*AttachRequest)(nil),   // 8: gaon.plugin.v1alpha1.AttachRequest
-	(*AttachResponse)(nil),  // 9: gaon.plugin.v1alpha1.AttachResponse
-	(*ReleaseRequest)(nil),  // 10: gaon.plugin.v1alpha1.ReleaseRequest
-	(*ReleaseResponse)(nil), // 11: gaon.plugin.v1alpha1.ReleaseResponse
+	(*PolicyPort)(nil),      // 8: gaon.plugin.v1alpha1.PolicyPort
+	(*Allow)(nil),           // 9: gaon.plugin.v1alpha1.Allow
+	(*Limit)(nil),           // 10: gaon.plugin.v1alpha1.Limit
+	(*MicroVMLimits)(nil),   // 11: gaon.plugin.v1alpha1.MicroVMLimits
+	(*EnforceRequest)(nil),  // 12: gaon.plugin.v1alpha1.EnforceRequest
+	(*EnforceResponse)(nil), // 13: gaon.plugin.v1alpha1.EnforceResponse
+	(*AttachRequest)(nil),   // 14: gaon.plugin.v1alpha1.AttachRequest
+	(*AttachResponse)(nil),  // 15: gaon.plugin.v1alpha1.AttachResponse
+	(*ReleaseRequest)(nil),  // 16: gaon.plugin.v1alpha1.ReleaseRequest
+	(*ReleaseResponse)(nil), // 17: gaon.plugin.v1alpha1.ReleaseResponse
 }
 var file_gaon_plugin_v1alpha1_plugin_proto_depIdxs = []int32{
 	0,  // 0: gaon.plugin.v1alpha1.NetworkRule.protocol:type_name -> gaon.plugin.v1alpha1.Protocol
@@ -723,19 +1066,27 @@ var file_gaon_plugin_v1alpha1_plugin_proto_depIdxs = []int32{
 	3,  // 3: gaon.plugin.v1alpha1.NetworkPolicy.ingress:type_name -> gaon.plugin.v1alpha1.NetworkRule
 	1,  // 4: gaon.plugin.v1alpha1.PolicyResponse.refusal:type_name -> gaon.plugin.v1alpha1.Refusal
 	4,  // 5: gaon.plugin.v1alpha1.PolicyResponse.policy:type_name -> gaon.plugin.v1alpha1.NetworkPolicy
-	1,  // 6: gaon.plugin.v1alpha1.AttachResponse.refusal:type_name -> gaon.plugin.v1alpha1.Refusal
-	5,  // 7: gaon.plugin.v1alpha1.AttachResponse.disks:type_name -> gaon.plugin.v1alpha1.DiskAttachment
-	6,  // 8: gaon.plugin.v1alpha1.NetworkService.Policy:input_type -> gaon.plugin.v1alpha1.PolicyRequest
-	8,  // 9: gaon.plugin.v1alpha1.StorageService.Attach:input_type -> gaon.plugin.v1alpha1.AttachRequest
-	10, // 10: gaon.plugin.v1alpha1.StorageService.Release:input_type -> gaon.plugin.v1alpha1.ReleaseRequest
-	7,  // 11: gaon.plugin.v1alpha1.NetworkService.Policy:output_type -> gaon.plugin.v1alpha1.PolicyResponse
-	9,  // 12: gaon.plugin.v1alpha1.StorageService.Attach:output_type -> gaon.plugin.v1alpha1.AttachResponse
-	11, // 13: gaon.plugin.v1alpha1.StorageService.Release:output_type -> gaon.plugin.v1alpha1.ReleaseResponse
-	11, // [11:14] is the sub-list for method output_type
-	8,  // [8:11] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	0,  // 6: gaon.plugin.v1alpha1.PolicyPort.protocol:type_name -> gaon.plugin.v1alpha1.Protocol
+	8,  // 7: gaon.plugin.v1alpha1.Allow.ports:type_name -> gaon.plugin.v1alpha1.PolicyPort
+	9,  // 8: gaon.plugin.v1alpha1.Limit.allow:type_name -> gaon.plugin.v1alpha1.Allow
+	10, // 9: gaon.plugin.v1alpha1.MicroVMLimits.ingress:type_name -> gaon.plugin.v1alpha1.Limit
+	10, // 10: gaon.plugin.v1alpha1.MicroVMLimits.egress:type_name -> gaon.plugin.v1alpha1.Limit
+	11, // 11: gaon.plugin.v1alpha1.EnforceRequest.microvms:type_name -> gaon.plugin.v1alpha1.MicroVMLimits
+	1,  // 12: gaon.plugin.v1alpha1.AttachResponse.refusal:type_name -> gaon.plugin.v1alpha1.Refusal
+	5,  // 13: gaon.plugin.v1alpha1.AttachResponse.disks:type_name -> gaon.plugin.v1alpha1.DiskAttachment
+	6,  // 14: gaon.plugin.v1alpha1.NetworkService.Policy:input_type -> gaon.plugin.v1alpha1.PolicyRequest
+	12, // 15: gaon.plugin.v1alpha1.NetworkService.Enforce:input_type -> gaon.plugin.v1alpha1.EnforceRequest
+	14, // 16: gaon.plugin.v1alpha1.StorageService.Attach:input_type -> gaon.plugin.v1alpha1.AttachRequest
+	16, // 17: gaon.plugin.v1alpha1.StorageService.Release:input_type -> gaon.plugin.v1alpha1.ReleaseRequest
+	7,  // 18: gaon.plugin.v1alpha1.NetworkService.Policy:output_type -> gaon.plugin.v1alpha1.PolicyResponse
+	13, // 19: gaon.plugin.v1alpha1.NetworkService.Enforce:output_type -> gaon.plugin.v1alpha1.EnforceResponse
+	15, // 20: gaon.plugin.v1alpha1.StorageService.Attach:output_type -> gaon.plugin.v1alpha1.AttachResponse
+	17, // 21: gaon.plugin.v1alpha1.StorageService.Release:output_type -> gaon.plugin.v1alpha1.ReleaseResponse
+	18, // [18:22] is the sub-list for method output_type
+	14, // [14:18] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_gaon_plugin_v1alpha1_plugin_proto_init() }
@@ -749,7 +1100,7 @@ func file_gaon_plugin_v1alpha1_plugin_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gaon_plugin_v1alpha1_plugin_proto_rawDesc), len(file_gaon_plugin_v1alpha1_plugin_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

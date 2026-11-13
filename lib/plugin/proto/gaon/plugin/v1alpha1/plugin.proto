@@ -59,6 +59,9 @@ message DiskAttachment {
 service NetworkService {
   // Policy returns the policy a MicroVM is created with.
   rpc Policy(PolicyRequest) returns (PolicyResponse);
+  // Enforce makes the node enforce exactly the limits in the request,
+  // replacing those of an earlier call. It is repeatable.
+  rpc Enforce(EnforceRequest) returns (EnforceResponse);
 }
 
 message PolicyRequest {
@@ -71,6 +74,48 @@ message PolicyResponse {
   Refusal refusal = 1;
   NetworkPolicy policy = 2;
 }
+
+// PolicyPort is a protocol and a port number a limit allows.
+message PolicyPort {
+  // PROTOCOL_TCP or PROTOCOL_UDP.
+  Protocol protocol = 1;
+  uint32 port = 2;
+}
+
+// Allow is one entry of a limit: traffic passes if any entry of the limit
+// matches the address of the other end and the destination port.
+message Allow {
+  // An IPv4 or IPv6 prefix; empty means every address.
+  string prefix = 1;
+  // Prefixes inside prefix whose addresses do not match.
+  repeated string except = 2;
+  // Empty means every port and protocol.
+  repeated PolicyPort ports = 3;
+}
+
+// Limit restricts a direction of a MicroVM's traffic to what its entries
+// allow. No entry allows nothing.
+message Limit {
+  repeated Allow allow = 1;
+}
+
+// MicroVMLimits are the limits NetworkPolicy puts on one MicroVM of the node.
+// A direction whose limit is unset is unrestricted.
+message MicroVMLimits {
+  string microvm = 1;
+  // The MicroVM's addresses; the limits apply to traffic to and from them.
+  repeated string addresses = 2;
+  Limit ingress = 3;
+  Limit egress = 4;
+}
+
+message EnforceRequest {
+  // Every MicroVM of the node that NetworkPolicy limits. One absent from it
+  // is unrestricted by NetworkPolicy.
+  repeated MicroVMLimits microvms = 1;
+}
+
+message EnforceResponse {}
 
 // StorageService is served by a storage plugin.
 service StorageService {

@@ -30,6 +30,7 @@ type Server struct {
 	volumes  map[string]api.Volume
 	secrets  map[string]api.Secret
 	configs  map[string]api.ConfigMap
+	policies map[string]api.NetworkPolicy
 	reads    []string
 	nodes    map[string]api.Node
 	leases   map[string]api.Lease
@@ -64,6 +65,7 @@ func newServer() (*Server, *http.ServeMux) {
 		volumes:  map[string]api.Volume{},
 		secrets:  map[string]api.Secret{},
 		configs:  map[string]api.ConfigMap{},
+		policies: map[string]api.NetworkPolicy{},
 		nodes:    map[string]api.Node{},
 		leases:   map[string]api.Lease{},
 		csrs:     map[string]api.CertificateSigningRequest{},
@@ -82,6 +84,7 @@ func newServer() (*Server, *http.ServeMux) {
 	mux.HandleFunc("PUT /volumes/{name}/status", s.putVolumeStatus)
 	mux.HandleFunc("GET /secrets/{name}", s.getSecret)
 	mux.HandleFunc("GET /configmaps/{name}", s.getConfigMap)
+	mux.HandleFunc("GET /networkpolicies", s.listNetworkPolicies)
 	mux.HandleFunc("POST /serviceaccounts/{name}/token", s.createToken)
 	mux.HandleFunc("GET /nodes/{name}", s.getNode)
 	mux.HandleFunc("PUT /nodes/{name}", s.putNode)
