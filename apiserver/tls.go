@@ -49,3 +49,41 @@ func (c Config) serverTLS() (*tls.Config, error) {
 		ClientAuth:   tls.VerifyClientCertIfGiven,
 	}, nil
 }
+
+// validateAgentTLS refuses one of the two agent client files without the
+// other, and either without the TLS files, because the client CA that verifies
+// the agent's certificate is one of them.
+func (c Config) validateAgentTLS() error {
+	if (c.AgentCert == "") != (c.AgentKey == "") {
+		return errors.New("agent-client-cert-file and agent-client-key-file are given together or not at all")
+	}
+	given, err := c.tlsGiven()
+	if err != nil {
+		return err
+	}
+	if c.AgentCert != "" && !given {
+		return errors.New("agent-client-cert-file needs tls-client-ca, tls-cert and tls-key: tls-client-ca verifies the agent's certificate")
+	}
+	return nil
+}
+
+// agentClient returns the client that calls the Node Agents, or nil where c
+// names no agent client certificate.
+func (c Config) agentClient() (*agentClient, error) {
+	if err := c.validateAgentTLS(); err != nil || c.AgentCert == "" {
+		return nil, err
+	}
+	cert, err := tls.LoadX509KeyPair(c.AgentCert, c.AgentKey)
+	if err != nil {
+		return nil, fmt.Errorf("load agent client certificate: %w", err)
+	}
+	pem, err := os.ReadFile(c.TLSClientCA)
+	if err != nil {
+		return nil, fmt.Errorf("read client CA: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("client CA %s holds no certificate", c.TLSClientCA)
+	}
+	return &agentClient{cert: cert, roots: roots}, nil
+}

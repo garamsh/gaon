@@ -34,6 +34,12 @@ type Config struct {
 	// callers' certificates and of the server's certificate and key. All three
 	// are set or none is.
 	TLSClientCA, TLSCert, TLSKey string
+	// AgentCert and AgentKey are the paths of the client certificate, of the
+	// Organization gaon:apiservers, and its key that the server presents to the
+	// Node Agents when it proxies a MicroVM's log and exec; TLSClientCA, the
+	// cluster CA, verifies the agent's certificate. Both are set or neither is,
+	// and they need the TLS files. With neither, log and exec are Unavailable.
+	AgentCert, AgentKey string
 	// BootstrapTokenFile is the path of the file of valid bootstrap tokens,
 	// one per line. It needs the TLS files.
 	BootstrapTokenFile string
@@ -97,6 +103,8 @@ func ParseConfig(args []string) (Config, error) {
 	fs.StringVar(&cfg.TLSClientCA, "tls-client-ca", "", "PEM file of the CA that signs client certificates")
 	fs.StringVar(&cfg.TLSCert, "tls-cert", "", "PEM file of the server certificate")
 	fs.StringVar(&cfg.TLSKey, "tls-key", "", "PEM file of the server certificate's key")
+	fs.StringVar(&cfg.AgentCert, "agent-client-cert-file", "", "PEM file of the client certificate, of the Organization gaon:apiservers, presented to the Node Agents for a MicroVM's log and exec; given with agent-client-key-file and the tls flags")
+	fs.StringVar(&cfg.AgentKey, "agent-client-key-file", "", "PEM file of the agent client certificate's key; given with agent-client-cert-file")
 	fs.StringVar(&cfg.BootstrapTokenFile, "bootstrap-token-file", "", "file of valid bootstrap tokens, one per line; needs the tls flags")
 	fs.StringVar(&cfg.AuthorizationMode, "authorization-mode", ModeAlwaysAllow, "AlwaysAllow, or RBAC: the Node authorizer, then cluster roles and bindings; RBAC needs the tls flags")
 	fs.StringVar(&cfg.ServiceAccountIssuer, "service-account-issuer", "", "the iss of service account tokens; given with service-account-signing-key-file")
@@ -145,6 +153,9 @@ func ParseConfig(args []string) (Config, error) {
 		return Config{}, err
 	}
 	if err := cfg.validateAuthorization(); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.validateAgentTLS(); err != nil {
 		return Config{}, err
 	}
 	if err := cfg.validateTokenSigning(); err != nil {
