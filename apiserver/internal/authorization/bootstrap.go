@@ -2,18 +2,17 @@ package authorization
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/garamsh/gaon/lib/api"
 )
 
-// Writer is what Bootstrap creates the policy with. A Put without a
-// resourceVersion creates, and fails with AlreadyExists where the object is
-// there.
+// Writer is what Bootstrap creates the policy with. An Ensure creates the
+// object where none of its name exists, leaves one that exists, and calls no
+// admission webhook.
 type Writer interface {
-	PutClusterRole(ctx context.Context, name string, r *api.ClusterRole) (*api.ClusterRole, error)
-	PutClusterRoleBinding(ctx context.Context, name string, b *api.ClusterRoleBinding) (*api.ClusterRoleBinding, error)
+	EnsureClusterRole(ctx context.Context, r *api.ClusterRole) error
+	EnsureClusterRoleBinding(ctx context.Context, b *api.ClusterRoleBinding) error
 }
 
 // The roles and groups that gaon creates (ADR 0008, Decision 6).
@@ -71,7 +70,7 @@ func Bootstrap(ctx context.Context, w Writer) error {
 			Metadata: api.ObjectMeta{Name: b.role},
 			Rules:    b.rules,
 		}
-		if _, err := w.PutClusterRole(ctx, b.role, role); err != nil && !errors.Is(err, api.ErrAlreadyExists) {
+		if err := w.EnsureClusterRole(ctx, role); err != nil {
 			return fmt.Errorf("create clusterrole %s: %w", b.role, err)
 		}
 		binding := &api.ClusterRoleBinding{
@@ -80,7 +79,7 @@ func Bootstrap(ctx context.Context, w Writer) error {
 			RoleRef:  api.RoleRef{Kind: api.KindClusterRole, Name: b.role},
 			Subjects: []api.Subject{{Kind: api.SubjectGroup, Name: b.group}},
 		}
-		if _, err := w.PutClusterRoleBinding(ctx, b.role, binding); err != nil && !errors.Is(err, api.ErrAlreadyExists) {
+		if err := w.EnsureClusterRoleBinding(ctx, binding); err != nil {
 			return fmt.Errorf("create clusterrolebinding %s: %w", b.role, err)
 		}
 	}

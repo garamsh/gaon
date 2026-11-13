@@ -26,6 +26,12 @@ func (s *service) PutClusterRoleBinding(ctx context.Context, name string, b *api
 	})
 }
 
+// EnsureClusterRoleBinding creates b when no ClusterRoleBinding of its name
+// exists, and leaves an existing one as it is. It calls no webhook.
+func (s *service) EnsureClusterRoleBinding(ctx context.Context, b *api.ClusterRoleBinding) error {
+	return ensure(ctx, s, clusterRoleBindings, b, b.Validate)
+}
+
 // DeleteClusterRoleBinding removes the ClusterRoleBinding if rv is its current
 // version.
 func (s *service) DeleteClusterRoleBinding(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterRoleBinding, error) {

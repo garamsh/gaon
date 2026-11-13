@@ -22,6 +22,12 @@ func (s *service) PutStorageClass(ctx context.Context, name string, c *api.Stora
 	return admittedPut(ctx, s, storageClasses, c, func() error { return nil }, c.ValidateUpdate)
 }
 
+// EnsureStorageClass creates c when no StorageClass of its name exists, and
+// leaves an existing one as it is. It calls no webhook.
+func (s *service) EnsureStorageClass(ctx context.Context, c *api.StorageClass) error {
+	return ensure(ctx, s, storageClasses, c, c.Validate)
+}
+
 // DeleteStorageClass removes the StorageClass if rv is its current version.
 func (s *service) DeleteStorageClass(ctx context.Context, name string, rv api.ResourceVersion) (*api.StorageClass, error) {
 	c, rev, err := storageClasses.get(ctx, s.st, name)
@@ -67,7 +73,7 @@ func (s *service) storageClassOf(ctx context.Context, name string) (*api.Storage
 // EnsureLocalStorageClass creates the StorageClass StorageClassLocal, which
 // provisions with "local" and allows volume expansion, when svc holds none. It
 // leaves an existing one as it is, so an administrator's change to it survives
-// a restart.
+// a restart, and calls no webhook.
 func EnsureLocalStorageClass(ctx context.Context, svc Service) error {
 	class := &api.StorageClass{
 		TypeMeta:             api.TypeMeta{APIVersion: api.GroupVersion, Kind: api.KindStorageClass},
@@ -75,8 +81,5 @@ func EnsureLocalStorageClass(ctx context.Context, svc Service) error {
 		Provisioner:          api.StorageClassLocal,
 		AllowVolumeExpansion: true,
 	}
-	if _, err := svc.PutStorageClass(ctx, api.StorageClassLocal, class); err != nil && !errors.Is(err, api.ErrAlreadyExists) {
-		return err
-	}
-	return nil
+	return svc.EnsureStorageClass(ctx, class)
 }

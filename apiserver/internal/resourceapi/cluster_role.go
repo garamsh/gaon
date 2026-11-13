@@ -21,6 +21,12 @@ func (s *service) PutClusterRole(ctx context.Context, name string, r *api.Cluste
 	return admittedPut(ctx, s, clusterRoles, r, func() error { return nil }, func(*api.ClusterRole) error { return nil })
 }
 
+// EnsureClusterRole creates r when no ClusterRole of its name exists, and
+// leaves an existing one as it is. It calls no webhook.
+func (s *service) EnsureClusterRole(ctx context.Context, r *api.ClusterRole) error {
+	return ensure(ctx, s, clusterRoles, r, r.Validate)
+}
+
 // DeleteClusterRole removes the ClusterRole if rv is its current version.
 func (s *service) DeleteClusterRole(ctx context.Context, name string, rv api.ResourceVersion) (*api.ClusterRole, error) {
 	r, rev, err := clusterRoles.get(ctx, s.st, name)
