@@ -1,17 +1,90 @@
 package apiserver_test
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/garamsh/gaon/lib/api"
 )
+
+// issueUsages signs a certificate for cn with the extended key usages given,
+// none where usages is nil.
+func issueUsages(t *testing.T, a *authority, cn string, usages []x509.ExtKeyUsage) (certPEM, keyPEM []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(4),
+		Subject:      pkix.Name{CommonName: cn},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  usages,
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, a.cert, &key.PublicKey, a.key)
+	require.NoError(t, err)
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	require.NoError(t, err)
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+}
+
+func TestAgentProxy_RequiresTLS13(t *testing.T) {
+	f := newAgentFixture(t, true)
+	certPEM, keyPEM := f.agentCert(t, "node-old")
+	old := startAgent(t, f.c, certPEM, keyPEM, answer("out\n"), func(c *tls.Config) { c.MinVersion, c.MaxVersion = tls.VersionTLS12, tls.VersionTLS12 })
+	f.node(t, "node-old", []string{"127.0.0.1"}, old.port)
+	f.vm(t, "old", "node-old", 1)
+	f.served(t, "new", 1, answer("out\n"))
+
+	status, _, body := f.as(t, adminID, http.MethodGet, "/microvms/new/log", "")
+	assert.Equal(t, http.StatusOK, status, "control: an agent that speaks TLS 1.3")
+	assert.Equal(t, "out\n", body)
+	status, _, body = f.as(t, adminID, http.MethodGet, "/microvms/old/log", "")
+	assert.Equal(t, http.StatusServiceUnavailable, status, "an agent capped at TLS 1.2")
+	assert.Equal(t, api.ReasonUnavailable, reasonOf(t, body))
+	assert.Empty(t, old.calls())
+}
+
+func TestAgentProxy_SendsTheStatusBeforeTheAgentWritesAByte(t *testing.T) {
+	f := newAgentFixture(t, true)
+	release := make(chan struct{})
+	f.served(t, "quiet", 1, func(w http.ResponseWriter, r *http.Request) {
+		w.(http.Flusher).Flush() // the agent answers 200 and has no output yet
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	})
+	t.Cleanup(func() { close(release) })
+
+	for _, req := range []struct{ method, path, body string }{
+		{http.MethodGet, "/microvms/quiet/log?follow=true", ""},
+		{http.MethodPost, "/microvms/quiet/exec", execBody},
+	} {
+		// open returns once the response headers arrive, under the client's 10 second
+		// timeout, and the agent has written nothing.
+		resp := f.open(t, adminID, req.method, req.path, req.body)
+		assert.Equal(t, http.StatusOK, resp.StatusCode, req.path)
+		_ = resp.Body.Close()
+	}
+}
 
 // closedPort returns a port nothing listens on.
 func closedPort(t *testing.T) int {
@@ -57,6 +130,10 @@ func TestAgentProxy_VerifiesTheCertificateOfTheAgent(t *testing.T) {
 		{"has the CN of another node", func(string) ([]byte, []byte) { return f.c.clientCA.issue(t, "node-other") }, http.StatusServiceUnavailable},
 		{"is signed by another CA", func(node string) ([]byte, []byte) { return otherCA.issue(t, node) }, http.StatusServiceUnavailable},
 		{"is valid for a client only", func(node string) ([]byte, []byte) { return f.c.clientCA.issueFor(t, who{cn: node}) }, http.StatusServiceUnavailable},
+		{"carries no extended key usage", func(node string) ([]byte, []byte) { return issueUsages(t, f.c.clientCA, node, nil) }, http.StatusServiceUnavailable},
+		{"carries any extended key usage", func(node string) ([]byte, []byte) {
+			return issueUsages(t, f.c.clientCA, node, []x509.ExtKeyUsage{x509.ExtKeyUsageAny})
+		}, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			name := "c" + strconv.Itoa(i)
@@ -73,6 +150,10 @@ func TestAgentProxy_VerifiesTheCertificateOfTheAgent(t *testing.T) {
 				return
 			}
 			assert.Equal(t, api.ReasonUnavailable, reasonOf(t, body))
+			assert.Contains(t, body, "cannot be reached")
+			assert.Contains(t, body, "node-"+name)
+			assert.NotContains(t, body, "127.0.0.1", "the caller is not told an address")
+			assert.NotContains(t, body, "certificate", "the caller is not told why the check failed")
 			assert.Empty(t, a.calls(), "no request reached an agent that failed the check")
 		})
 	}
@@ -213,6 +294,7 @@ func TestAgentProxy_RefusesAnInvalidLogQueryWithoutCallingTheAgent(t *testing.T)
 	for _, q := range []string{
 		"?tailBytes=0", "?tailBytes=-1", "?tailBytes=abc", "?tailBytes=1.5", "?tailBytes=", "?tailBytes=99999999999999999999",
 		"?follow=maybe", "?follow=", "?follow=true&follow=false", "?colour=red",
+		"?tailBytes=%zz", "?tailBytes=1;x=2", "?colour=%zz", "?%zz=1",
 	} {
 		status, _, body := f.as(t, adminID, http.MethodGet, logPath+q, "")
 		assert.Equal(t, http.StatusUnprocessableEntity, status, q)

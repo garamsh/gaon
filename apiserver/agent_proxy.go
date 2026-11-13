@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -85,6 +86,11 @@ func (c *agentClient) verify(cs tls.ConnectionState, node string) error {
 	if _, err := leaf.Verify(opts); err != nil {
 		return fmt.Errorf("verify the agent's certificate: %w", err)
 	}
+	// Verify accepts a leaf with no extended key usage for any use, and ADR 0043
+	// has the agent's certificate carry serverAuth.
+	if !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageServerAuth) {
+		return errors.New("the agent's certificate does not carry the extended key usage serverAuth")
+	}
 	if leaf.Subject.CommonName != node {
 		return fmt.Errorf("the agent's certificate is for %q, want node %q", leaf.Subject.CommonName, node)
 	}
@@ -113,7 +119,13 @@ func (c *agentClient) do(ctx context.Context, t agentTarget, method, path string
 // microVMLog serves GET /microvms/{name}/log.
 func (h *handler) microVMLog(svc resourceapi.Service, agents *agentClient) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		q, err := logQuery(r.URL.Query())
+		// URL.Query drops a pair it cannot parse, so the raw query is parsed here.
+		parsed, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			h.fail(w, r, api.NewAPIError(api.ReasonInvalid, "the query is malformed: %v", err))
+			return
+		}
+		q, err := logQuery(parsed)
 		if err != nil {
 			h.fail(w, r, err)
 			return
@@ -261,7 +273,9 @@ func (h *handler) callAgent(w http.ResponseWriter, r *http.Request, agents *agen
 	q.Set("uid", string(m.Metadata.UID))
 	resp, err := agents.do(r.Context(), t, p.method, "/microvms/"+name+"/"+p.sub, q, p.body)
 	if err != nil {
-		return api.NewAPIError(api.ReasonUnavailable, "call the agent of node %q: %v", t.node, err)
+		// The cause names an address and a certificate, which the caller may not read.
+		h.log.Warn("call the agent failed", "trace_id", traceID(r), "node", t.node, "error", err)
+		return api.NewAPIError(api.ReasonUnavailable, "the agent of node %q cannot be reached", t.node)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -291,6 +305,7 @@ func agentError(node string, resp *http.Response) error {
 // whole. A client that went away ends the copy quietly.
 func (h *handler) stream(w http.ResponseWriter, r *http.Request, body io.Reader) {
 	flusher, _ := w.(http.Flusher)
+	flush(flusher) // the status and headers go out before the first byte of output
 	buf := make([]byte, 32<<10)
 	for {
 		n, err := body.Read(buf)

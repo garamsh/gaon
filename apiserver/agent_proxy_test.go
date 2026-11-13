@@ -47,20 +47,24 @@ func (a *fakeAgent) calls() []agentCall {
 }
 
 // startAgent serves handle with the serving certificate certPEM and keyPEM.
-func startAgent(t *testing.T, c *cluster, certPEM, keyPEM []byte, handle http.HandlerFunc) *fakeAgent {
+func startAgent(t *testing.T, c *cluster, certPEM, keyPEM []byte, handle http.HandlerFunc, tune ...func(*tls.Config)) *fakeAgent {
 	t.Helper()
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	require.NoError(t, err)
 	pool := x509.NewCertPool()
 	pool.AddCert(c.clientCA.cert)
 	a := &fakeAgent{}
+	tlsCfg := &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    pool,
+	}
+	for _, f := range tune {
+		f(tlsCfg)
+	}
 	srv := &http.Server{
-		TLSConfig: &tls.Config{
-			MinVersion:   tls.VersionTLS13,
-			Certificates: []tls.Certificate{cert},
-			ClientAuth:   tls.RequireAndVerifyClientCert,
-			ClientCAs:    pool,
-		},
+		TLSConfig: tlsCfg,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			call := agentCall{method: r.Method, path: r.URL.Path, query: r.URL.Query(), body: string(body)}
