@@ -353,9 +353,8 @@ func TestEndpoints_WritesAgainAfterTheRetryDelayWhenAWriteFails(t *testing.T) {
 func TestEndpoints_StopsRetryingAWriteForAServiceWhoseSelectorIsRemoved(t *testing.T) {
 	f := newFakeAPI(t)
 	f.setFailPuts(1)
-	f.seed([]api.Service{newService("web", web, tcp("", 80)), sentinelService()}, []api.MicroVM{newMicroVM("a", web, "10.0.0.1"), sentinelMicroVM()})
+	f.seed([]api.Service{newService("web", web, tcp("", 80))}, []api.MicroVM{newMicroVM("a", web, "10.0.0.1"), sentinelMicroVM()})
 	clock := start(t, f)
-	f.waitStored(sentinel, func(api.Endpoints) bool { return true })
 	require.Eventually(t, func() bool { return putsOf(f, "web") == 1 }, 5*time.Second, time.Millisecond)
 	clock.waitTimersAbove(t, 0)
 
