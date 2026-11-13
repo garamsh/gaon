@@ -24,12 +24,12 @@ The units of milestone M1, each created by the pull request of the issue that ow
 - **`workloads/`**: the controller of the `Job` kind, a client of the public API with its own identity, binary `gaon-workloads`. Issue 146.
 - **`etcd-snapshot/`**: the backup of the Store, a client of etcd run as a CronJob, binary `gaon-etcd-snapshot`. Issue 174.
 - **`dns/`**: serves the names of Services, a client of the public API run as a Deployment, binary `gaon-dns`. Issue 221.
-- **`gateway/`**: serves the kinds `Gateway`, `HTTPRoute` and `TLSRoute`, a client of the public API, binary `gaon-gateway-controller`; the proxy `gaon-gateway-proxy` is not built yet. Issue 222.
+- **`gateway/`**: serves the kinds `Gateway`, `HTTPRoute` and `TLSRoute`, a client of the public API, binaries `gaon-gateway-controller` and `gaon-gateway-proxy`. Issues 222 and 223.
 - **`tooling/e2e/`**: the end-to-end test of M1 on QEMU nodes. Issue 9.
 
 The Cell Router and microvm and cluster management are in gaon's scope (Discussion #2 comments `discussioncomment-19466471` and `discussioncomment-19533418`, in garamsh/discussions) and have no unit planned yet.
 
-The gateway unit `gateway/` is to hold the binaries `gaon-gateway-controller` and `gaon-gateway-proxy` ([ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds-of-their-own-group-a-gateway-unit-registers-and-runs-with-a-loadbalancer-service-and-a-deployment-of-proxies-for-each-gateway.md), [gateway.md](./gateway.md)).
+The gateway unit `gateway/` holds the binaries `gaon-gateway-controller` and `gaon-gateway-proxy` ([ADR 0032](./adr/0032-the-gateway-is-gateway-httproute-and-tlsroute-kinds-of-their-own-group-a-gateway-unit-registers-and-runs-with-a-loadbalancer-service-and-a-deployment-of-proxies-for-each-gateway.md), [gateway.md](./gateway.md)).
 
 The rules for units:
 
