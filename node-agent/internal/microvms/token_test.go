@@ -454,6 +454,34 @@ func TestRestart_FailsTheMicroVMWhoseReferenceNoLongerResolvesAndStartsItOnceItD
 	assert.NotContains(t, ready.Message, v2)
 }
 
+func TestRestart_TriesAHaltedMicroVMAgainAtEachResyncWhileItsReferenceIsMissing(t *testing.T) {
+	r := newRig(t, nil)
+	v := unique(t)
+	r.gaon.SetSecret(rigSecret("creds", map[string]string{"pw": v}))
+	r.beginWith(func(m *api.MicroVM) {
+		m.Spec.Env = []api.EnvVar{{Name: "PW", ValueFrom: &api.ValueSource{SecretKeyRef: &api.KeyReference{Name: "creds", Key: "pw"}}}}
+	})
+	m := r.gaon.MicroVM("m1")
+	m.Spec.RunStrategy = api.RunHalted
+	r.put(m)
+	r.mustRound()
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_STOPPED)
+	r.gaon.SetSecret(rigSecret("creds", map[string]string{"other": v}))
+	m = r.gaon.MicroVM("m1")
+	m.Spec.RunStrategy = api.RunAlways
+	r.put(m)
+
+	r.mustRound()
+	require.Equal(t, api.MicroVMFailed, r.gaon.MicroVM("m1").Status.Phase)
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_STOPPED)
+
+	r.gaon.SetSecret(rigSecret("creds", map[string]string{"pw": v}))
+	r.mustRound()
+
+	r.requireState(v1alpha2.MachineState_MACHINE_STATE_RUNNING)
+	assert.Equal(t, api.MicroVMRunning, r.gaon.MicroVM("m1").Status.Phase, "control: the next resync started it with no backoff")
+}
+
 func TestRestart_ResolvesAgainWhenAHaltedMicroVMIsStarted(t *testing.T) {
 	for _, strategy := range []api.RunStrategy{api.RunAlways, api.RunOnce} {
 		t.Run(string(strategy), func(t *testing.T) {

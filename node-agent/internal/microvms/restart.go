@@ -89,8 +89,12 @@ func (s *service) restart(ctx context.Context, m *api.MicroVM, id string, r *v1a
 	st := s.runOf(id)
 	now := s.clock.Now()
 	if st.halted {
+		o, err := s.startAgain(ctx, m, id, r)
+		if err != nil || o.failure != nil {
+			return o, err
+		}
 		st.halted = false
-		return s.startAgain(ctx, m, id, r)
+		return o, nil
 	}
 	if !st.exited {
 		failed, rec, err := s.classify(ctx, id, r, st.last)
