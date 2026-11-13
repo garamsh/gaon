@@ -217,6 +217,46 @@ func (c *Client) ListStorageClasses(ctx context.Context) (*StorageClassList, err
 	return call[StorageClassList](ctx, c, http.MethodGet, "/storageclasses", c.listQuery(), nil)
 }
 
+// PutVolumeSnapshot creates s, or changes it when s carries the
+// ResourceVersion it was read at (PUT /volumesnapshots/{name}). A snapshot's
+// spec is immutable after creation, so a change is for its finalizers.
+func (c *Client) PutVolumeSnapshot(ctx context.Context, s *VolumeSnapshot) (*VolumeSnapshot, error) {
+	return put(ctx, c, "/volumesnapshots/"+url.PathEscape(s.Metadata.Name), s)
+}
+
+// PutVolumeSnapshotStatus writes s's status (PUT /volumesnapshots/{name}/status).
+func (c *Client) PutVolumeSnapshotStatus(ctx context.Context, s *VolumeSnapshot) (*VolumeSnapshot, error) {
+	return put(ctx, c, "/volumesnapshots/"+url.PathEscape(s.Metadata.Name)+"/status", s)
+}
+
+// DeleteVolumeSnapshot sets the deletionTimestamp of a VolumeSnapshot, or
+// removes one with no finalizer, if it is still at version rv
+// (DELETE /volumesnapshots/{name}).
+func (c *Client) DeleteVolumeSnapshot(ctx context.Context, name string, rv ResourceVersion) (*VolumeSnapshot, error) {
+	if rv == "" {
+		return nil, errors.New("delete volumesnapshot: resource version is empty")
+	}
+	return call[VolumeSnapshot](ctx, c, http.MethodDelete, "/volumesnapshots/"+url.PathEscape(name), url.Values{"resourceVersion": {string(rv)}}, nil)
+}
+
+// GetVolumeSnapshot returns the named VolumeSnapshot
+// (GET /volumesnapshots/{name}).
+func (c *Client) GetVolumeSnapshot(ctx context.Context, name string) (*VolumeSnapshot, error) {
+	return call[VolumeSnapshot](ctx, c, http.MethodGet, "/volumesnapshots/"+url.PathEscape(name), nil, nil)
+}
+
+// ListVolumeSnapshots returns every VolumeSnapshot and the version to watch
+// from (GET /volumesnapshots).
+func (c *Client) ListVolumeSnapshots(ctx context.Context) (*VolumeSnapshotList, error) {
+	return call[VolumeSnapshotList](ctx, c, http.MethodGet, "/volumesnapshots", c.listQuery(), nil)
+}
+
+// WatchVolumeSnapshots streams the changes made after version rv
+// (GET /volumesnapshots?watch=true), as WatchMicroVMs does.
+func (c *Client) WatchVolumeSnapshots(ctx context.Context, rv ResourceVersion) (*Watch[VolumeSnapshot], error) {
+	return watch[VolumeSnapshot](ctx, c, "/volumesnapshots", KindVolumeSnapshot, rv)
+}
+
 // PutLease creates l, or renews it when l carries the ResourceVersion it was
 // read at (PUT /leases/{name}).
 func (c *Client) PutLease(ctx context.Context, l *Lease) (*Lease, error) {

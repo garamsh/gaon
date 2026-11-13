@@ -318,3 +318,64 @@ func TestClientReachesStorageClassesOnTheirPaths(t *testing.T) {
 	assert.Error(t, err, "a delete without a version is refused before any request")
 	assert.Len(t, seen, 4)
 }
+
+func TestClientReachesVolumeSnapshotsOnTheirPaths(t *testing.T) {
+	const snapshot = `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"VolumeSnapshot","metadata":{"name":"snap","resourceVersion":"7"},"spec":{"volumeName":"data"},"status":{"readyToUse":true,"restoreSize":"10Gi","storageClass":"local","nodeName":"n1"}}`
+	var seen []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Query().Get("watch") == "true":
+			_, _ = io.WriteString(w, `{"type":"Added","object":`+snapshot+"}\n")
+		case r.URL.Path == "/volumesnapshots":
+			_, _ = io.WriteString(w, `{"apiVersion":"compute.gaon.garam.sh/v1alpha1","kind":"VolumeSnapshotList","metadata":{"resourceVersion":"7"},"items":[`+snapshot+`]}`)
+		default:
+			_, _ = io.WriteString(w, snapshot)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	c := api.NewClient(ts.URL, ts.Client(), api.WithLabelSelector(mustSelector(t, "app=web")))
+	ctx := testContext(t)
+
+	put, err := c.PutVolumeSnapshot(ctx, newSnapshot("snap", "data"))
+	require.NoError(t, err)
+	assert.Equal(t, "data", put.Spec.VolumeName)
+
+	status, err := c.PutVolumeSnapshotStatus(ctx, newSnapshot("snap", "data"))
+	require.NoError(t, err)
+	assert.True(t, status.Status.ReadyToUse)
+
+	got, err := c.GetVolumeSnapshot(ctx, "snap")
+	require.NoError(t, err)
+	assert.Equal(t, "n1", got.Status.NodeName)
+
+	list, err := c.ListVolumeSnapshots(ctx)
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	assert.Equal(t, "snap", list.Items[0].Metadata.Name)
+
+	w, err := c.WatchVolumeSnapshots(ctx, list.Metadata.ResourceVersion)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = w.Close() })
+	ev := nextEvent(t, w)
+	assert.Equal(t, api.EventAdded, ev.Type)
+	assert.Equal(t, "snap", ev.Object.Metadata.Name)
+
+	deleted, err := c.DeleteVolumeSnapshot(ctx, "snap", "7")
+	require.NoError(t, err)
+	assert.Equal(t, "snap", deleted.Metadata.Name)
+
+	assert.Equal(t, []string{
+		"PUT /volumesnapshots/snap",
+		"PUT /volumesnapshots/snap/status",
+		"GET /volumesnapshots/snap",
+		"GET /volumesnapshots?labelSelector=app%3Dweb",
+		"GET /volumesnapshots?labelSelector=app%3Dweb&resourceVersion=7&watch=true",
+		"DELETE /volumesnapshots/snap?resourceVersion=7",
+	}, seen)
+
+	_, err = c.DeleteVolumeSnapshot(ctx, "snap", "")
+	assert.Error(t, err, "a delete without a version is refused before any request")
+	assert.Len(t, seen, 6)
+}

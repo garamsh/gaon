@@ -28,6 +28,13 @@ type Service interface {
 	ListVolumes(ctx context.Context, sel api.Selector) (*api.VolumeList, error)
 	WatchVolumes(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
 
+	PutVolumeSnapshot(ctx context.Context, name string, s *api.VolumeSnapshot) (*api.VolumeSnapshot, error)
+	PutVolumeSnapshotStatus(ctx context.Context, name string, s *api.VolumeSnapshot) (*api.VolumeSnapshot, error)
+	DeleteVolumeSnapshot(ctx context.Context, name string, rv api.ResourceVersion) (*api.VolumeSnapshot, error)
+	GetVolumeSnapshot(ctx context.Context, name string) (*api.VolumeSnapshot, error)
+	ListVolumeSnapshots(ctx context.Context, sel api.Selector) (*api.VolumeSnapshotList, error)
+	WatchVolumeSnapshots(ctx context.Context, rv api.ResourceVersion, sel api.Selector) (<-chan api.WatchEvent, error)
+
 	PutNode(ctx context.Context, name string, n *api.Node) (*api.Node, error)
 	PutNodeStatus(ctx context.Context, name string, n *api.Node) (*api.Node, error)
 	GetNode(ctx context.Context, name string) (*api.Node, error)
@@ -176,6 +183,8 @@ var (
 
 	mutatingWebhookConfigurations   = kind[api.MutatingWebhookConfiguration]{"mutatingwebhookconfigurations", func(c *api.MutatingWebhookConfiguration) *api.ObjectMeta { return &c.Metadata }, func(c *api.MutatingWebhookConfiguration) any { return c.Webhooks }, gvk(api.AdmissionRegistrationGroup, api.KindMutatingWebhookConfiguration)}
 	validatingWebhookConfigurations = kind[api.ValidatingWebhookConfiguration]{"validatingwebhookconfigurations", func(c *api.ValidatingWebhookConfiguration) *api.ObjectMeta { return &c.Metadata }, func(c *api.ValidatingWebhookConfiguration) any { return c.Webhooks }, gvk(api.AdmissionRegistrationGroup, api.KindValidatingWebhookConfiguration)}
+
+	volumeSnapshots = kind[api.VolumeSnapshot]{"volumesnapshots", func(s *api.VolumeSnapshot) *api.ObjectMeta { return &s.Metadata }, func(s *api.VolumeSnapshot) any { return s.Spec }, gvk(api.Group, api.KindVolumeSnapshot)}
 
 	storageClasses = kind[api.StorageClass]{"storageclasses", func(c *api.StorageClass) *api.ObjectMeta { return &c.Metadata }, func(c *api.StorageClass) any { return [2]any{c.Provisioner, c.AllowVolumeExpansion} }, gvk(api.Group, api.KindStorageClass)}
 
