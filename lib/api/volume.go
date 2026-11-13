@@ -12,13 +12,20 @@ const (
 	VolumeFailed    VolumePhase = "Failed"
 )
 
-// The storage class a Node Agent serves itself, and the one access mode it
-// offers. A Volume of any other class waits Pending for a plugin that serves
-// it.
+// The storage class a Node Agent serves itself, which is also the name and the
+// provisioner of the StorageClass the API server creates for it, and the one
+// access mode it offers. A Volume of any other class waits Pending for a plugin
+// that serves it.
 const (
 	StorageClassLocal   = "local"
 	AccessReadWriteOnce = "ReadWriteOnce"
 )
+
+// VolumeConditionResizing is the type of the condition a Volume's status
+// carries while spec.storage is larger than status.capacity. Its status is
+// True and its reason and message say where the growth stands; the plugin that
+// grows the disk removes it once status.capacity has caught up.
+const VolumeConditionResizing = "Resizing"
 
 // NodeAgentFinalizer is the finalizer the API server adds to a local Volume
 // when it pins the Volume to a Node, and the Node's agent removes once no
@@ -42,8 +49,9 @@ type VolumeList struct {
 }
 
 // VolumeSpec is the desired state of a Volume. A user writes it at creation
-// and it is immutable after, except NodeName, which only the binding of a
-// MicroVM that uses the Volume sets.
+// and it is immutable after, except Storage, which ValidateResize lets grow,
+// and NodeName, which only the binding of a MicroVM that uses the Volume
+// sets.
 type VolumeSpec struct {
 	StorageClass string   `json:"storageClass,omitempty"`
 	AccessModes  []string `json:"accessModes,omitempty"`
@@ -57,6 +65,7 @@ type VolumeStatus struct {
 	Phase      VolumePhase `json:"phase,omitempty"`
 	Attachment *Attachment `json:"attachment,omitempty"`
 	Capacity   Quantity    `json:"capacity,omitempty"`
+	Conditions []Condition `json:"conditions,omitempty"`
 }
 
 // Attachment names the MicroVM, and the epoch of its binding, that a Volume
@@ -104,13 +113,61 @@ func (v *Volume) ValidateCreate() error {
 }
 
 // ValidateUpdate checks that v changes nothing of old's spec, nodeName
-// included.
+// included. ValidateResize is the check that lets storage grow.
 func (v *Volume) ValidateUpdate(old *Volume) error {
 	if err := v.Validate(); err != nil {
 		return err
 	}
 	if !sameJSON(v.Spec, old.Spec) {
 		return invalid("spec changes after creation")
+	}
+	return nil
+}
+
+// ValidateResize checks v as an update of old that changes nothing of the spec
+// but storage, which it may change as follows. Storage may not fall below
+// old's status.capacity, so a Volume never shrinks, and a request for more than
+// the disk holds may be lowered down to it. A change of storage on a Volume
+// that is being deleted is ErrConflict. A growth, a storage above old's, needs
+// a class that allows expansion: class is the StorageClass v names, nil when
+// none exists.
+func (v *Volume) ValidateResize(old *Volume, class *StorageClass) error {
+	if err := v.Validate(); err != nil {
+		return err
+	}
+	frozen := v.Spec
+	frozen.Storage = old.Spec.Storage
+	if !sameJSON(frozen, old.Spec) {
+		return invalid("spec changes a field other than storage")
+	}
+	want, err := v.Spec.Storage.Value()
+	if err != nil {
+		return invalid("spec.storage: %v", err)
+	}
+	was, err := old.Spec.Storage.Value()
+	if err != nil {
+		return invalid("spec.storage of the stored volume: %v", err)
+	}
+	if want.Cmp(was) == 0 {
+		return nil
+	}
+	have, err := old.Status.Capacity.Value()
+	if err != nil {
+		return invalid("status.capacity: %v", err)
+	}
+	if want.Cmp(have) < 0 {
+		return invalid("spec.storage is %q, below status.capacity %q: a volume does not shrink", v.Spec.Storage, old.Status.Capacity)
+	}
+	if old.Metadata.DeletionTimestamp != nil {
+		return NewAPIError(ReasonConflict, "volume %q is being deleted", old.Metadata.Name)
+	}
+	if want.Cmp(was) > 0 {
+		if class == nil {
+			return invalid("spec.storage grows, and storage class %q does not exist", v.Spec.StorageClass)
+		}
+		if !class.AllowVolumeExpansion {
+			return invalid("spec.storage grows, and storage class %q does not allow volume expansion", v.Spec.StorageClass)
+		}
 	}
 	return nil
 }
@@ -168,14 +225,20 @@ func (m *MicroVM) PinVolumes(node string, volumes map[string]*Volume) ([]*Volume
 	return changed, nil
 }
 
-// ValidateStatus checks that the phase of v's status is a known one.
+// ValidateStatus checks that the phase of v's status is a known one and that
+// each of its conditions has a known status.
 func (v *Volume) ValidateStatus() error {
 	switch v.Status.Phase {
 	case VolumePending, VolumeAvailable, VolumeBound, VolumeReleased, VolumeFailed:
-		return nil
 	default:
 		return invalid("status.phase is %q, want Pending, Available, Bound, Released or Failed", v.Status.Phase)
 	}
+	for _, c := range v.Status.Conditions {
+		if err := c.validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Attach attaches v to the named MicroVM at its current epoch. It succeeds
