@@ -97,11 +97,11 @@ func (s *service) decide(ctx context.Context, r *api.CertificateSigningRequest) 
 // signed certificate.
 func (s *service) outcome(r *api.CertificateSigningRequest) (api.Condition, string, error) {
 	at := s.cfg.Now()
-	csr, d := approve(r)
+	csr, usages, d := approve(r)
 	if d != nil {
 		return api.Condition{Type: api.CSRDenied, Status: api.ConditionTrue, Reason: d.reason, Message: d.message, LastTransitionTime: &at}, "", nil
 	}
-	certificate, err := s.sign(csr)
+	certificate, err := s.sign(csr, usages)
 	if err != nil {
 		return api.Condition{}, "", err
 	}

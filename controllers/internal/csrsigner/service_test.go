@@ -102,6 +102,35 @@ func TestRun_ApprovesABootstrapRequestAndSignsAClientCertificate(t *testing.T) {
 	assert.Empty(t, cert.DNSNames)
 }
 
+func TestRun_SignsExactlyTheExtendedKeyUsageTheRequestStates(t *testing.T) {
+	ca := newTestCA(t, now.Add(24*365*time.Hour))
+	f := newFakeAPI(t)
+	tests := []struct {
+		name string
+		opts []csrOption
+		want []x509.ExtKeyUsage
+	}{
+		{"client auth alone", []csrOption{withExtKeyUsage(t, oidClientAuth)}, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}},
+		{"no extended key usage", nil, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}},
+		{"client auth and server auth", []csrOption{withExtKeyUsage(t, oidClientAuth, oidServerAuth)}, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth}},
+	}
+	for i, tt := range tests {
+		pemRequest, _ := newCSR(t, "node-1", tt.opts...)
+		f.add(newRequest(requestName(i), "bootstrap:abcdef", pemRequest))
+	}
+	start(t, f, ca.load(t), signingDuration)
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := waitDecided(t, f, requestName(i))
+
+			require.Equal(t, api.CSRApproved, condition(t, r).Type)
+			assert.Equal(t, tt.want, issued(t, r).ExtKeyUsage)
+			assert.Empty(t, issued(t, r).UnknownExtKeyUsage)
+		})
+	}
+}
+
 func TestRun_SignsEachCertificateWithItsOwnRandomSerial(t *testing.T) {
 	ca := newTestCA(t, now.Add(24*365*time.Hour))
 	f := newFakeAPI(t)
@@ -164,6 +193,9 @@ func TestRun_DeniesEachFailureOfTheApprovalRuleWithItsOwnReason(t *testing.T) {
 	serverAuth, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidServerAuth))
 	both, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidClientAuth, oidServerAuth))
 	clientAuth, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidClientAuth))
+	clientAndCode, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidClientAuth, oidCodeSigning))
+	serverAndCode, _ := newCSR(t, "node-1", withExtKeyUsage(t, oidServerAuth, oidCodeSigning))
+	noUsage, _ := newCSR(t, "node-1", withExtKeyUsage(t))
 
 	tests := []struct {
 		name     string
@@ -185,7 +217,10 @@ func TestRun_DeniesEachFailureOfTheApprovalRuleWithItsOwnReason(t *testing.T) {
 		{"subject alternative name", "bootstrap:abcdef", san, false, "DisallowedExtension"},
 		{"other extension", "bootstrap:abcdef", other, false, "DisallowedExtension"},
 		{"server auth only", "bootstrap:abcdef", serverAuth, false, "DisallowedExtension"},
-		{"client and server auth", "bootstrap:abcdef", both, false, "DisallowedExtension"},
+		{"control: client and server auth", "bootstrap:abcdef", both, true, ""},
+		{"client auth and another usage", "bootstrap:abcdef", clientAndCode, false, "DisallowedExtension"},
+		{"server auth and another usage", "bootstrap:abcdef", serverAndCode, false, "DisallowedExtension"},
+		{"empty extended key usage", "bootstrap:abcdef", noUsage, false, "DisallowedExtension"},
 		{"another Node's certificate", "node-2", node1, false, "UnauthorizedRequester"},
 		{"empty username", "", node1, false, "UnauthorizedRequester"},
 	}
