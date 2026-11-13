@@ -1,0 +1,10 @@
+apiVersion: rbac.gaon.garam.sh/v1alpha1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-web-reader
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+rules:
+  - apiGroups: [compute.gaon.garam.sh]
+    resources: [microvms]
+    verbs: [get, list]

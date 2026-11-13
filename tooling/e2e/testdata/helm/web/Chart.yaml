@@ -1,0 +1,5 @@
+apiVersion: v2
+name: web
+description: A Deployment of a MicroVM template and the ClusterRole that reads its MicroVMs, as gaon kinds.
+version: 0.1.0
+appVersion: "1"

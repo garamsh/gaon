@@ -1,0 +1,2 @@
+replicas: 2
+image: gaon-93/image@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
