@@ -26,6 +26,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	NetworkService_Policy_FullMethodName  = "/gaon.plugin.v1alpha1.NetworkService/Policy"
 	NetworkService_Enforce_FullMethodName = "/gaon.plugin.v1alpha1.NetworkService/Enforce"
+	NetworkService_Expose_FullMethodName  = "/gaon.plugin.v1alpha1.NetworkService/Expose"
 )
 
 // NetworkServiceClient is the client API for NetworkService service.
@@ -39,6 +40,10 @@ type NetworkServiceClient interface {
 	// Enforce makes the node enforce exactly the limits in the request,
 	// replacing those of an earlier call. It is repeatable.
 	Enforce(ctx context.Context, in *EnforceRequest, opts ...grpc.CallOption) (*EnforceResponse, error)
+	// Expose makes the node translate the addresses in the request to their
+	// backends and answer for the LAN addresses in it, replacing an earlier
+	// call. It is repeatable.
+	Expose(ctx context.Context, in *ExposeRequest, opts ...grpc.CallOption) (*ExposeResponse, error)
 }
 
 type networkServiceClient struct {
@@ -69,6 +74,16 @@ func (c *networkServiceClient) Enforce(ctx context.Context, in *EnforceRequest, 
 	return out, nil
 }
 
+func (c *networkServiceClient) Expose(ctx context.Context, in *ExposeRequest, opts ...grpc.CallOption) (*ExposeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExposeResponse)
+	err := c.cc.Invoke(ctx, NetworkService_Expose_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NetworkServiceServer is the server API for NetworkService service.
 // All implementations must embed UnimplementedNetworkServiceServer
 // for forward compatibility.
@@ -80,6 +95,10 @@ type NetworkServiceServer interface {
 	// Enforce makes the node enforce exactly the limits in the request,
 	// replacing those of an earlier call. It is repeatable.
 	Enforce(context.Context, *EnforceRequest) (*EnforceResponse, error)
+	// Expose makes the node translate the addresses in the request to their
+	// backends and answer for the LAN addresses in it, replacing an earlier
+	// call. It is repeatable.
+	Expose(context.Context, *ExposeRequest) (*ExposeResponse, error)
 	mustEmbedUnimplementedNetworkServiceServer()
 }
 
@@ -95,6 +114,9 @@ func (UnimplementedNetworkServiceServer) Policy(context.Context, *PolicyRequest)
 }
 func (UnimplementedNetworkServiceServer) Enforce(context.Context, *EnforceRequest) (*EnforceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Enforce not implemented")
+}
+func (UnimplementedNetworkServiceServer) Expose(context.Context, *ExposeRequest) (*ExposeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Expose not implemented")
 }
 func (UnimplementedNetworkServiceServer) mustEmbedUnimplementedNetworkServiceServer() {}
 func (UnimplementedNetworkServiceServer) testEmbeddedByValue()                        {}
@@ -153,6 +175,24 @@ func _NetworkService_Enforce_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NetworkService_Expose_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExposeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NetworkServiceServer).Expose(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NetworkService_Expose_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NetworkServiceServer).Expose(ctx, req.(*ExposeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NetworkService_ServiceDesc is the grpc.ServiceDesc for NetworkService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -167,6 +207,10 @@ var NetworkService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Enforce",
 			Handler:    _NetworkService_Enforce_Handler,
+		},
+		{
+			MethodName: "Expose",
+			Handler:    _NetworkService_Expose_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -55,6 +55,13 @@ func (c *NetworkClient) Enforce(ctx context.Context, limits []MicroVMLimits) err
 	return err
 }
 
+// Expose calls the plugin as an Exposer. A plugin that does not implement it
+// answers gRPC Unimplemented.
+func (c *NetworkClient) Expose(ctx context.Context, routes []Route, announce []string) error {
+	_, err := c.client.Expose(ctx, &pb.ExposeRequest{Routes: routesToWire(routes), Announce: announce})
+	return err
+}
+
 // StorageClient calls the storage plugin on a socket as a Storage.
 type StorageClient struct {
 	conn   *grpc.ClientConn

@@ -124,3 +124,33 @@ type PolicyPort struct {
 	Protocol Protocol
 	Port     uint32
 }
+
+// Exposer is implemented by a Network that translates the addresses of
+// Services and answers for their LAN addresses. The agent calls it after each
+// round of MicroVMs; a Network that does not implement it answers the call as
+// unimplemented and Services are not served on its node.
+type Exposer interface {
+	// Expose makes the node translate exactly routes and answer for exactly
+	// announce, replacing an earlier call. It is repeatable.
+	Expose(ctx context.Context, routes []Route, announce []string) error
+}
+
+// Route sends the connections to one port of an address to its backends.
+type Route struct {
+	// Service is the name of the Service the route is for.
+	Service  string
+	Address  string
+	Protocol Protocol
+	Port     uint32
+	// Backends are the ready ones. A Route with none refuses connections.
+	Backends []Backend
+	// LAN is set when Address is a LAN address, so connections from outside
+	// the cluster come back through this node.
+	LAN bool
+}
+
+// Backend is an address and port that a Route sends connections to.
+type Backend struct {
+	Address string
+	Port    uint32
+}

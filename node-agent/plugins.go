@@ -86,6 +86,18 @@ func (n timedNetwork) Enforce(ctx context.Context, limits []plugin.MicroVMLimits
 	return e.Enforce(ctx, limits)
 }
 
+// Expose is called when the network plugin serves Services, which a client
+// does by asking; one that does not answers Unimplemented.
+func (n timedNetwork) Expose(ctx context.Context, routes []plugin.Route, announce []string) error {
+	x, ok := n.Network.(plugin.Exposer)
+	if !ok {
+		return status.Error(codes.Unimplemented, "the network plugin does not serve Services")
+	}
+	ctx, cancel := context.WithTimeout(ctx, n.timeout)
+	defer cancel()
+	return x.Expose(ctx, routes, announce)
+}
+
 type timedStorage struct {
 	plugin.Storage
 	timeout time.Duration

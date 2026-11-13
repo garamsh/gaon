@@ -17,4 +17,6 @@ type API interface {
 	PutMicroVMStatus(ctx context.Context, m *api.MicroVM) (*api.MicroVM, error)
 	CreateServiceAccountToken(ctx context.Context, name string, req *api.TokenRequest) (*api.TokenRequest, error)
 	ListNetworkPolicies(ctx context.Context) (*api.NetworkPolicyList, error)
+	ListServices(ctx context.Context) (*api.ServiceList, error)
+	ListEndpoints(ctx context.Context) (*api.EndpointsList, error)
 }

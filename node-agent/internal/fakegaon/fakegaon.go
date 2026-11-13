@@ -24,29 +24,31 @@ type Server struct {
 	// URL is the root a client is given.
 	URL string
 
-	mu       sync.Mutex
-	rev      int64
-	microvms map[string]api.MicroVM
-	volumes  map[string]api.Volume
-	secrets  map[string]api.Secret
-	configs  map[string]api.ConfigMap
-	policies map[string]api.NetworkPolicy
-	reads    []string
-	nodes    map[string]api.Node
-	leases   map[string]api.Lease
-	log      []logged
-	changed  chan struct{}
-	failures map[string]bool
-	puts     []api.Lease
-	node     string
-	holdNode bool
-	attempts int
-	refused  []string
-	csrs     map[string]api.CertificateSigningRequest
-	tls      *tlsState
-	accounts map[string]bool
-	requests []api.TokenRequestSpec
-	issued   []string
+	mu        sync.Mutex
+	rev       int64
+	microvms  map[string]api.MicroVM
+	volumes   map[string]api.Volume
+	secrets   map[string]api.Secret
+	configs   map[string]api.ConfigMap
+	policies  map[string]api.NetworkPolicy
+	services  map[string]api.Service
+	endpoints map[string]api.Endpoints
+	reads     []string
+	nodes     map[string]api.Node
+	leases    map[string]api.Lease
+	log       []logged
+	changed   chan struct{}
+	failures  map[string]bool
+	puts      []api.Lease
+	node      string
+	holdNode  bool
+	attempts  int
+	refused   []string
+	csrs      map[string]api.CertificateSigningRequest
+	tls       *tlsState
+	accounts  map[string]bool
+	requests  []api.TokenRequestSpec
+	issued    []string
 }
 
 // New starts a fake and stops it when the test ends.
@@ -61,17 +63,19 @@ func New(t testing.TB) *Server {
 
 func newServer() (*Server, *http.ServeMux) {
 	s := &Server{
-		microvms: map[string]api.MicroVM{},
-		volumes:  map[string]api.Volume{},
-		secrets:  map[string]api.Secret{},
-		configs:  map[string]api.ConfigMap{},
-		policies: map[string]api.NetworkPolicy{},
-		nodes:    map[string]api.Node{},
-		leases:   map[string]api.Lease{},
-		csrs:     map[string]api.CertificateSigningRequest{},
-		changed:  make(chan struct{}),
-		failures: map[string]bool{},
-		accounts: map[string]bool{},
+		microvms:  map[string]api.MicroVM{},
+		volumes:   map[string]api.Volume{},
+		secrets:   map[string]api.Secret{},
+		configs:   map[string]api.ConfigMap{},
+		policies:  map[string]api.NetworkPolicy{},
+		services:  map[string]api.Service{},
+		endpoints: map[string]api.Endpoints{},
+		nodes:     map[string]api.Node{},
+		leases:    map[string]api.Lease{},
+		csrs:      map[string]api.CertificateSigningRequest{},
+		changed:   make(chan struct{}),
+		failures:  map[string]bool{},
+		accounts:  map[string]bool{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /microvms", s.listMicroVMs)
@@ -85,6 +89,8 @@ func newServer() (*Server, *http.ServeMux) {
 	mux.HandleFunc("GET /secrets/{name}", s.getSecret)
 	mux.HandleFunc("GET /configmaps/{name}", s.getConfigMap)
 	mux.HandleFunc("GET /networkpolicies", s.listNetworkPolicies)
+	mux.HandleFunc("GET /services", s.listServices)
+	mux.HandleFunc("GET /endpoints", s.listEndpoints)
 	mux.HandleFunc("POST /serviceaccounts/{name}/token", s.createToken)
 	mux.HandleFunc("GET /nodes/{name}", s.getNode)
 	mux.HandleFunc("PUT /nodes/{name}", s.putNode)
