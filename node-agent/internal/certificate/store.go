@@ -56,9 +56,23 @@ func joinPair(certPEM, keyPEM []byte) []byte {
 	return append(append([]byte{}, certPEM...), keyPEM...)
 }
 
+// syncDir is replaced by a test to observe the directory sync.
+var syncDir = func(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
 // writePair puts the certificate block and then the key block in the pair file
 // in dir, mode 0600. It writes a temporary file in dir and renames it into
-// place, so a crash leaves the old pair or the new one whole.
+// place, so a crash leaves the old pair or the new one whole, and syncs dir so
+// the rename survives a power cut.
 func writePair(dir string, keyPEM, certPEM []byte) error {
 	tmp, err := writeTemp(dir, PairFile, joinPair(certPEM, keyPEM), 0o600)
 	if err != nil {
@@ -67,6 +81,9 @@ func writePair(dir string, keyPEM, certPEM []byte) error {
 	if err := os.Rename(tmp, filepath.Join(dir, PairFile)); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("replace %s: %w", PairFile, err)
+	}
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("sync %s directory: %w", PairFile, err)
 	}
 	return nil
 }
