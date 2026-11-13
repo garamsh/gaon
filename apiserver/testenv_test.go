@@ -127,12 +127,20 @@ func startEtcdWith(t *testing.T, tlsInfo *transport.TLSInfo) string {
 	}
 }
 
-func freeURL(t *testing.T) url.URL {
+func freeURL(t *testing.T) url.URL { return freeURLs(t, 1)[0] }
+
+// freeURLs returns n URLs on distinct free ports. It holds every listener
+// until all are open, so no two share a port.
+func freeURLs(t *testing.T, n int) []url.URL {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-	return url.URL{Scheme: "http", Host: ln.Addr().String()}
+	urls := make([]url.URL, n)
+	for i := range urls {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer ln.Close()
+		urls[i] = url.URL{Scheme: "http", Host: ln.Addr().String()}
+	}
+	return urls
 }
 
 // send makes a raw request to path under the API root, for what the client

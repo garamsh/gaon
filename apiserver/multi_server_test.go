@@ -38,10 +38,10 @@ func startEtcdCluster(t *testing.T, n int) *etcdCluster {
 	t.Helper()
 	const attempts = 10
 	for attempt := 1; ; attempt++ {
-		clients, peers := make([]url.URL, n), make([]url.URL, n)
+		urls := freeURLs(t, 2*n)
+		clients, peers := urls[:n], urls[n:]
 		initial := ""
 		for i := range n {
-			clients[i], peers[i] = freeURL(t), freeURL(t)
 			if i > 0 {
 				initial += ","
 			}

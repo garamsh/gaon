@@ -6,12 +6,54 @@
 # The controller creates the Service `gateway-edge`, which holds the address,
 # and the Deployment `gateway-edge`, whose MicroVMs run the proxy. The
 # ServiceAccount and the CA below are the ones the controller's flags
-# -proxy-service-account and -proxy-ca-configmap name; the proxy's Role is not
-# in this file, because the proxy is not built yet.
+# -proxy-service-account and -proxy-ca-configmap name. The proxy reads the
+# Gateway, the routes, Services, Endpoints and certificate Secrets under the
+# token of that ServiceAccount, so the ClusterRole below is everything it is
+# allowed. It lists and watches only the Secrets labelled
+# gateway.gaon.garam.sh/certificate=true, so a Secret named in a listener's
+# certificateRefs carries that label.
 apiVersion: compute.gaon.garam.sh/v1alpha1
 kind: ServiceAccount
 metadata:
   name: gaon-gateway-proxy
+---
+apiVersion: rbac.gaon.garam.sh/v1alpha1
+kind: ClusterRole
+metadata:
+  name: gaon:gateway-proxy
+rules:
+  - apiGroups: [gateway.gaon.garam.sh]
+    resources: [gateways, httproutes, tlsroutes]
+    verbs: [list, watch]
+  - apiGroups: [compute.gaon.garam.sh]
+    resources: [services, endpoints]
+    verbs: [list, watch]
+  - apiGroups: [compute.gaon.garam.sh]
+    resources: [secrets]
+    verbs: [list, watch]
+    labelSelector: gateway.gaon.garam.sh/certificate=true
+---
+apiVersion: rbac.gaon.garam.sh/v1alpha1
+kind: ClusterRoleBinding
+metadata:
+  name: gaon:gateway-proxy
+roleRef:
+  kind: ClusterRole
+  name: gaon:gateway-proxy
+subjects:
+  - kind: User
+    name: gaon:serviceaccount:gaon-gateway-proxy
+---
+# The certificate of the https listener, labelled so the proxy may read it.
+apiVersion: compute.gaon.garam.sh/v1alpha1
+kind: Secret
+metadata:
+  name: app-example-com
+  labels:
+    gateway.gaon.garam.sh/certificate: "true"
+data:
+  tls.crt: <base64 of the PEM certificate chain for app.example.com>
+  tls.key: <base64 of the PEM private key>
 ---
 # The CA that signed the API server's certificate, which the proxies trust.
 apiVersion: compute.gaon.garam.sh/v1alpha1
