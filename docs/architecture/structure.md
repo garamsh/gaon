@@ -23,6 +23,7 @@ The units of milestone M1, each created by the pull request of the issue that ow
 - **`gaon-cli/`**: the client CLI, binary `gaon`. Issue 8.
 - **`workloads/`**: the controller of the `Job` kind, a client of the public API with its own identity, binary `gaon-workloads`. Issue 146.
 - **`etcd-snapshot/`**: the backup of the Store, a client of etcd run as a CronJob, binary `gaon-etcd-snapshot`. Issue 174.
+- **`dns/`**: serves the names of Services, a client of the public API run as a Deployment, binary `gaon-dns`. Issue 221.
 - **`tooling/e2e/`**: the end-to-end test of M1 on QEMU nodes. Issue 9.
 
 The Cell Router and microvm and cluster management are in gaon's scope (Discussion #2 comments `discussioncomment-19466471` and `discussioncomment-19533418`, in garamsh/discussions) and have no unit planned yet.

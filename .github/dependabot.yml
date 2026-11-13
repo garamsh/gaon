@@ -44,6 +44,10 @@ updates:
     directory: /etcd-snapshot
     schedule:
       interval: weekly
+  - package-ecosystem: gomod
+    directory: /dns
+    schedule:
+      interval: weekly
   - package-ecosystem: docker
     directory: /etcd-snapshot
     schedule:
