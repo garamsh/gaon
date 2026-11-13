@@ -10,7 +10,7 @@ Basis: [resource-api.md](./resource-api.md) §Paths and the types of `lib/api/`.
 
 | Command | Does |
 |---|---|
-| `gaon apply -f FILE` | Creates or updates each resource in a YAML file, in file order. |
+| `gaon apply -f FILE` | Creates or updates each resource in a YAML file, in file order, and leaves one the file already matches. `-f -` reads standard input. |
 | `gaon get [-o table\|yaml\|json] KIND` | Prints every resource of a kind. Default `table`. |
 | `gaon get [-o table\|yaml\|json] KIND NAME` | Prints one resource. Default `table`. |
 | `gaon describe KIND NAME` | Prints one resource as labelled lines and its status conditions. |
@@ -99,14 +99,27 @@ An empty value prints as `-`.
 
 ### Apply
 
-- **A file** holds one or more YAML documents; each carries `apiVersion` and `kind`. An empty document is skipped; a file with no resource is an error.
+- **A file** holds one or more YAML documents; each carries `apiVersion` and `kind`. An empty document, or one of only comments, is skipped; a file with no resource is an error. `-f -` takes the documents from standard input, and errors name it `standard input`.
 - **Checked before sending:** every document is decoded strictly (a field the type does not have is an error) and validated with `lib/api/`. If any document fails, or names a kind or verb with no path, no write is sent. Finding a registered kind reads the definitions first, so a refused `apply` may have sent that one `GET` ([ADR 0015](./adr/0015-the-gaon-cli-derives-the-other-groups-roots-from-server-and-finds-a-registered-kinds-plural-in-the-established-definitions.md) §8).
 - **Compare-and-swap:** `apply` writes with the `resourceVersion` it holds and never retries.
   - A document that carries `metadata.resourceVersion` is written against it, so a file made from `gaon get` is applied only over the version it was read at.
   - A document without one is first read; a `NotFound` means create, otherwise the version read is the one written against. A change made after that read fails the write.
+- **Unchanged:** a document without a `resourceVersion` that the object read already matches is not sent, and prints `KIND/NAME unchanged`. It matches when the document and the object are equal in every field a write sets: everything but `status` and the metadata the server sets (`uid`, `resourceVersion`, `generation`, `deletionTimestamp`). A document that carries a `resourceVersion` is always sent. A field the server adds to a stored object that the document lacks makes the two differ, so the document is sent and prints `configured`; a MicroVM or Volume the server has bound (`spec.nodeName`) is such an object, and the server refuses the write.
 - **A concurrent change is reported, not overwritten:** `Conflict` (the version moved) and `AlreadyExists` (a create lost a race) end `apply` with exit code 1 and a message saying the resource was changed by someone else.
-- **Order and failure:** documents are sent in file order and `apply` stops at the first failure; the lines already printed (`microvm/web created`, `node/n1 configured`) were applied.
+- **Order and failure:** documents are sent in file order and `apply` stops at the first failure; the lines already printed (`microvm/web created`, `node/n1 configured`, `lease/n1 unchanged`) were applied. `apply` does not retry a document whose referent is missing: a document that needs another comes after it, and running the same input again after a failure sends only what is not yet applied, the rest printing `unchanged`.
 - **Quantities** in a file may be strings or numbers: `cpu: "2"` and `cpu: 2` both decode, because `lib/api/` decodes a Quantity from either a JSON string or a JSON number.
+
+### Applying a Helm-rendered stream
+
+`helm template RELEASE CHART | gaon apply -f -` applies a chart whose templates emit gaon kinds. Helm is the template engine only; gaon does not serve the Kubernetes API, so a chart that emits Kubernetes kinds is not supported. The example chart is `tooling/e2e/testdata/helm/web/`, and `tooling/e2e/extensions/helm_test.go` renders it with the release name `rel` and applies it twice, a second time reporting every object `unchanged`.
+
+- **Order** in the stream is Helm's: a kind Helm knows (`Secret`, `ClusterRole`, `Deployment`, `Job` and the other Kubernetes kinds) in Helm's install order, then every other kind in template file-name order. A chart that needs one gaon-only kind before another names its files so they sort that way.
+- **Kinds reached** are those of §Verbs by kind and a registered kind, so a document of any other kind (`Secret`, `ConfigMap`, `ServiceAccount`, `Service`, `Endpoints`, `NetworkPolicy`) is refused and nothing in the stream is sent.
+- **Not offered, and what to use:**
+  - **Removing an object a later render no longer holds:** nothing. `apply` records no owner or label of the render, so it cannot tell an object the chart made from one made by another client. Delete it with `gaon delete KIND NAME`.
+  - **History and rollback:** nothing. gaon keeps no record of a render. Rolling back is rendering the earlier chart version and applying it.
+  - **Hooks:** nothing. Helm runs a hook as a Job or a pod around an install, which `helm template` does not do; a template carrying a hook annotation is applied as an ordinary document.
+- **Release names** are the chart's: gaon does not track a release, so a second `helm template` with another name applies a second set of objects.
 
 ### Delete
 
@@ -119,8 +132,11 @@ An empty value prints as `-`.
 - The other groups' roots are derived from `--server`, and a registered kind is found among the Established definitions, because the CLI has one address and `lib/api/` has no discovery; the alternatives are in [ADR 0015](./adr/0015-the-gaon-cli-derives-the-other-groups-roots-from-server-and-finds-a-registered-kinds-plural-in-the-established-definitions.md).
 - A cluster's `server` is the compute root, not a base address, so the file and `--server` hold one meaning of one word; the alternatives are in [ADR 0016](./adr/0016-the-gaon-cli-reads-its-server-and-credentials-from-a-config-file-of-clusters-users-and-contexts.md).
 - `apply` takes its version from the file first because a version the user read is the only basis on which a change by someone else since can be detected before the write, as `resource-api.md` §Common rules makes every write a compare-and-swap.
+- `apply` compares the document to the object it reads and sends nothing when they match, because every write bumps `resourceVersion` on the server and re-applying a stream would otherwise change every object, and it prints a third result so a run shows what it did. The alternatives are in [ADR 0035](./adr/0035-gaon-apply-reads-standard-input-reports-an-unchanged-object-and-offers-no-prune-history-or-hooks-for-a-helm-rendered-stream.md).
 
 ## Open questions
 
 - **Namespace:** the CLI sends no namespace, as the paths have none yet ([resource-api.md](./resource-api.md) §Open questions).
+- **Prune, history and hooks for a rendered stream:** not offered, §Applying a Helm-rendered stream. A prune needs a record of what a render made, which `apply` has no field for.
+- **`Secret`, `ConfigMap`, `ServiceAccount`, `Service`, `Endpoints` and `NetworkPolicy` have no CLI verbs yet,** so a chart cannot emit them.
 - **A `--context` flag, embedded credential data, bearer tokens, output formats beyond `table`, `yaml` and `json`:** out of scope.

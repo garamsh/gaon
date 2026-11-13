@@ -21,10 +21,30 @@ type Store struct {
 	cli *clientv3.Client
 }
 
+// Options are how the client reaches etcd.
+type Options struct {
+	// DialTimeout bounds the connection to each endpoint at start.
+	DialTimeout time.Duration
+	// KeepAliveTime and KeepAliveTimeout make the client ping a connection that
+	// has a request in flight after KeepAliveTime of silence and drop it where
+	// no answer comes within KeepAliveTimeout, so that a member that stopped
+	// without closing its connections is left for another. Zero KeepAliveTime
+	// sends no ping.
+	KeepAliveTime, KeepAliveTimeout time.Duration
+}
+
 // New connects to the etcd endpoints, over tlsCfg where it is not nil, and
-// checks that one answers, each within timeout.
-func New(ctx context.Context, endpoints []string, timeout time.Duration, tlsCfg *tls.Config) (*Store, error) {
-	cli, err := clientv3.New(clientv3.Config{Endpoints: endpoints, DialTimeout: timeout, TLS: tlsCfg, Logger: zap.NewNop()})
+// checks that one answers, each within opts.DialTimeout.
+func New(ctx context.Context, endpoints []string, tlsCfg *tls.Config, opts Options) (*Store, error) {
+	timeout := opts.DialTimeout
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:            endpoints,
+		DialTimeout:          timeout,
+		DialKeepAliveTime:    opts.KeepAliveTime,
+		DialKeepAliveTimeout: opts.KeepAliveTimeout,
+		TLS:                  tlsCfg,
+		Logger:               zap.NewNop(),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("connect to etcd: %w", err)
 	}

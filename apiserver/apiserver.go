@@ -64,7 +64,11 @@ func Run(ctx context.Context, cfg Config, ln net.Listener, log *slog.Logger) err
 	if err != nil {
 		return err
 	}
-	st, err := etcdstore.New(ctx, cfg.Endpoints, cfg.DialTimeout, etcdTLS)
+	st, err := etcdstore.New(ctx, cfg.Endpoints, etcdTLS, etcdstore.Options{
+		DialTimeout:      cfg.DialTimeout,
+		KeepAliveTime:    cfg.EtcdKeepAliveTime,
+		KeepAliveTimeout: cfg.EtcdKeepAliveTimeout,
+	})
 	if err != nil {
 		return err
 	}

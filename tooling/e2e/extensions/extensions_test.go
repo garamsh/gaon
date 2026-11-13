@@ -82,6 +82,7 @@ func TestExtensions(t *testing.T) {
 	t.Run("webhook_refuses_a_marked_object", c.webhookRefuses)
 	t.Run("extender_filters_out_the_preferred_node", c.extenderFilters)
 	t.Run("workloads_run_a_job_to_completion", c.jobsRun)
+	t.Run("helm_stream_applies_twice_with_no_change", c.helmApplies)
 	t.Run("no_service_logged_forbidden", c.noForbidden)
 }
 
