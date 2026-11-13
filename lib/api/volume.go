@@ -76,9 +76,9 @@ type Attachment struct {
 }
 
 // Validate checks the identity and the spec of v. A Volume of the local
-// class is a disk of a positive size, ReadWriteOnce, with no data source.
-// CreateFromSnapshot holds the rules of one that names a VolumeSnapshot; the
-// API server drops this refusal in the change that applies them.
+// class is a disk of a positive size, ReadWriteOnce, whose data source, if
+// any, is a name. CreateFromSnapshot holds the rules of one that names a
+// VolumeSnapshot.
 func (v *Volume) Validate() error {
 	if err := validateIdentity(v.TypeMeta, GroupVersion, KindVolume, v.Metadata); err != nil {
 		return err
@@ -97,7 +97,7 @@ func (v *Volume) Validate() error {
 		return invalid("spec.storage is %q, want a positive size for class %s", spec.Storage, StorageClassLocal)
 	}
 	if spec.DataSource != "" {
-		return invalid("spec.dataSource is %q, want empty for class %s", spec.DataSource, StorageClassLocal)
+		return validateObjectName("spec.dataSource", spec.DataSource)
 	}
 	return nil
 }
@@ -129,7 +129,9 @@ func (v *Volume) ValidateUpdate(old *Volume) error {
 // ValidateResize checks v as an update of old that changes nothing of the spec
 // but storage, which it may change as follows. Storage may not fall below
 // old's status.capacity, so a Volume never shrinks, and a request for more than
-// the disk holds may be lowered down to it. A change of storage on a Volume
+// the disk holds may be lowered down to it, except that a Volume with a data
+// source never takes a storage below the one it holds, which create checked
+// against the snapshot's restore size. A change of storage on a Volume
 // that is being deleted is ErrConflict. A growth, a storage above old's, needs
 // a class that allows expansion: class is the StorageClass v names, nil when
 // none exists.
@@ -152,6 +154,9 @@ func (v *Volume) ValidateResize(old *Volume, class *StorageClass) error {
 	}
 	if want.Cmp(was) == 0 {
 		return nil
+	}
+	if v.Spec.DataSource != "" && want.Cmp(was) < 0 {
+		return invalid("spec.storage is %q, below %q, which was checked against the restore size of volume snapshot %q", v.Spec.Storage, old.Spec.Storage, v.Spec.DataSource)
 	}
 	have, err := old.Status.Capacity.Value()
 	if err != nil {

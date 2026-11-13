@@ -80,7 +80,13 @@ func TestVolumeValidate(t *testing.T) {
 		}, false},
 		{"local, no storage", func(v *api.Volume) { v.Spec.Storage = "" }, false},
 		{"local, zero storage", func(v *api.Volume) { v.Spec.Storage = "0" }, false},
-		{"local, data source", func(v *api.Volume) { v.Spec.DataSource = "snap-1" }, false},
+		{"local, data source that is a name", func(v *api.Volume) { v.Spec.DataSource = "snap-1" }, true},
+		{"local, data source that is not a name", func(v *api.Volume) { v.Spec.DataSource = "Snap_1" }, false},
+		{"local, data source with a slash", func(v *api.Volume) { v.Spec.DataSource = "a/b" }, false},
+		{"local, data source and no storage", func(v *api.Volume) {
+			v.Spec.DataSource = "snap-1"
+			v.Spec.Storage = ""
+		}, false},
 		{"other class, other access mode and a data source", func(v *api.Volume) {
 			v.Spec.StorageClass = "ceph"
 			v.Spec.AccessModes = []string{"ReadWriteMany"}
@@ -542,4 +548,28 @@ func TestVolumeValidateStatusChecksConditions(t *testing.T) {
 
 	v.Status.Conditions[0].Status = "Maybe"
 	assert.ErrorIs(t, v.ValidateStatus(), api.ErrInvalid)
+}
+
+func TestVolumeValidateResizeRefusesAShrinkOfAVolumeFromASnapshotBeforeItHasADisk(t *testing.T) {
+	class := newClass("local", "local", true)
+	pending := func(dataSource string) *api.Volume {
+		v := newVolume("data")
+		v.Spec.Storage = "1Gi"
+		v.Spec.DataSource = dataSource
+		return v
+	}
+
+	from := pending("snap-1")
+	shrunk := *from
+	shrunk.Spec.Storage = "1Mi"
+	assert.ErrorIs(t, shrunk.ValidateResize(from, class), api.ErrInvalid, "below the size the snapshot was checked against, with no capacity yet")
+
+	grown := *from
+	grown.Spec.Storage = "2Gi"
+	assert.NoError(t, grown.ValidateResize(from, class), "control: a growth of the same Volume")
+
+	plain := pending("")
+	lowered := *plain
+	lowered.Spec.Storage = "1Mi"
+	assert.NoError(t, lowered.ValidateResize(plain, class), "control: the same shrink of a Volume with no data source, which has no disk yet")
 }

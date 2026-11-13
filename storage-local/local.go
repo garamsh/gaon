@@ -212,9 +212,10 @@ func (l *Local) bind(ctx context.Context, m *api.MicroVM, name string) error {
 	return fmt.Errorf("write status of volume %s: still conflicting after %d attempts", name, statusAttempts)
 }
 
-// ensureDisk returns the disk of v, making it if mvmd has none. disks is the
-// listing already read, or nil to read it. A disk mvmd refuses to make is
-// written as Failed and refused.
+// ensureDisk returns the disk of v, making it if mvmd has none, from the mvmd
+// snapshot of the VolumeSnapshot v names as its data source. disks is the
+// listing already read, or nil to read it. A disk mvmd refuses to make, or one
+// whose VolumeSnapshot is gone, is written as Failed and refused.
 func (l *Local) ensureDisk(ctx context.Context, v *api.Volume, disks map[string]*v1alpha2.Disk) (*v1alpha2.Disk, error) {
 	id := diskID(v.Metadata.Name)
 	if disks == nil {
@@ -231,7 +232,11 @@ func (l *Local) ensureDisk(ctx context.Context, v *api.Volume, disks map[string]
 	if err != nil {
 		return nil, l.fail(ctx, v, err)
 	}
-	resp, err := l.runtime.CreateDisk(ctx, &v1alpha2.CreateDiskRequest{DiskId: id, RequestId: "create-" + id, SizeBytes: size})
+	from, err := l.sourceSnapshot(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := l.runtime.CreateDisk(ctx, &v1alpha2.CreateDiskRequest{DiskId: id, RequestId: "create-" + id, SizeBytes: size, FromSnapshotId: from})
 	switch kind := v1alpha2.KindOf(err); {
 	case err == nil:
 		return resp.GetDisk(), nil
@@ -240,6 +245,26 @@ func (l *Local) ensureDisk(ctx context.Context, v *api.Volume, disks map[string]
 	default:
 		return nil, fmt.Errorf("create disk %s: %w", id, err)
 	}
+}
+
+// sourceSnapshot returns the identifier of the mvmd snapshot v's disk is made
+// from, empty when v names no data source.
+func (l *Local) sourceSnapshot(ctx context.Context, v *api.Volume) (string, error) {
+	if v.Spec.DataSource == "" {
+		return "", nil
+	}
+	s, err := l.snapshots.GetVolumeSnapshot(ctx, v.Spec.DataSource)
+	if errors.Is(err, api.ErrNotFound) {
+		return "", l.fail(ctx, v, err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("read volume snapshot %s: %w", v.Spec.DataSource, err)
+	}
+	id, err := snapshotID(s)
+	if err != nil {
+		return "", l.fail(ctx, v, err)
+	}
+	return id, nil
 }
 
 // fail writes v Failed, unless it is already, and returns the refusal that

@@ -55,7 +55,8 @@ func (s *service) checkAttachment(ctx context.Context, v *api.Volume, a *api.Att
 	return v.Attach(a.MicroVMName, a.BindingEpoch)
 }
 
-// PutVolume creates v with phase Pending, or changes the finalizers and
+// PutVolume creates v with phase Pending, pinned to the Node of its snapshot
+// when it names one of class local, or changes the finalizers and
 // spec.storage of the stored Volume v was read at. Neither takes the status or
 // the node from v: only the binding of a MicroVM pins a Volume, and storage
 // changes as Volume.ValidateResize allows. An update that clears the last finalizer of a Volume being deleted removes it.
@@ -77,10 +78,30 @@ func (s *service) PutVolume(ctx context.Context, name string, v *api.Volume) (*a
 	}
 	v.Metadata.Generation, v.Metadata.DeletionTimestamp = 1, nil
 	v.Status = api.VolumeStatus{Phase: api.VolumePending}
+	if err := s.createFromSnapshot(ctx, v); err != nil {
+		return nil, err
+	}
 	if err := validate(ctx, s, volumes, "", api.OperationCreate, v, nil); err != nil {
 		return nil, err
 	}
 	return v, volumes.create(ctx, s.st, v)
+}
+
+// createFromSnapshot applies Volume.CreateFromSnapshot to v with the stored
+// VolumeSnapshot v.spec.dataSource names, read just before the write and not
+// in its transaction.
+func (s *service) createFromSnapshot(ctx context.Context, v *api.Volume) error {
+	if v.Spec.DataSource == "" {
+		return nil
+	}
+	snap, _, err := volumeSnapshots.get(ctx, s.st, v.Spec.DataSource)
+	if errors.Is(err, api.ErrNotFound) {
+		return v.CreateFromSnapshot(nil)
+	}
+	if err != nil {
+		return err
+	}
+	return v.CreateFromSnapshot(snap)
 }
 
 func (s *service) updateVolume(ctx context.Context, v *api.Volume) (*api.Volume, error) {
