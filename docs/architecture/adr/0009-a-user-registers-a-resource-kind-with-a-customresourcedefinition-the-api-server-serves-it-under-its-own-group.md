@@ -1,6 +1,6 @@
 # ADR 0009: A user registers a resource kind with a CustomResourceDefinition, and the API server serves it under its own group
 
-> Status: accepted
+> Status: accepted; the schema keywords of Decision 5 are amended by ADR 0031 (an integer-or-string node)
 > Date: 2026-11-12
 
 Drafted for garamsh/gaon#80, under goal garamsh/gaon#74. The design is the PM's, taken under the project owner's decisions in #74 (Kubernetes semantics, a gaon-native implementation, additive only, no namespaces) and recorded in #80 §Design. It uses the group [ADR 0003](./0003-the-v1alpha1-resource-api-fixes-one-writer-per-section-and-a-per-node-lease.md), Decision 8, reserved for resource definitions, and the authorization of [ADR 0008](./0008-the-api-server-authorizes-certificate-callers-with-cluster-roles-bindings-and-a-node-authorizer.md). This ADR is the contract; serving it in the API server is a later issue of #74.

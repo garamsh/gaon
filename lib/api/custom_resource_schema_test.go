@@ -100,3 +100,21 @@ func TestSchemaPatternBelongsToStringsAndCompiles(t *testing.T) {
 	assert.ErrorIs(t, crdWithSchema(spec(`{"type":"integer","pattern":"^1$"}`)).Validate(), api.ErrInvalid, "pattern on an integer")
 	assert.ErrorIs(t, crdWithSchema(spec(`{"type":"string","pattern":"("}`)).Validate(), api.ErrInvalid, "a pattern that does not compile")
 }
+
+func TestSchemaIntOrStringTakesNoTypeAndNoNumberOrCompoundKeyword(t *testing.T) {
+	spec := func(node string) string {
+		return `{"type":"object","properties":{"spec":{"type":"object","properties":{"a":` + node + `}}}}`
+	}
+	require.NoError(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true}`)).Validate(), "control: the flag alone")
+	require.NoError(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true,"pattern":"^[0-9]+%$","enum":[1,"auto"]}`)).Validate(), "control: pattern and an enum of integers and strings")
+	assert.ErrorIs(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true,"type":"string"}`)).Validate(), api.ErrInvalid, "the flag with a type")
+	assert.ErrorIs(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true,"minimum":1}`)).Validate(), api.ErrInvalid, "minimum")
+	assert.ErrorIs(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true,"maximum":1}`)).Validate(), api.ErrInvalid, "maximum")
+	assert.ErrorIs(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true,"enum":[true]}`)).Validate(), api.ErrInvalid, "a boolean in the enum")
+	assert.ErrorIs(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true,"enum":[1.5]}`)).Validate(), api.ErrInvalid, "a fraction in the enum")
+	assert.ErrorIs(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true,"pattern":"("}`)).Validate(), api.ErrInvalid, "a pattern that does not compile")
+	assert.ErrorIs(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true,"x-kubernetes-preserve-unknown-fields":true}`)).Validate(), api.ErrInvalid, "the flag with preserve")
+	assert.ErrorIs(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true,"properties":{"b":{"type":"string"}}}`)).Validate(), api.ErrInvalid, "properties")
+	assert.ErrorIs(t, crdWithSchema(spec(`{"x-kubernetes-int-or-string":true,"items":{"type":"string"}}`)).Validate(), api.ErrInvalid, "items")
+	assert.ErrorIs(t, crdWithSchema(spec(`{"description":"no flag, no type"}`)).Validate(), api.ErrInvalid, "control: without the flag the node still needs a type")
+}

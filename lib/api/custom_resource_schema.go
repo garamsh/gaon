@@ -35,6 +35,9 @@ type JSONSchemaProps struct {
 	// PreserveUnknownFields keeps the fields of an object that the schema does
 	// not name, and lets the node omit its type.
 	PreserveUnknownFields bool `json:"x-kubernetes-preserve-unknown-fields,omitempty"`
+	// IntOrString lets the node hold an integer or a string, and takes no type.
+	// Pattern and Enum apply to the string; an integer must be one of Enum.
+	IntOrString bool `json:"x-kubernetes-int-or-string,omitempty"`
 
 	unsupported []string
 }
@@ -42,7 +45,7 @@ type JSONSchemaProps struct {
 var supportedKeywords = map[string]bool{
 	"type": true, "description": true, "properties": true, "required": true, "items": true,
 	"enum": true, "minimum": true, "maximum": true, "pattern": true,
-	"x-kubernetes-preserve-unknown-fields": true,
+	"x-kubernetes-preserve-unknown-fields": true, "x-kubernetes-int-or-string": true,
 }
 
 // UnmarshalJSON decodes a node and records the keywords outside the subset.
@@ -87,6 +90,9 @@ func (s *JSONSchemaProps) validate(path string) error {
 	if len(s.unsupported) > 0 {
 		return invalid("%s uses unsupported keyword %q", path, s.unsupported[0])
 	}
+	if s.IntOrString {
+		return s.validateIntOrString(path)
+	}
 	switch s.Type {
 	case SchemaObject, SchemaArray, SchemaString, SchemaInteger, SchemaNumber, SchemaBoolean:
 	case "":
@@ -110,6 +116,32 @@ func (s *JSONSchemaProps) validate(path string) error {
 			return invalid("%s has items and is not an array", path)
 		}
 		return s.Items.validate(path + ".items")
+	}
+	return nil
+}
+
+// validateIntOrString checks a node that holds an integer or a string. It has
+// no type and none of the keywords of an object, an array or a number.
+func (s *JSONSchemaProps) validateIntOrString(path string) error {
+	switch {
+	case s.Type != "":
+		return invalid("%s sets x-kubernetes-int-or-string and type %q; it takes no type", path, s.Type)
+	case s.PreserveUnknownFields:
+		return invalid("%s sets x-kubernetes-int-or-string and x-kubernetes-preserve-unknown-fields", path)
+	case len(s.Properties) > 0 || len(s.Required) > 0 || s.Items != nil:
+		return invalid("%s sets x-kubernetes-int-or-string and has properties, required or items", path)
+	case s.Minimum != nil || s.Maximum != nil:
+		return invalid("%s sets x-kubernetes-int-or-string and has minimum or maximum", path)
+	}
+	for _, v := range s.Enum {
+		if !enumValueHasType(v, SchemaString) && !enumValueHasType(v, SchemaInteger) {
+			return invalid("%s has enum value %s that is neither an integer nor a string", path, v)
+		}
+	}
+	if s.Pattern != "" {
+		if _, err := regexp.Compile(s.Pattern); err != nil {
+			return invalid("%s has a pattern that does not compile: %v", path, err)
+		}
 	}
 	return nil
 }
